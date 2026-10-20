@@ -144,6 +144,9 @@ type Core struct {
 	lastPrintSeq        map[string]int64
 	lastPrintDay        map[string]int64
 	lastEligible        map[string]EligiblePrint
+	protectionPrices    map[string]*protectionPrice
+	protectionPending   map[string]pendingProtection
+	protectionBooks     map[string]bool
 	trailBooks          map[string]TrailBook
 	trailCycles         map[trailCycleKey]trailCycle
 	trailCandles        map[string]TrailCandle
@@ -672,7 +675,16 @@ func (c *Core) Run(ctx context.Context) error {
 	cycleTimer := c.clk.After(time.Until(session.NextTradingCycleStart(c.clk.Now())))
 	heldTimer := c.clk.NewTicker(time.Second)
 	defer heldTimer.Stop()
+	var priceTimer <-chan time.Time
+	var priceDeadline int64
 	for {
+		if next := c.protectionDeadline(ctx); next != priceDeadline {
+			priceDeadline = next
+			priceTimer = nil
+			if next > 0 {
+				priceTimer = c.clk.After(time.Duration(next-c.now()) * time.Millisecond)
+			}
+		}
 		select {
 		case <-ctx.Done():
 			c.shutdownHeldOrders()
@@ -710,6 +722,8 @@ func (c *Core) Run(ctx context.Context) error {
 		case <-heldTimer.C():
 			c.expireHeldOrders(ctx)
 			c.refreshProtectionWarnings(ctx)
+		case <-priceTimer:
+			priceDeadline = 0
 		case <-cycleTimer:
 			c.rollCycle()
 			cycleTimer = c.clk.After(session.NextTradingCycleStart(c.clk.Now()).Sub(c.clk.Now()))
@@ -1100,8 +1114,9 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 			c.heldDemand.Release(req.ClientOrderID)
 			return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: req.ClientOrderID}
 		}
+		c.requestProtectionBook(o)
 		if last, ok := c.lastEligible[req.Symbol]; ok && c.freshEligiblePrint(last) && HeldOrderTriggered(o.Type, o.Side, last.Price, o.StopPrice) {
-			c.activateHeld(ctx, c.order(o.ID))
+			c.activateProtectedStop(ctx, c.order(o.ID), last)
 		}
 		return CmdAck{Accepted: true, OrderID: req.ClientOrderID}
 	}
@@ -1292,7 +1307,7 @@ func (c *Core) handleReplaceSingle(ctx context.Context, cm ReplaceOrder) CmdAck 
 				return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: o.ID}
 			}
 			if last, ok := c.lastEligible[o.Symbol]; ok && c.freshEligiblePrint(last) && HeldOrderTriggered(o.Type, o.Side, last.Price, stop) {
-				c.activateHeld(ctx, c.order(o.ID))
+				c.activateProtectedStop(ctx, c.order(o.ID), last)
 			}
 			return CmdAck{Accepted: true, OrderID: o.ID}
 		}

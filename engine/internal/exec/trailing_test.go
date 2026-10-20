@@ -38,18 +38,19 @@ func TestTrailQuoteRequiresCurrentAcknowledgedBookCoverage(t *testing.T) {
 		t.Fatal(a)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 10))
 	waitHeldOrder(t, c, a.OrderID, HeldArmed)
-	c.FeedTrailBook(ctx, TrailBook{Symbol: "AAPL", Bid: 9.68, Ask: 9.69, Generation: 1, Coverage: 41})
+	feedProtectionBook(t, c, ctx, TrailBook{Symbol: "AAPL", Bid: 9.68, Ask: 9.69, Generation: 1, Coverage: 41})
 	clk.Advance(time.Millisecond)
 	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 9.7))
+	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.7)) // distinct trade corroboration; execution quote remains unavailable
 	waitHeldOrder(t, c, a.OrderID, HeldWaitingQuote)
 	select {
 	case child := <-b.submits:
 		t.Fatalf("used prior subscription: %+v", child)
 	case <-time.After(20 * time.Millisecond):
 	}
-	c.FeedTrailBook(ctx, TrailBook{Symbol: "AAPL", Bid: 9.68, Ask: 9.69, Generation: 1, Coverage: 42})
+	feedProtectionBook(t, c, ctx, TrailBook{Symbol: "AAPL", Bid: 9.68, Ask: 9.69, Generation: 1, Coverage: 42})
 	select {
 	case child := <-b.submits:
 		if child.LimitPrice != 9.68 {
@@ -69,7 +70,7 @@ func TestRiskTrailingPresetKeepsInitialFloorAndPartialFillProgress(t *testing.T)
 	}
 	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	select {
 	case <-broker.submits:
 	case <-time.After(time.Second):
@@ -82,7 +83,7 @@ func TestRiskTrailingPresetKeepsInitialFloorAndPartialFillProgress(t *testing.T)
 		t.Fatalf("initial floor lost: %+v", stop)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 10.2))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 10.2))
 	waitOrder(t, c, stop.ID, func(o Order) bool { return o.StopPrice == 9.9 })
 	broker.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 50, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 150, AvgPrice: 10}
 	stop = waitOrder(t, c, stop.ID, func(o Order) bool { return o.Qty == 150 })
@@ -99,7 +100,7 @@ func TestCandlePresetClearlyRetainsFixedProtectionBeforeReferenceReady(t *testin
 	}
 	entry := waitOrder(t, c, a.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	select {
 	case <-b.submits:
 	case <-time.After(time.Second):
@@ -112,7 +113,7 @@ func TestCandlePresetClearlyRetainsFixedProtectionBeforeReferenceReady(t *testin
 		t.Fatalf("fallback misrepresented: %+v", stop.Held)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.8))
 	select {
 	case child := <-b.submits:
 		if child.Qty != 100 || child.LimitPrice != 9.8 {
@@ -135,7 +136,7 @@ func TestConvertProtectionToTrailPreservesConfirmedStopAndOwner(t *testing.T) {
 		t.Fatal("zero-fill conversion accepted")
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	select {
 	case <-broker.submits:
 	case <-time.After(time.Second):
@@ -180,7 +181,7 @@ func TestRiskTrailManualReductionCannotBeRestoredByIndependentBuy(t *testing.T) 
 	}
 	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	select {
 	case <-broker.submits:
 	case <-time.After(time.Second):
@@ -194,7 +195,7 @@ func TestRiskTrailManualReductionCannotBeRestoredByIndependentBuy(t *testing.T) 
 	broker.ev <- BrokerPosition{Position: Position{Venue: "v", Symbol: "AAPL", Qty: 80, AvgPrice: 10}}
 	waitPosition(t, c, "AAPL", 80)
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.8))
 	select {
 	case child := <-broker.submits:
 		if child.Qty != 60 {
@@ -215,7 +216,7 @@ func TestWaitingCandleTrailCanBeEditedBeforeExecutionReferenceExists(t *testing.
 		t.Fatal(a)
 	}
 	waitHeldOrder(t, c, a.OrderID, HeldWaiting)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 10))
 	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
 		time.Sleep(time.Millisecond)
 	}
@@ -237,7 +238,7 @@ func TestConversionPreservesReductionsBeforeTrailWasEnabled(t *testing.T) {
 	}
 	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	select {
 	case <-broker.submits:
 	case <-time.After(time.Second):
@@ -254,7 +255,7 @@ func TestConversionPreservesReductionsBeforeTrailWasEnabled(t *testing.T) {
 		t.Fatal(a)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.8))
 	select {
 	case child := <-broker.submits:
 		if child.Qty != 60 {
@@ -274,10 +275,12 @@ func TestWaitingQuoteTrailCancelReleasesReservation(t *testing.T) {
 		t.Fatal(a)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 10))
 	waitHeldOrder(t, c, a.OrderID, HeldArmed)
 	clk.Advance(time.Millisecond)
+	feedProtectionBook(t, c, ctx, TrailBook{Symbol: "AAPL", Generation: 1, Gap: true})
 	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 9.7))
+	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.7)) // distinct trade corroboration; execution quote remains unavailable
 	waitHeldOrder(t, c, a.OrderID, HeldWaitingQuote)
 	if ack := c.Do(CancelOrder{Venue: "v", OrderID: a.OrderID}); !ack.Accepted {
 		t.Fatal(ack)
@@ -313,7 +316,7 @@ func TestQuoteConversionCancelsRemainingEntryAtTriggerBeforeQuoteReady(t *testin
 	}
 	entry := waitOrder(t, c, a.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	select {
 	case <-b.submits:
 	case <-time.After(time.Second):
@@ -327,7 +330,9 @@ func TestQuoteConversionCancelsRemainingEntryAtTriggerBeforeQuoteReady(t *testin
 		t.Fatal(converted)
 	}
 	clk.Advance(time.Millisecond)
+	feedProtectionBook(t, c, ctx, TrailBook{Symbol: "AAPL", Generation: 1, Gap: true})
 	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
+	c.FeedEligiblePrint(ctx, eligible(4, clk.Now(), 9.8)) // distinct trade corroboration; execution quote remains unavailable
 	waitHeldOrder(t, c, entry.RiskEntry.StopID, HeldWaitingQuote)
 	waitOrder(t, c, entry.ID, func(o Order) bool { return o.RiskEntry.Closing })
 }
@@ -342,7 +347,7 @@ func TestCandleAdvanceDoesNotTriggerAgainstPrintBeforeReferenceOnPartialFill(t *
 	}
 	entry := waitOrder(t, c, a.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	select {
 	case <-b.submits:
 	case <-time.After(time.Second):
@@ -352,7 +357,7 @@ func TestCandleAdvanceDoesNotTriggerAgainstPrintBeforeReferenceOnPartialFill(t *
 	b.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 100, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 100, AvgPrice: 10}
 	waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.StopPrice == 9.8 })
 	clk.Advance(time.Minute)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.85))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.85))
 	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
 		time.Sleep(time.Millisecond)
 	}
@@ -365,7 +370,7 @@ func TestCandleAdvanceDoesNotTriggerAgainstPrintBeforeReferenceOnPartialFill(t *
 	case <-time.After(25 * time.Millisecond):
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(4, clk.Now(), 9.85))
+	feedCorroboratedPrint(t, c, ctx, eligible(4, clk.Now(), 9.85))
 	select {
 	case child := <-b.submits:
 		if child.Qty != 150 || child.LimitPrice != 9.9 {
@@ -401,7 +406,7 @@ func testTrailingLateFillSnapshot(t *testing.T, positionFirst, lateWhilePending,
 	}
 	entry := waitOrder(t, c, a.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	select {
 	case <-b.submits:
 	case <-time.After(time.Second):
@@ -411,7 +416,7 @@ func testTrailingLateFillSnapshot(t *testing.T, positionFirst, lateWhilePending,
 	b.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 100, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 100, AvgPrice: 10}
 	waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Qty == 100 })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.8))
 	select {
 	case <-b.submits:
 	case <-time.After(time.Second):
@@ -518,11 +523,11 @@ func TestTrailingPriceExitRatchetsAndSubmitsOneLimit(t *testing.T) {
 	}
 	for i, sample := range []struct{ price, stop float64 }{{10, 9.70}, {10.20, 9.90}, {10.05, 9.90}} {
 		clk.Advance(time.Millisecond)
-		c.FeedEligiblePrint(ctx, eligible(int64(i+1), clk.Now(), sample.price))
+		feedCorroboratedPrint(t, c, ctx, eligible(int64(i+1), clk.Now(), sample.price))
 		waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.StopPrice == sample.stop })
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(4, clk.Now(), 9.90))
+	feedCorroboratedPrint(t, c, ctx, eligible(4, clk.Now(), 9.90))
 	select {
 	case child := <-broker.submits:
 		if child.Type != TypeLimit || child.Qty != 100 || child.LimitPrice != 9.88 {
@@ -545,11 +550,11 @@ func TestTrailingPercentCoversOnlyConfirmedShortShares(t *testing.T) {
 	}
 	for i, sample := range []struct{ price, stop float64 }{{10, 10.20}, {9.50, 9.69}, {9.60, 9.69}} {
 		clk.Advance(time.Millisecond)
-		c.FeedEligiblePrint(ctx, eligible(int64(i+1), clk.Now(), sample.price))
+		feedCorroboratedPrint(t, c, ctx, eligible(int64(i+1), clk.Now(), sample.price))
 		waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.StopPrice == sample.stop })
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(4, clk.Now(), 9.69))
+	feedCorroboratedPrint(t, c, ctx, eligible(4, clk.Now(), 9.69))
 	select {
 	case child := <-broker.submits:
 		if child.Side != SideCover || child.Type != TypeLimit || child.Qty != 50 || child.LimitPrice != 9.71 {
@@ -569,7 +574,7 @@ func TestTrailingExitRetiresWhenPositionCloses(t *testing.T) {
 		t.Fatal(ack)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 10))
 	waitHeldOrder(t, c, ack.OrderID, HeldArmed)
 	broker.ev <- BrokerPositions{V: "v"}
 	retired := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.Status == StatusCanceled })
@@ -590,10 +595,12 @@ func TestTrailingQuoteWaitFreezesAndReservesExitQuantity(t *testing.T) {
 		t.Fatal(ack)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 10))
 	waitHeldOrder(t, c, ack.OrderID, HeldArmed)
 	clk.Advance(time.Millisecond)
+	feedProtectionBook(t, c, ctx, TrailBook{Symbol: "AAPL", Generation: 1, Gap: true})
 	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 9.70))
+	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.70)) // distinct trade corroboration; execution quote remains unavailable
 	waiting := waitHeldOrder(t, c, ack.OrderID, HeldWaitingQuote)
 	if waiting.Held.ResolvedQty != 100 {
 		t.Fatalf("unreserved waiting exit: %+v", waiting)
@@ -603,7 +610,7 @@ func TestTrailingQuoteWaitFreezesAndReservesExitQuantity(t *testing.T) {
 	}
 	broker.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 150}}}
 	waitPosition(t, c, "AAPL", 150)
-	c.FeedTrailBook(ctx, TrailBook{Symbol: "AAPL", Bid: 9.68, Ask: 9.69, Generation: 1})
+	feedProtectionBook(t, c, ctx, TrailBook{Symbol: "AAPL", Bid: 9.68, Ask: 9.69, Generation: 1})
 	select {
 	case child := <-broker.submits:
 		if child.Qty != 100 || child.LimitPrice != 9.66 {
@@ -689,18 +696,18 @@ func TestCandleTrailFreezesReferenceCorrectionsAndOnlyRatchets(t *testing.T) {
 	start := clk.Now().Add(-time.Minute).UnixMilli()
 	c.FeedTrailCandle(ctx, TrailCandle{Symbol: "AAPL", Timeframe: "1m", StartMs: start, EndMs: clk.Now().UnixMilli(), Low: 9.80, High: 10, Verified: true})
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 10))
 	waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.StopPrice == 9.78 })
 	c.FeedTrailCandle(ctx, TrailCandle{Symbol: "AAPL", Timeframe: "1m", StartMs: start, EndMs: clk.Now().UnixMilli() - 1, Low: 9.99, High: 10, Verified: true})
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 9.90))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 9.90))
 	waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.StopPrice == 9.78 })
 	clk.Advance(time.Minute)
 	c.FeedTrailCandle(ctx, TrailCandle{Symbol: "AAPL", Timeframe: "1m", StartMs: start + 60_000, EndMs: start + 120_000, Low: 9.85, High: 10, Verified: true})
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.90))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.90))
 	waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.StopPrice == 9.83 })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(4, clk.Now(), 9.83))
+	feedCorroboratedPrint(t, c, ctx, eligible(4, clk.Now(), 9.83))
 	select {
 	case child := <-broker.submits:
 		if child.LimitPrice != 9.83 {
@@ -724,7 +731,7 @@ func TestCandleTimeframeEditCannotReuseCorrectedPriorReference(t *testing.T) {
 		t.Fatal(a)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 10))
 	waitOrder(t, c, a.OrderID, func(o Order) bool { return o.StopPrice == 9.8 })
 	c.FeedTrailCandle(ctx, TrailCandle{Symbol: "AAPL", Timeframe: "5m", StartMs: five, EndMs: five + 300000, Low: 9.7, High: 10, Verified: true})
 	config.Timeframe = "5m"
@@ -738,7 +745,7 @@ func TestCandleTimeframeEditCannotReuseCorrectedPriorReference(t *testing.T) {
 		t.Fatal(ack)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 9.9))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 9.9))
 	waitOrder(t, c, a.OrderID, func(o Order) bool { return o.Held.Phase == HeldArmed && o.Held.Trail.Config.Timeframe == "1m" })
 	select {
 	case child := <-b.submits:

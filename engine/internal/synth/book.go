@@ -341,10 +341,13 @@ func (b *bookState) best() (bid, ask float64) {
 // tsMs. feed.BookLevel names its size field Volume, not Size.
 func (b *bookState) snapshot(symbol string, tsMs int64) feed.Book {
 	return feed.Book{
-		Symbol: symbol,
-		TsMs:   tsMs,
-		Bids:   toFeedLevels(b.bids),
-		Asks:   toFeedLevels(b.asks),
+		Source:  feed.SourceRef{ReceiptMs: tsMs},
+		BidTsMs: &tsMs,
+		AskTsMs: &tsMs,
+		Symbol:  symbol,
+		TsMs:    tsMs,
+		Bids:    toFeedLevels(b.bids),
+		Asks:    toFeedLevels(b.asks),
 	}
 }
 

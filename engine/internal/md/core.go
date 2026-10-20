@@ -582,7 +582,7 @@ func (c *Core) applyTicks(e feed.TicksEvent) {
 			c.executionTick(t, e.Execution)
 		}
 		if !e.Seed && t.LastEligible && t.Delivery == feed.DeliveryRealtime && t.Seq > 0 {
-			c.eligiblePrints <- EligiblePrint{Symbol: t.Symbol, Price: t.Price, TsMs: t.TsMs, RecvTsMs: t.RecvTsMs, Seq: t.Seq}
+			c.eligiblePrints <- EligiblePrint{Symbol: t.Symbol, Price: t.Price, TsMs: t.TsMs, RecvTsMs: t.RecvTsMs, ReceiptMs: t.SourceRef().ReceiptMs, Seq: t.Seq}
 		}
 	}
 	c.bars.applyTicks(c, accepted) // Task 11 (10s + shadow 1m)

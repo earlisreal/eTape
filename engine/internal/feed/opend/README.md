@@ -6,6 +6,12 @@ cache sorting preserves original source indexes. Request descriptors classify
 GetKL replies, including unmatched/timeout gaps. BOOK stores top sides and
 their separate clocks, without full depth payloads.
 
+Normalized push and snapshot books preserve each optional provider side clock;
+absent and zero clocks remain distinguishable. Execution receives these clocks
+and local frame receipt even with recording disabled. Protective stops request
+optional background BOOK ownership through ordinary admission; quota shortage
+does not delay their required TICKER lease. See [protective price evidence](../../exec/README.md#protective-price-evidence).
+
 Recorder-only BOOK uses a separate admission worker, bounded snapshot queue
 and snapshot worker. It reuses ordinary BOOK ownership, never enlarges ordinary
 profiles, and admits only existing US TICKER symbols when fresh account quota

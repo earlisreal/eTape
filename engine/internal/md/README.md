@@ -14,6 +14,12 @@ invalidate readiness. Book evidence must match the current acknowledged lease;
 an unchanged quote remains usable during healthy continuity. Basic Quote
 timestamps do not establish execution BBO readiness.
 
+Execution prints and books preserve local source receipt independently of the
+recorder; books also carry optional independent provider side clocks, including
+unknown/zero values. Protective-price corroboration applies stricter age and
+coherence limits in the [execution core](../exec/README.md#protective-price-evidence),
+without changing the reported-price lane or existing quote-derived limit policy.
+
 Execution candles use continuously observed real 10-second ranges and live
 authoritative one-minute K-lines; contiguous verified minutes form larger
 intraday references only after provider minute rollover proves completion.

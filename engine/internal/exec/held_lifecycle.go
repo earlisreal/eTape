@@ -95,6 +95,8 @@ func (c *Core) freshEligiblePrint(p EligiblePrint) bool {
 
 func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 	if p.Gap {
+		clear(c.protectionPrices)
+		clear(c.protectionPending)
 		clear(c.trailBooks)
 		clear(c.trailCandles)
 		gapAt := p.RecvTsMs
@@ -136,6 +138,14 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 	}
 	c.printHealthy = true
 	for _, id := range c.heldOrderIDs() {
+		if o := c.order(id); o.Symbol == p.Symbol && c.protectiveOrder(o) && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
+			c.requestProtectionBook(o)
+			c.observeProtectionPrice(p)
+			break
+		}
+	}
+	c.resolveProtection(ctx, p.Symbol)
+	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
 		if o.Symbol != p.Symbol || o.Held == nil || (o.Held.Phase != HeldWaiting && o.Held.Phase != HeldArmed) ||
 			p.RecvTsMs <= o.CreatedMs || p.RecvTsMs <= o.Held.ResumeAfterMs {
@@ -148,7 +158,7 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 		if o.Held.Trail != nil {
 			c.advanceTrail(ctx, o, p, false)
 		} else if HeldOrderTriggered(o.Type, o.Side, p.Price, o.StopPrice) {
-			c.activateHeld(ctx, o)
+			c.activateProtectedStop(ctx, o, p)
 		} else {
 			c.changeHeld(o, HeldArmed, "", false)
 		}
@@ -371,6 +381,20 @@ func (c *Core) expireHeld(o Order) {
 }
 
 func (c *Core) releaseHeld(orderID string) {
+	o := c.order(orderID)
+	keep := false
+	for _, id := range c.heldOrderIDs() {
+		other := c.order(id)
+		if id != orderID && other.Symbol == o.Symbol && c.protectiveOrder(other) {
+			keep = true
+			break
+		}
+	}
+	if !keep {
+		delete(c.protectionPrices, o.Symbol)
+	}
+	delete(c.protectionPending, orderID)
+	delete(c.protectionBooks, orderID)
 	if c.heldDemand != nil {
 		c.heldDemand.Release(orderID)
 	}
@@ -493,9 +517,10 @@ func (c *Core) handleResumeHeld(ctx context.Context, cm ResumeHeldOrder) CmdAck 
 	h := *o.Held
 	h.Phase, h.PausedReason, h.CancelRequested, h.ResumeAfterMs = HeldWaiting, "", false, c.now()
 	if err := c.appendAndFold(HeldOrderChanged{V: o.Venue, OID: o.ID, Held: h, Ts: c.now()}, SrcLocal); err != nil {
-		c.heldDemand.Release(o.ID)
+		c.releaseHeld(o.ID)
 		return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: o.ID}
 	}
+	c.requestProtectionBook(c.order(o.ID))
 	if o.Held.Trail != nil {
 		if o.Held.Trail.Triggered {
 			if o.Held.Trail.Config.Pricing == "QUOTE" {

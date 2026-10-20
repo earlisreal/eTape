@@ -1,6 +1,7 @@
 package synth
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func eventsEqual(a, b feed.Event) bool {
 			return false
 		}
 		for i := range av.Ticks {
-			if av.Ticks[i] != bv.Ticks[i] {
+			if !reflect.DeepEqual(av.Ticks[i], bv.Ticks[i]) {
 				return false
 			}
 		}
@@ -34,10 +35,10 @@ func eventsEqual(a, b feed.Event) bool {
 		return ok && av == bv
 	case feed.BookEvent:
 		bv, ok := b.(feed.BookEvent)
-		if !ok || av.Seed != bv.Seed || av.Book.Symbol != bv.Book.Symbol || av.Book.TsMs != bv.Book.TsMs {
+		if !ok || av.Seed != bv.Seed || !reflect.DeepEqual(av.Book, bv.Book) {
 			return false
 		}
-		return bookLevelsEqual(av.Book.Bids, bv.Book.Bids) && bookLevelsEqual(av.Book.Asks, bv.Book.Asks)
+		return true
 	case feed.Bars1mEvent:
 		bv, ok := b.(feed.Bars1mEvent)
 		if !ok || av.Seed != bv.Seed || len(av.Bars) != len(bv.Bars) {
@@ -52,18 +53,6 @@ func eventsEqual(a, b feed.Event) bool {
 	default:
 		return false
 	}
-}
-
-func bookLevelsEqual(a, b []feed.BookLevel) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func TestGenerator_Deterministic_ByteIdentical(t *testing.T) {

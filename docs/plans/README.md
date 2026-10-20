@@ -8,6 +8,8 @@ Approved, implementation pending:
 
 Implemented:
 
+- [Protective-stop spike filtering](2026-10-20-protective-stop-spike-filter.md)
+
 - [Sub-dollar prices in tables](2026-10-16-sub-dollar-table-prices.md)
 - [Chart Risk Entry error toasts](2026-10-16-chart-risk-entry-error-toasts.md)
 - [Price-only Order Price Pills](2026-10-16-price-only-order-pills.md)
