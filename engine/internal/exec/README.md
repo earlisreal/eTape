@@ -1,5 +1,48 @@
 # Execution Core
 
+## Trailing stops
+
+`SubmitTrail` admits one reducing SELL/COVER strategy per venue and symbol.
+Price and percent modes retain a favorable high/low watermark; Candle Trail
+uses a trustworthy completed 10s, 1m, 5m, 15m, 30m or 60m reference. Stops only
+tighten, with SELL rounded down and COVER up on the existing price grid.
+Standalone sizing is a position percentage resolved to whole shares at trigger,
+then frozen. A quote recipe latches in `WAITING_QUOTE` and reserves those shares
+until a current acknowledged Book is usable. There is no market fallback,
+repricing, chasing, automatic rearming or broker-native trailing order.
+
+Trails select today's PRE/RTH/POST windows and expire at the scheduled last
+selected close, including early closes. Feed gaps pause pretrigger evaluation
+until explicit Resume. Flat, reversal, lost broker continuity, expiry and engine
+termination retire the position-cycle-bound intent permanently. Graceful
+shutdown requests child cancellation; crash recovery reconciles uncertain
+children and never reposts a trail. Ordinary Disarm/day-loss controls leave
+healthy reducing protection enabled; Cancel Protection and KillSwitch cancel
+it without flattening.
+
+Chart Risk Entry defaults to Fixed protection. A trailing preset retains the
+chart-selected initial stop as a floor, sizes from the original cushion-adjusted
+limits and reviewed quantity, and begins trailing after confirmed fills. Missing
+trail references leave that fixed floor active. Partial fills grow only the
+entry's coverage; confirmed unrelated reductions retire owned shares before
+independent additions. Triggering cancels remaining buying. Healthy uncovered
+late fills receive separate linked LIMIT cleanup, with frozen main-child
+quantities and quote reservations counted once.
+
+`ConvertProtectionToTrail` changes healthy filled primary WAITING/ARMED
+protection atomically, retaining its owner, current confirmed stop bound and
+deadline. Missing data, stale observed state, paused/uncertain/working children
+and zero-fill setups reject conversion. `EditTrail` changes parameters within
+the existing mode and cannot loosen the bound. Trailing presets, including
+zero-fill preparation and fixed fallback, expire across engine runs.
+
+The execution writer owns prices, reservations, position cycles and durable
+submission intent. Engine-owned Ticker/Book/K_1M demand survives chart closure;
+Go-owned WebSocket projections expose state and reference snapshots. Validate
+through `go test ./internal/exec` and lifecycle race tests; use sim/paper only.
+
+## Existing execution lifecycle
+
 Broker-neutral lifecycle, gates, routing, reconciliation, and round-trip
 tracking. Link Groups choose the execution venue; there is no runtime global
 venue fallback. The account poller requests every configured live venue for

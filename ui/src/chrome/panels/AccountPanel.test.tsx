@@ -843,6 +843,13 @@ describe("AccountPanel", () => {
       expect(screen.getByText("Open Orders (1)")).toBeTruthy();
       expect(screen.queryByText("Filled")).toBeNull();
     });
+    it("shows a trail waiting reason and permits scoped Resume even before a stop line exists",async()=>{
+      const {props,stores,sent}=mkProps();wrap(props);
+      act(()=>{stores.exec.apply({kind:"snapshot",topic:"exec.status",payload:status(true)});stores.exec.apply({kind:"snapshot",topic:"exec.orders",payload:[order("trail",{type:"TRAILING_STOP",side:"SELL",stopPrice:0,limitPrice:0,held:{phase:"PAUSED",pausedReason:"eligible-print gap; resume manually",deadlineMs:9999999999999,trail:{config:{mode:"PRICE",value:.3,sessions:{pre:true,rth:true,post:true},pricing:"CUSHION",cushion:{value:0,unit:"$"},offset:{value:0,unit:"$"},buffer:{value:0,unit:"$"}},watermark:0,stop:0,limit:0}}})]});});
+      expect(screen.getByText(/eligible-print gap; resume manually/)).toBeTruthy();
+      fireEvent.click(screen.getByRole("button",{name:"Resume trail"}));
+      await waitFor(()=>expect(sent).toContainEqual({name:"ResumeHeldOrder",args:{venue:"alpaca-paper",orderId:"trail"}}));
+    });
 
     it("cancel on a working row sends CancelOrder; Cancel All cancels every working order", () => {
       const { props, stores, sent } = mkProps();

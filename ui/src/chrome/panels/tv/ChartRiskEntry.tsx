@@ -7,6 +7,7 @@ import { TV_FONT, type TvChrome } from "../../../render/chart/tvTheme";
 import type { Tool } from "../../../render/chart/drawings/interaction";
 import { CHART_RISK_ENTRY_EVENT, type OrderConfig, type RiskEntryTemplate } from "../../exec/actionTemplate";
 import { riskEntrySize } from "../../exec/riskEntry";
+import {trailError} from "../../exec/trailing";
 import type { LinkGroup, LinkGroups } from "../../linkGroups";
 import { modalTracker } from "../../modalTracker";
 import { useToasts } from "../../Toast";
@@ -118,6 +119,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             return "";
         };
         const invalid = () => {
+            if(draft?.template.protection){const error=trailError(draft.template.protection);if(error)return error;}
             const p = latest.current, status = p.stores.exec.status(), v = status?.venues.find(v => v.venue === venue);
             if (!p.active || !document.hasFocus() || modalTracker.isOpen() || editable())
                 return "Focus the chart to continue.";
@@ -285,7 +287,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return;
             }
             const args: SubmitRiskEntryArgs = { venue, symbol, buyStop: current.buy!, sellStop: current.sell!, mode: current.template.mode, value: current.template.value,
-                maxQty: Math.min(current.maxQty, s.qty), buyCushion: current.template.buyCushion, sellCushion: current.template.sellCushion };
+                maxQty: Math.min(current.maxQty, s.qty), buyCushion: current.template.buyCushion, sellCushion: current.template.sellCushion,
+                ...(current.template.protection?{protection:current.template.protection}:{}) };
             try {
                 const ack = await latest.current.sendCommand("SubmitRiskEntry", args);
                 if (ack.ambiguous) notify(ack.reason || "", true);

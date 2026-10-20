@@ -13,6 +13,18 @@ describe("action templates", () => {
 });
 
 describe("normalizeOrderConfig", () => {
+  it("normalizes partial imported trail settings without inventing a distance or accepting market execution",()=>{
+    const config=normalizeOrderConfig(JSON.parse('{"activeVenue":"sim","templates":[{"kind":"place","id":"t","label":"Trail","type":"TRAILING_STOP","side":"SELL","tif":"DAY","priceSource":"Bid","priceOffset":0,"sizing":{"mode":"PositionFraction","pct":100},"trail":{"mode":"PRICE","pricing":"MARKET"}}]}'));
+    const t=config.templates[0];
+    expect(t.kind==="place" && t.trail).toMatchObject({mode:"PRICE",value:0,pricing:"MARKET",sessions:{pre:true,rth:true,post:true},cushion:{value:0,unit:"$"},buffer:{value:0,unit:"$"},offset:{value:0,unit:"$"}});
+  });
+  it("retains trailing protection through config export and import, while legacy presets stay Fixed",()=>{
+    const config:OrderConfig={activeVenue:"sim",templates:[{kind:"risk",id:"r",label:"Risk",mode:"Dollar",value:100,buyCushion:{value:0,unit:"$"},sellCushion:{value:.02,unit:"$"},
+      protection:{mode:"CANDLE",value:0,timeframe:"5m",sessions:{pre:true,rth:true,post:true},buffer:{value:.1,unit:"%"},pricing:"CUSHION",cushion:{value:.02,unit:"$"},offset:{value:0,unit:"$"}}}]};
+    expect(normalizeOrderConfig(JSON.parse(JSON.stringify(config))).templates[0]).toMatchObject(config.templates[0]);
+    const legacy={...config.templates[0]};if(legacy.kind==="risk")delete legacy.protection;
+    expect(normalizeOrderConfig({...config,templates:[legacy]}).templates[0]).not.toHaveProperty("protection");
+  });
 	 it("persists risk presets and defaults auto-send off", () => {
 	   const raw: OrderConfig = { activeVenue: "v", templates: [{kind:"risk",id:"r",label:"Risk",mode:"CashPct",value:1,hotkey:"Ctrl+R",buyCushion:{value:0.05,unit:"$"},sellCushion:{value:0.1,unit:"%"}}] };
 	   expect(normalizeOrderConfig(raw).chartRiskAutoSend).toBe(false);

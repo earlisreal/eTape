@@ -1,5 +1,20 @@
 # Execution UI
 
+Trailing Stop in the ticket and saved order templates shares Price, Percent or
+Candle settings, position-percentage sizing, PRE/RTH/POST windows and quote or
+cushion execution. No positive distance is invented. Chart Risk Entry presets
+default to Fixed and can choose trailing protection while retaining both chart
+prices and the initial stop floor. A management template can Convert Protection
+to Trail in its scoped venue/symbol; ambiguous or ineligible targets reject.
+
+Grouped charts draw the engine's derived stop with mode/state, hover details,
+Edit/Resume/Cancel controls and conversion for eligible filled protection.
+Derived prices cannot be dragged or arrow-moved. A missing initial reference
+creates no fabricated line; Open Orders retains waiting reasons and Resume.
+Progress uses an imperative ExecStore lane and frame-coalesced chart/ladder
+painting; chrome snapshots coalesce to 250 ms while lifecycle changes publish
+immediately. Live trails reuse the existing account-held-stop acknowledgement.
+
 Order ticket, hotkeys, sizing, venue selection, and arm/disarm presentation.
 Inputs: user intent plus account/position stores; outputs: typed wire commands.
 UI never bypasses engine gates. Grouped panels resolve only their Link Group's

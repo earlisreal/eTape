@@ -1,5 +1,16 @@
 # UI
 
+Choose **Trailing Stop** in the order ticket, or save a `TRAILING_STOP` order
+template for a hotkey/Deck button. Configure a positive price/percent distance
+or an intraday candle reference, position percentage, daytime sessions and
+LIMIT execution recipe. Chart Risk Entry presets offer Fixed (default), Trail
+Price, Trail Percent and Candle Trail protection; both chart prices still size
+the entry. Healthy filled primary protection has **Convert to trail** on its
+chart pill, with an equivalent scoped management hotkey. Derived stops expose
+Edit/Resume/Cancel and cannot be dragged. See the
+[execution UI guide](src/chrome/exec/README.md) for run-bound lifetime and data
+readiness behavior.
+
 Add **Alerts** through Add Panel to manage engine-owned price alerts across all
 workspaces. Its Alerts tab holds saved definitions; History retains every trigger,
 including entries whose definition was deleted. Create via the chart's bell tool

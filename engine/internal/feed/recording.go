@@ -8,6 +8,7 @@ type SourceRef struct {
 	Ingress    uint64
 	Index      int32
 	ReceiptMs  int64
+	Loss       uint64 // transport push losses observed before this delivery
 }
 
 // Recording is immutable after submission. Data contains fixed observation

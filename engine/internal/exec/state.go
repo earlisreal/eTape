@@ -159,7 +159,14 @@ func (s *State) Apply(ev Event) {
 	case HeldOrderChanged:
 		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
 			held := e.Held
+			if held.Trail != nil && held.Trail.ReservedQty > 0 {
+				held.ResolvedQty = held.Trail.ReservedQty
+			}
 			o.Held = &held
+			if held.Trail != nil {
+				o.StopPrice = held.Trail.Stop
+				o.LimitPrice = held.Trail.Limit
+			}
 			if held.ResolvedQty > 0 {
 				o.Qty, o.LeavesQty = held.ResolvedQty, held.ResolvedQty-o.ExecutedQty
 				if o.LeavesQty < 0 {

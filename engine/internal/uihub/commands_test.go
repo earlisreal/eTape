@@ -60,6 +60,19 @@ func (s *spyCfg) DeleteConfig(k string) { s.deleted = k }
 
 type spyInd struct{ ensured, released string }
 
+func TestCommandsSubmitTrailPreservesExecutionRecipe(t *testing.T) {
+	ex := &spyExec{ack: exec.CmdAck{Accepted: true, OrderID: "trail"}}
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	ack, _ := cd.handle(context.Background(), "SubmitTrail", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"SELL","positionPct":50,"config":{"mode":"PRICE","value":0.3,"sessions":{"rth":true},"pricing":"QUOTE","quoteSide":"BID","offset":{"value":-0.02,"unit":"$"}}}`), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != "accepted" {
+		t.Fatal(ack)
+	}
+	cmd, ok := ex.last.(exec.SubmitTrail)
+	if !ok || cmd.PositionPct != 50 || cmd.Config.Offset.Value != -.02 || !cmd.Config.Sessions.RTH {
+		t.Fatalf("trail recipe lost: %#v", ex.last)
+	}
+}
+
 func (s *spyInd) EnsureIndicator(_ uint64, id string, _ md.IndicatorSpec) { s.ensured = id }
 func (s *spyInd) ReleaseIndicator(_ uint64, id string)                    { s.released = id }
 

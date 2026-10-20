@@ -24,6 +24,8 @@ type RiskEntry struct {
 	ProtectionCanceled bool         `json:"protectionCanceled,omitempty"`
 	Failure            string       `json:"failure,omitempty"`
 	FlatConfirmedQty   float64      `json:"flatConfirmedQty,omitempty"`
+	Protection         *TrailConfig `json:"protection,omitempty"`
+	RetiredQty         float64      `json:"retiredQty,omitempty"`
 }
 
 type SubmitRiskEntry struct {
@@ -33,6 +35,7 @@ type SubmitRiskEntry struct {
 	Mode                    string
 	Value, MaxQty           float64
 	BuyCushion, SellCushion LimitCushion
+	Protection              *TrailConfig
 }
 
 func (SubmitRiskEntry) isCommand() {}
@@ -163,10 +166,24 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	deadline := session.Schedule(c.clk.Now()).DataClose.UnixMilli()
 	entry.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: deadline}
 	stop.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: deadline, PausedReason: "awaiting entry fills"}
+	if cm.Protection != nil {
+		config := *cm.Protection
+		if config.Pricing != "CUSHION" && config.Pricing != "" {
+			return blocked("risk presets require stop-relative Limit Cushion execution")
+		}
+		config.Sessions = TrailSessions{Pre: true, RTH: true, Post: true}
+		config.Pricing, config.Cushion = "CUSHION", cm.SellCushion
+		if err := validateTrailConfig(&config); err != nil {
+			return blocked(err.Error())
+		}
+		cm.Protection = &config
+		stop.Held.Trail = &TrailState{Config: config, Stop: cm.SellStop, Limit: sellLimit, Floor: cm.SellStop}
+	}
 	entry.RiskEntry = &RiskEntry{StopID: stop.ID, Budget: budget, Mode: cm.Mode, BuyCushion: cm.BuyCushion, SellCushion: cm.SellCushion}
+	entry.RiskEntry.Protection = cm.Protection
 	stop.RiskEntryID = entry.ID
 	for _, o := range []Order{entry, stop} {
-		if err := c.heldDemand.Acquire(ctx, o.ID, o.Symbol); err != nil {
+		if err := c.acquireHeldDemand(ctx, o); err != nil {
 			c.releaseHeld(entry.ID)
 			c.releaseHeld(stop.ID)
 			return blocked("execution ticker unavailable: " + err.Error())
@@ -227,6 +244,26 @@ func (c *Core) persistRisk(entry Order, risk RiskEntry) error {
 	return c.appendAndFold(RiskEntryChanged{Entry: entry, Stop: c.order(risk.StopID)}, SrcLocal)
 }
 
+func (c *Core) beginRiskExit(ctx context.Context, entry Order) bool {
+	if entry.RiskEntry == nil || entry.RiskEntry.Closing {
+		return true
+	}
+	risk := *entry.RiskEntry
+	risk.Closing = true
+	if err := c.persistRisk(entry, risk); err != nil {
+		c.syslog("exec.risk", err.Error())
+		return false
+	}
+	if entry.Working() {
+		if entry.Held.ChildClientID == "" {
+			_ = c.handleCancel(ctx, CancelOrder{Venue: entry.Venue, OrderID: entry.ID})
+		} else {
+			c.requestHeldVenueCancel(ctx, c.order(entry.ID), "linked stop triggered; cancel remaining buy")
+		}
+	}
+	return true
+}
+
 // Protection is scoped to confirmed fills from this entry, never the whole position.
 func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling bool) {
 	if entry.RiskEntry == nil {
@@ -234,17 +271,24 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 	}
 	risk := *entry.RiskEntry
 	stop := c.order(risk.StopID)
-	if risk.ProtectionCanceled || stop.Held == nil || stop.Held.DeadlineMs <= c.now() {
+	if risk.ProtectionCanceled || stop.Held == nil || stop.Held.DeadlineMs <= c.now() || stop.Held.Trail != nil && stop.Held.Trail.Retired {
 		return
 	}
 	if !risk.Closing {
 		if stop.Held.ChildClientID != "" {
 			return
 		}
-		stop.Qty, stop.LeavesQty = entry.ExecutedQty, entry.ExecutedQty
+		stop.Qty = math.Max(0, entry.ExecutedQty-risk.RetiredQty)
+		stop.LeavesQty = stop.Qty
 		stop.UpdatedMs = c.now()
 		if stop.Qty == 0 {
-			stop.Held = &HeldOrder{Phase: stop.Held.Phase, DeadlineMs: stop.Held.DeadlineMs, ResumeAfterMs: stop.Held.ResumeAfterMs, PausedReason: "awaiting entry fills"}
+			h := *stop.Held
+			h.PausedReason = "awaiting entry fills"
+			stop.Held = &h
+		} else if stop.Held.Trail != nil && stop.Held.PausedReason == "awaiting entry fills" {
+			h := *stop.Held
+			h.PausedReason = "fixed fallback; waiting for trailing data"
+			stop.Held = &h
 		}
 		if !entry.Working() && entry.ExecutedQty == 0 {
 			stop.Status = StatusCanceled
@@ -255,8 +299,12 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 			return
 		}
 		if stop.Qty > 0 && (stop.Held.Phase == HeldWaiting || stop.Held.Phase == HeldArmed) {
-			if last, ok := c.lastEligible[stop.Symbol]; ok && c.freshEligiblePrint(last) && StopLimitTriggered(SideSell, last.Price, stop.StopPrice) {
-				c.activateHeld(ctx, stop)
+			if last, ok := c.lastEligible[stop.Symbol]; ok && c.printHealthy && c.freshEligiblePrint(last) {
+				if stop.Held.Trail != nil {
+					c.advanceTrail(ctx, stop, last, false)
+				} else if StopLimitTriggered(SideSell, last.Price, stop.StopPrice) {
+					c.activateHeld(ctx, stop)
+				}
 			}
 		}
 		return
@@ -271,7 +319,7 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 			covered += exit.LeavesQty
 		}
 	}
-	qty := entry.ExecutedQty - covered
+	qty := entry.ExecutedQty - risk.RetiredQty - covered
 	if qty <= 1e-9 || risk.Failure != "" {
 		return
 	}
@@ -280,14 +328,28 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 		Qty: qty, LimitPrice: stop.LimitPrice, StopPrice: stop.StopPrice, ClientOrderID: c.idgen.Next()}, c.now())
 	late.RiskEntryID = entry.ID
 	late.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: stop.Held.DeadlineMs}
+	if stop.Held.Trail != nil {
+		trail := *stop.Held.Trail
+		trail.ReservedQty = qty
+		late.Held.Trail = &trail
+		late.Held.ResolvedQty = qty
+		if trail.Config.Pricing == "QUOTE" {
+			late.Held.Phase = HeldWaitingQuote
+			late.Held.PausedReason = "late entry fill; waiting for execution quote"
+		}
+	}
 	if reconciling || stop.Held.Phase == HeldPaused || !c.printHealthy || !c.state.PositionsReady(entry.Venue) {
 		late.Held.Phase = HeldPaused
 		late.Held.PausedReason = "late entry fill; reconcile and resume protection"
 	}
+	if late.Held.Trail != nil && !late.Held.Trail.Config.Sessions.allows(c.clk.Now()) {
+		late.Held.Phase = HeldPaused
+		late.Held.PausedReason = "late entry fill outside permitted session; manual recovery required"
+	}
 	if c.heldDemand == nil {
 		return
 	}
-	if err := c.heldDemand.Acquire(ctx, late.ID, late.Symbol); err != nil {
+	if err := c.acquireHeldDemand(ctx, late); err != nil {
 		c.failRisk(ctx, entry, "late fill protection unavailable: "+err.Error())
 		return
 	}
@@ -296,8 +358,11 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 		c.failRisk(ctx, entry, "late fill protection persistence failed: "+err.Error())
 		return
 	}
-	if late.Held.Phase == HeldWaiting {
+	switch late.Held.Phase {
+	case HeldWaiting:
 		c.activateHeld(ctx, late)
+	case HeldWaitingQuote:
+		c.activateTrailQuote(ctx, late)
 	}
 }
 
@@ -366,6 +431,9 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 		return blocked("entry activated or changed during drag; review current risk sizing")
 	}
 	pretrigger := o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed
+	if pretrigger && o.Held.Trail != nil {
+		return blocked("derived trailing prices cannot be dragged; edit trail parameters")
+	}
 	expectedPre := cm.ExpectedHeldPhase == HeldWaiting || cm.ExpectedHeldPhase == HeldArmed
 	if cm.ExpectedHeldPhase == "" || pretrigger != expectedPre || !pretrigger && cm.ExpectedHeldPhase != o.Held.Phase {
 		return blocked("order activated or changed during drag; review current order")

@@ -118,6 +118,7 @@ type LimitCushion struct {
 }
 
 type RiskEntry struct {
+	Protection         *TrailConfig `json:"protection,omitempty"`
 	StopID             string       `json:"stopId"`
 	Budget             float64      `json:"budget"`
 	Mode               string       `json:"mode"`
@@ -129,6 +130,7 @@ type RiskEntry struct {
 }
 
 type SubmitRiskEntryArgs struct {
+	Protection  *TrailConfig `json:"protection,omitempty"`
 	Venue       string       `json:"venue"`
 	Symbol      string       `json:"symbol"`
 	BuyStop     float64      `json:"buyStop"`
@@ -141,13 +143,65 @@ type SubmitRiskEntryArgs struct {
 }
 
 type HeldOrder struct {
-	Phase           string  `json:"phase"`
-	DeadlineMs      int64   `json:"deadlineMs"`
-	ChildClientID   string  `json:"childClientId,omitempty"`
-	ChildBrokerID   string  `json:"childBrokerId,omitempty"`
-	PausedReason    string  `json:"pausedReason,omitempty"`
-	CancelRequested bool    `json:"cancelRequested,omitempty"`
-	ResolvedQty     float64 `json:"resolvedQty,omitempty"`
+	Trail           *TrailState `json:"trail,omitempty"`
+	Phase           string      `json:"phase"`
+	DeadlineMs      int64       `json:"deadlineMs"`
+	ChildClientID   string      `json:"childClientId,omitempty"`
+	ChildBrokerID   string      `json:"childBrokerId,omitempty"`
+	PausedReason    string      `json:"pausedReason,omitempty"`
+	CancelRequested bool        `json:"cancelRequested,omitempty"`
+	ResolvedQty     float64     `json:"resolvedQty,omitempty"`
+}
+
+type TrailSessions struct {
+	Pre  bool `json:"pre"`
+	RTH  bool `json:"rth"`
+	Post bool `json:"post"`
+}
+type TrailConfig struct {
+	Mode      string        `json:"mode"`
+	Value     float64       `json:"value"`
+	Sessions  TrailSessions `json:"sessions"`
+	Pricing   string        `json:"pricing"`
+	Cushion   LimitCushion  `json:"cushion"`
+	QuoteSide string        `json:"quoteSide,omitempty"`
+	Offset    LimitCushion  `json:"offset"`
+	Timeframe string        `json:"timeframe,omitempty"`
+	Buffer    LimitCushion  `json:"buffer"`
+}
+type TrailCandle struct {
+	Symbol    string  `json:"symbol"`
+	Timeframe string  `json:"timeframe"`
+	StartMs   int64   `json:"startMs"`
+	EndMs     int64   `json:"endMs"`
+	Low       float64 `json:"low"`
+	High      float64 `json:"high"`
+}
+type TrailState struct {
+	PositionCycle string       `json:"positionCycle,omitempty"`
+	Floor         float64      `json:"floor,omitempty"`
+	Config        TrailConfig  `json:"config"`
+	Watermark     float64      `json:"watermark"`
+	Stop          float64      `json:"stop"`
+	Limit         float64      `json:"limit"`
+	Triggered     bool         `json:"triggered,omitempty"`
+	Retired       bool         `json:"retired,omitempty"`
+	ReservedQty   float64      `json:"reservedQty,omitempty"`
+	Reference     *TrailCandle `json:"reference,omitempty"`
+}
+type SubmitTrailArgs struct {
+	Venue       string      `json:"venue"`
+	Symbol      string      `json:"symbol"`
+	Side        Side        `json:"side"`
+	PositionPct float64     `json:"positionPct"`
+	Config      TrailConfig `json:"config"`
+}
+type ConfigureTrailArgs struct {
+	Venue             string      `json:"venue"`
+	OrderID           string      `json:"orderId"`
+	ExpectedHeldPhase string      `json:"expectedHeldPhase"`
+	ExpectedStop      float64     `json:"expectedStop"`
+	Config            TrailConfig `json:"config"`
 }
 
 type OrderAction struct {

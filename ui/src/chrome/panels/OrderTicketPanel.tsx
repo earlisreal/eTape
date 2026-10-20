@@ -20,15 +20,17 @@ import { PanelHeaderActionsSlotContext } from "./headerSlot";
 import { IconGear } from "./tv/tvIcons";
 import { HotkeyDeck, resolveDeckRows } from "./HotkeyDeck";
 import { chartConditionalOrderWillTrigger, conditionalRouteLabel } from "../exec/resolveChartConditionalOrder";
+import {TrailEditor} from "../exec/TrailEditor";
+import {newTrailConfig} from "../exec/trailing";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
-const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT", "LIMIT_IF_TOUCHED"];
+const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT", "LIMIT_IF_TOUCHED", "TRAILING_STOP"];
 const TIFS: TIF[] = ["DAY", "GTC", "IOC", "FOK"];
 const SESSIONS: OrderSession[] = ["AUTO", "RTH", "EXTENDED", "OVERNIGHT"];
 const MODES: SizingMode[] = ["Shares", "Dollar", "CashPct", "BuyingPowerPct", "PositionFraction"];
 // Full words in the ticket's own dropdowns — abbrevType (orderStatus.ts) stays
 // abbreviated since it's shared with OpenOrdersPanel and the submit-flash toast.
-const TYPE_LABEL: Record<OrderType, string> = { MARKET: "Market", LIMIT: "Limit", STOP: "Stop", STOP_LIMIT: "Stop Limit", LIMIT_IF_TOUCHED: "Limit If Touched" };
+const TYPE_LABEL: Record<OrderType, string> = { MARKET: "Market", LIMIT: "Limit", STOP: "Stop", STOP_LIMIT: "Stop Limit", LIMIT_IF_TOUCHED: "Limit If Touched", TRAILING_STOP:"Trailing Stop" };
 const MODE_LABEL: Record<SizingMode, string> = { Shares: "Shares", Dollar: "Dollars", CashPct: "Cash %", BuyingPowerPct: "Buying Power %", PositionFraction: "Position" };
 // AUTO resolves session-dependent behavior (extended_hours flags, TIF
 // coercion) from the server clock at submit time — today's behavior, kept as
@@ -76,6 +78,8 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const oldOrders = previousVenue ? stores.exec.orders().filter((o) => o.order.venue === previousVenue && (o.optimistic || o.order.status === "SUBMITTED" || o.order.status === "ACCEPTED" || o.order.status === "PARTIALLY_FILLED")).length : 0;
 
   const [type, setType] = useState<OrderType>("LIMIT");
+  const [trail,setTrail]=useState(()=>({...newTrailConfig(),quoteSide:""}));
+  const isTrail=type==="TRAILING_STOP";
   const [tif, setTif] = useState<TIF>("DAY");
   const [session, setSession] = useState<OrderSession>("AUTO");
   const [mode, setMode] = useState<SizingMode>("Shares");
@@ -111,7 +115,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const venueStatus = status?.venues.find((v) => v.venue === venue);
   const liveHeldNeedsAck = (type === "STOP_LIMIT" && !venueStatus?.heldStopLimitAcknowledged ||
     type === "LIMIT_IF_TOUCHED" && !venueStatus?.heldLimitIfTouchedAcknowledged) &&
-    conditionalRoute?.route === "ENGINE_HELD" && venueStatus?.env?.toLowerCase() === "live";
+    conditionalRoute?.route === "ENGINE_HELD" && venueStatus?.env?.toLowerCase() === "live" || isTrail && !venueStatus?.heldStopLimitAcknowledged && venueStatus?.env?.toLowerCase()==="live";
 
   const acknowledgeHeldStopLimit = async () => {
     if (!venue) return;
@@ -129,6 +133,10 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const submitManual = (side: Side) => {
     if (venue === "") { toast.push({ level: "danger", text: "no execution venue — set one up in Settings › Venues & creds" }); return; }
     if (symbol === "") { toast.push({ level: "danger", text: "no symbol focused — type a symbol in the order ticket or a linked panel" }); return; }
+    if(isTrail){
+      if(side!=="SELL" && side!=="COVER")return;
+      void oc.submitTrail({venue,symbol,side,positionPct:Number(amount),config:{...trail,quoteSide:trail.quoteSide||(side==="SELL"?"BID":"ASK")}});return;
+    }
     const px = Number(price) || 0;
     const spec = mode === "Shares" ? { mode, shares: Number(amount) || 0 }
       : mode === "Dollar" ? { mode, dollar: Number(amount) || 0 }
@@ -240,15 +248,17 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
             {TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
           </select>
         ))}
-        {field(type === "LIMIT_IF_TOUCHED" ? "Limit" : "Price", (
+        {!isTrail && field(type === "LIMIT_IF_TOUCHED" ? "Limit" : "Price", (
           <StepperInput testid="price" value={price} onChange={setPrice} disabled={type === "MARKET"} placeholder="price" style={full} />
         ))}
-        {field(type === "LIMIT_IF_TOUCHED" ? "Trigger" : "Stop", (
+        {!isTrail && field(type === "LIMIT_IF_TOUCHED" ? "Trigger" : "Stop", (
           <StepperInput testid="stop" value={stop} onChange={setStop} disabled={!hasStop} placeholder="stop" style={{ ...full, opacity: hasStop ? 1 : 0.4 }} />
         ))}
       </div>
+      {isTrail && <><label>Position % <input aria-label="Trail position percentage" type="number" min="0" max="100" value={amount} onChange={e=>setAmount(e.target.value)}/></label>
+        <TrailEditor value={trail} onChange={c=>setTrail({...c,quoteSide:c.quoteSide??""})}/></>}
       {/* Strip 3 — size · size-by · tif, same equal-width columns as strip 2 */}
-      <div style={{ display: "flex", gap: 6 }}>
+      {!isTrail && <div style={{ display: "flex", gap: 6 }}>
         {field("Size", (
           <input type="number" inputMode="decimal" min={0} data-testid="amount" className="ctl numfield mono" value={amount} onChange={(e) => setAmount(e.target.value)} style={full} />
         ))}
@@ -267,7 +277,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
             {SESSIONS.map((s) => <option key={s} value={s}>{SESSION_LABEL[s]}</option>)}
           </select>
         ))}
-      </div>
+      </div>}
       {(type === "STOP_LIMIT" || type === "LIMIT_IF_TOUCHED") && (
         <div data-testid="conditional-custody-preview" style={{ color: conditionalRoute?.route === "ENGINE_HELD" ? palette.warn : palette.textMuted, fontSize: 11 }}>
           {conditionalRoute?.route === "UNSUPPORTED"
@@ -296,7 +306,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       )}
       {/* Strip 4 — action row: each button submits its side directly */}
       <div style={{ display: "flex", gap: 3 }}>
-        {SIDES.map((s) => (
+        {(isTrail?SIDES.filter(s=>s==="SELL"||s==="COVER"):SIDES).map((s) => (
           <button key={s} type="button" data-testid={`side-${s}`} className={sideTone(s)} onClick={() => submitManual(s)}>{s}</button>
         ))}
       </div>

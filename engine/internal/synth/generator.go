@@ -370,13 +370,13 @@ func (g *Generator) Drain(nowMs int64) []feed.Event {
 			bars = append(bars, inProg)
 		}
 		if len(bars) > 0 {
-			events = append(events, feed.Bars1mEvent{Bars: bars})
+			events = append(events, feed.Bars1mEvent{Bars: bars, Execution: feed.Coverage{Verified: true, Revision: 1}})
 			rt.lastBarMs = nowMs
 		}
 		rt.pendingBars = nil
 
 		if len(rt.pendingTicks) > 0 {
-			events = append(events, feed.TicksEvent{Ticks: rt.pendingTicks})
+			events = append(events, feed.TicksEvent{Ticks: rt.pendingTicks, Execution: feed.Coverage{Verified: true, Revision: 1}})
 			rt.pendingTicks = nil
 		}
 
@@ -388,7 +388,7 @@ func (g *Generator) Drain(nowMs int64) []feed.Event {
 		}
 
 		if rt.dirtyBook && nowMs-rt.lastBookMs >= bookThrottleMs {
-			events = append(events, feed.BookEvent{Book: rt.book.snapshot(code, nowMs)})
+			events = append(events, feed.BookEvent{Book: rt.book.snapshot(code, nowMs), ExecutionVerified: true, ExecutionRevision: 1})
 			rt.dirtyBook = false
 			rt.lastBookMs = nowMs
 		}

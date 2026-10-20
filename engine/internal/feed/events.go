@@ -8,8 +8,9 @@ type Event interface{ isEvent() }
 
 // TicksEvent carries one push (or seed batch) of trade prints, oldest first.
 type TicksEvent struct {
-	Ticks []Tick
-	Seed  bool
+	Ticks     []Tick
+	Seed      bool
+	Execution Coverage
 }
 
 // QuoteEvent replaces the symbol's latest quote.
@@ -20,15 +21,25 @@ type QuoteEvent struct {
 
 // BookEvent replaces the symbol's book.
 type BookEvent struct {
-	Book Book
-	Seed bool
+	Book              Book
+	Seed              bool
+	ExecutionVerified bool // acknowledged current subscription; independent of recording
+	ExecutionRevision uint64
 }
 
 // Bars1mEvent carries authoritative 1m bars (K_1M push or cache seed),
 // oldest first.
 type Bars1mEvent struct {
-	Bars []Bar
-	Seed bool
+	Bars      []Bar
+	Seed      bool
+	Execution Coverage
+}
+
+// Coverage is acknowledged subscription continuity, independent of recording.
+type Coverage struct {
+	Verified bool
+	Revision uint64
+	SinceMs  int64
 }
 
 // ConnUpEvent / ConnDownEvent are feed-connection transitions.
@@ -37,6 +48,7 @@ type Bars1mEvent struct {
 type ConnUpEvent struct{}
 type ConnDownEvent struct{}
 type ResyncedEvent struct{}
+type DataGapEvent struct{}
 
 func (TicksEvent) isEvent()    {}
 func (QuoteEvent) isEvent()    {}
@@ -45,3 +57,4 @@ func (Bars1mEvent) isEvent()   {}
 func (ConnUpEvent) isEvent()   {}
 func (ConnDownEvent) isEvent() {}
 func (ResyncedEvent) isEvent() {}
+func (DataGapEvent) isEvent()  {}

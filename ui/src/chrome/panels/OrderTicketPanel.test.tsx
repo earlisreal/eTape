@@ -33,6 +33,17 @@ const wrap = (p: PanelProps) => render(
 );
 
 describe("OrderTicketPanel", () => {
+  it("submits a configured trail as position percentage without fixed price fields", async () => {
+    const {props,stores,linkGroups,sent}=mkProps();
+    act(()=>{stores.exec.apply({kind:"snapshot",topic:"exec.status" as never,payload:status()});linkGroups.focus("green","US.AAPL");});
+    wrap(props);
+    fireEvent.change(screen.getByTestId("order-type"),{target:{value:"TRAILING_STOP"}});
+    fireEvent.change(screen.getByLabelText("Trail distance"),{target:{value:"0.3"}});
+    fireEvent.click(screen.getByTestId("side-SELL"));
+    await waitFor(()=>expect(sent.some(s=>s.name==="SubmitTrail")).toBe(true));
+    expect(sent.find(s=>s.name==="SubmitTrail")?.args).toMatchObject({positionPct:100,config:{mode:"PRICE",value:.3,quoteSide:"BID"}});
+    expect(screen.queryByTestId("side-BUY")).toBeNull();
+  });
   it("follows the link-group symbol and shows bid/ask", async () => {
     // The header symbol span itself now lives in PanelFrame (symbolBearing:
     // true — see PanelFrame.test.tsx), not in this body-only render, so this
@@ -266,7 +277,7 @@ describe("OrderTicketPanel", () => {
     act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
     wrap(props);
     const typeOptions = Array.from(screen.getByTestId("order-type").querySelectorAll("option")).map((o) => o.textContent);
-    expect(typeOptions).toEqual(["Limit", "Market", "Stop", "Stop Limit", "Limit If Touched"]);
+    expect(typeOptions).toEqual(["Limit", "Market", "Stop", "Stop Limit", "Limit If Touched", "Trailing Stop"]);
     const modeOptions = Array.from(screen.getByTestId("mode").querySelectorAll("option")).map((o) => o.textContent);
     expect(modeOptions).toEqual(["Shares", "Dollars", "Cash %", "Buying Power %", "Position"]);
   });

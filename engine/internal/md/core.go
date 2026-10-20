@@ -19,11 +19,12 @@ import (
 
 // Config sizes the core. Zero values get defaults.
 type Config struct {
-	Recorder     feed.Recorder
-	TapeRing     int         // per-symbol tick ring capacity (default 65536)
-	AnchorSecs   int64       // intraday bucket anchor (default session.AnchorSecsDefault)
-	FinalizedBar func(Bar)   // optional lossless sink, called before UI emission
-	Clock        clock.Clock // optional injected clock for derived time-driven state
+	Recorder      feed.Recorder
+	TapeRing      int         // per-symbol tick ring capacity (default 65536)
+	AnchorSecs    int64       // intraday bucket anchor (default session.AnchorSecsDefault)
+	FinalizedBar  func(Bar)   // optional lossless sink, called before UI emission
+	Clock         clock.Clock // optional injected clock for derived time-driven state
+	ExecutionData bool        // ordered lossless execution evidence, independent of UI consumers
 }
 
 type inMsg interface{ isInMsg() }
@@ -103,6 +104,9 @@ type Core struct {
 	marks             chan Mark
 	eligiblePrints    chan EligiblePrint
 	bookOut           chan feed.Book
+	execution         chan ExecutionEvent
+	executionCtx      context.Context
+	executionState    executionState
 	droppedInbox      atomic.Uint64
 	droppedUpdates    atomic.Uint64
 
@@ -161,13 +165,17 @@ func New(cfg Config) *Core {
 	if cfg.Recorder != nil {
 		c.bars.record = c.record
 	}
+	if cfg.ExecutionData {
+		c.execution = make(chan ExecutionEvent, 8192)
+	}
 	return c
 }
 
-func (c *Core) Updates() <-chan Update               { return c.updates }
-func (c *Core) Marks() <-chan Mark                   { return c.marks }
-func (c *Core) EligiblePrints() <-chan EligiblePrint { return c.eligiblePrints }
-func (c *Core) Books() <-chan feed.Book              { return c.bookOut }
+func (c *Core) Updates() <-chan Update                 { return c.updates }
+func (c *Core) Marks() <-chan Mark                     { return c.marks }
+func (c *Core) EligiblePrints() <-chan EligiblePrint   { return c.eligiblePrints }
+func (c *Core) Books() <-chan feed.Book                { return c.bookOut }
+func (c *Core) ExecutionEvents() <-chan ExecutionEvent { return c.execution }
 
 // DropStats returns a race-safe snapshot of the two lossy MD paths.
 func (c *Core) DropStats() DropStats {
@@ -188,6 +196,10 @@ func (c *Core) DroppedUpdates() uint64 { return c.DropStats().Total() }
 // separate seedCh + liveCh channels.
 func (c *Core) Feed(ev feed.Event) {
 	at := c.cfg.Clock.Now()
+	if c.cfg.ExecutionData {
+		c.inbox <- eventMsg{ev: ev, at: at}
+		return
+	}
 	select {
 	case c.inbox <- eventMsg{ev: ev, at: at}:
 	default:
@@ -204,7 +216,7 @@ func (c *Core) Feed(ev feed.Event) {
 // FeedContext preserves cache seeds under inbox backpressure. Live events keep
 // Feed's drop-on-full behavior; callers can cancel a blocked seed on shutdown.
 func (c *Core) FeedContext(ctx context.Context, ev feed.Event) {
-	if !seedEvent(ev) {
+	if !seedEvent(ev) && !c.cfg.ExecutionData {
 		c.Feed(ev)
 		return
 	}
@@ -287,6 +299,7 @@ func (c *Core) SyncHistory(symbol string) {
 
 // Run is the single writer. It returns when ctx is done.
 func (c *Core) Run(ctx context.Context) error {
+	c.executionCtx = ctx
 	tick := c.cfg.Clock.NewTicker(time.Second)
 	defer tick.Stop()
 	defer func() {
@@ -397,6 +410,7 @@ func (c *Core) applyEventAt(ev feed.Event, at time.Time) {
 		at = c.currentTime()
 	}
 	c.now = at
+	c.executionSource(ev, at)
 	switch e := ev.(type) {
 	case feed.TicksEvent:
 		if e.Seed && len(e.Ticks) > 0 {
@@ -418,7 +432,9 @@ func (c *Core) applyEventAt(ev feed.Event, at time.Time) {
 		stored := c.books.set(e.Book)
 		c.emit(BookUpdate{Book: stored})
 		c.emitBook(stored)
+		c.executionBook(e)
 	case feed.Bars1mEvent:
+		c.executionMinutes(e)
 		if e.Seed && len(e.Bars) > 0 {
 			c.bars.seedHistory1m(c, e.Bars[0].Symbol, e.Bars)
 			c.emit(HistoryReadyUpdate{Symbol: e.Bars[0].Symbol})
@@ -426,16 +442,23 @@ func (c *Core) applyEventAt(ev feed.Event, at time.Time) {
 			c.bars.apply1m(c, e.Bars) // Task 11
 		}
 	case feed.ConnUpEvent:
+		c.executionGap(at)
 		c.advanceTransport(false, at)
 		c.emit(ConnUpdate{Up: true})
 	case feed.ConnDownEvent:
+		c.executionGap(at)
 		c.advanceTransport(true, at)
 		c.eligiblePrints <- EligiblePrint{Gap: true, RecvTsMs: at.UnixMilli()}
 		c.emit(ConnUpdate{Up: false})
 	case feed.ResyncedEvent:
+		c.executionGap(at)
 		c.bars.markGaps() // Task 11: next tick-derived bars carry Gap
 		c.eligiblePrints <- EligiblePrint{Gap: true, RecvTsMs: at.UnixMilli()}
 		c.emit(ResyncedUpdate{})
+	case feed.DataGapEvent:
+		c.executionGap(at)
+		c.bars.markGaps()
+		c.eligiblePrints <- EligiblePrint{Gap: true, RecvTsMs: at.UnixMilli()}
 	}
 }
 
@@ -555,6 +578,9 @@ func (c *Core) applyTicks(e feed.TicksEvent) {
 	}
 	for _, t := range accepted {
 		tape.append(t)
+		if !e.Seed && e.Execution.Verified {
+			c.executionTick(t, e.Execution)
+		}
 		if !e.Seed && t.LastEligible && t.Delivery == feed.DeliveryRealtime && t.Seq > 0 {
 			c.eligiblePrints <- EligiblePrint{Symbol: t.Symbol, Price: t.Price, TsMs: t.TsMs, RecvTsMs: t.RecvTsMs, Seq: t.Seq}
 		}

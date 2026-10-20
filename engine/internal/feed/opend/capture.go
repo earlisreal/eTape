@@ -222,7 +222,7 @@ func DecodeRecording(r feed.Recording) ([]feed.Recording, error) {
 }
 
 func (f Frame) sourceAt(index int) feed.SourceRef {
-	if f.Source.Run == "" {
+	if f.Source.Run == "" && f.Source.Connection == 0 {
 		return feed.SourceRef{}
 	}
 	ref := f.Source
@@ -231,7 +231,7 @@ func (f Frame) sourceAt(index int) feed.SourceRef {
 }
 
 func (f Frame) tickSourceAt(index int) *feed.SourceRef {
-	if f.Source.Run == "" {
+	if f.Source.Run == "" && f.Source.Connection == 0 {
 		return nil
 	}
 	ref := f.sourceAt(index)

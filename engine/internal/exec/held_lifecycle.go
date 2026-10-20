@@ -19,6 +19,20 @@ func (c *Core) shutdownHeldOrders() {
 		if o.Held == nil {
 			continue
 		}
+		if o.Held.Trail != nil {
+			if o.Held.ChildClientID == "" {
+				c.retireTrail(ctx, o, "engine terminated")
+				continue
+			}
+			t := *o.Held.Trail
+			t.Retired = true
+			if err := c.saveTrail(o, t, o.Held.Phase, "engine terminated"); err != nil {
+				c.syslog("exec.trail", err.Error())
+				summary.Unconfirmed++
+				continue
+			}
+			o = c.order(o.ID)
+		}
 		switch o.Held.Phase {
 		case HeldWaiting, HeldArmed:
 			c.changeHeld(o, HeldPaused, "engine shutdown; resume manually", false)
@@ -81,6 +95,8 @@ func (c *Core) freshEligiblePrint(p EligiblePrint) bool {
 
 func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 	if p.Gap {
+		clear(c.trailBooks)
+		clear(c.trailCandles)
 		gapAt := p.RecvTsMs
 		if gapAt <= 0 {
 			gapAt = c.now()
@@ -100,7 +116,7 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 		}
 		return
 	}
-	if p.Symbol == "" || p.Price <= 0 || p.Seq <= 0 || p.RecvTsMs <= 0 {
+	if p.Symbol == "" || !finitePositive(p.Price) || p.Seq <= 0 || p.RecvTsMs <= 0 {
 		return
 	}
 	if p.RecvTsMs <= c.lastPrintGapMs {
@@ -129,7 +145,9 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 			c.expireHeld(o)
 			continue
 		}
-		if HeldOrderTriggered(o.Type, o.Side, p.Price, o.StopPrice) {
+		if o.Held.Trail != nil {
+			c.advanceTrail(ctx, o, p, false)
+		} else if HeldOrderTriggered(o.Type, o.Side, p.Price, o.StopPrice) {
 			c.activateHeld(ctx, o)
 		} else {
 			c.changeHeld(o, HeldArmed, "", false)
@@ -172,7 +190,7 @@ func (c *Core) changeHeld(o Order, phase HeldPhase, reason string, cancelRequest
 func (c *Core) heldGate(req OrderRequest, orderID string) (bool, string) {
 	copyState := *c.state
 	gate := c.gate
-	if o := c.order(orderID); o.RiskEntryID != "" && req.Side == SideSell && reducesPosition(c.state, req) {
+	if o := c.order(orderID); (o.RiskEntryID != "" || o.Held != nil && o.Held.Trail != nil) && (req.Side == SideSell || req.Side == SideCover) && reducesPosition(c.state, req) {
 		copyState.MasterArmed = true
 		gate.Global.MaxDayLoss = 0
 	}
@@ -201,8 +219,26 @@ func (c *Core) heldGate(req OrderRequest, orderID string) (bool, string) {
 }
 
 func (c *Core) activateHeld(ctx context.Context, o Order) {
-	if o.Held == nil || o.Held.Phase == HeldActivating || o.Held.Phase == HeldWorking || o.Held.CancelRequested {
+	if o.Held == nil || !o.Working() || o.Held.Phase == HeldActivating || o.Held.Phase == HeldWorking || o.Held.CancelRequested || o.Held.Trail != nil && (o.Held.Trail.Retired || !o.Held.Trail.Config.Sessions.allows(c.clk.Now())) {
 		return
+	}
+	if o.Held.DeadlineMs <= c.now() {
+		if o.Held.Trail != nil {
+			c.retireTrail(ctx, o, "session deadline reached")
+		} else {
+			c.expireHeld(o)
+		}
+		return
+	}
+	if o.Held.Trail != nil && o.Held.Trail.PositionCycle != "" && o.Held.Trail.PositionCycle != c.trailPositionCycle(o.Venue, o.Symbol) {
+		c.retireTrail(ctx, o, "position cycle changed before submit")
+		return
+	}
+	if o.Held.Trail != nil {
+		if identity := c.heldLiveIdentity[o.Venue]; identity != "" && c.heldLiveAck[o.Venue] != identity {
+			c.rejectTrail(ctx, o, "account acknowledgement changed")
+			return
+		}
 	}
 	if o.RiskEntry != nil {
 		defer func() {
@@ -222,34 +258,29 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 				c.failRisk(ctx, c.riskOwner(current), "protection trigger rejected: "+current.RejectReason)
 			}
 		}()
-		if !entry.RiskEntry.Closing {
-			risk := *entry.RiskEntry
-			risk.Closing = true
-			if err := c.persistRisk(entry, risk); err != nil {
-				c.syslog("exec.risk", err.Error())
-				return
-			}
-			if entry.Working() {
-				c.requestHeldVenueCancel(ctx, c.order(entry.ID), "linked stop triggered; cancel remaining buy")
-			}
+		if !c.beginRiskExit(ctx, entry) {
+			return
 		}
 	}
-	if o.Side == SideSell && !c.state.PositionsReady(o.Venue) {
+	if (o.Side == SideSell || o.Side == SideCover) && !c.state.PositionsReady(o.Venue) {
 		c.changeHeld(o, HeldPaused, "position data unavailable; reconcile and resume manually", false)
 		return
 	}
-	if o.Side == SideSell && c.state.Venue(o.Venue).FlattenPending {
+	if (o.Side == SideSell || o.Side == SideCover) && c.state.Venue(o.Venue).FlattenPending {
 		c.changeHeld(o, HeldPaused, "venue flatten is awaiting authoritative reconciliation; resume manually", false)
 		return
 	}
 	child := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: TypeLimit, TIF: o.TIF, Session: o.Session,
 		Qty: o.LeavesQty, LimitPrice: o.LimitPrice, ClientOrderID: o.ID}
-	if o.DeferredPositionPct > 0 {
+	if o.DeferredPositionPct > 0 && (o.Held.Trail == nil || o.Held.ResolvedQty == 0) {
 		if !c.state.PositionsReady(o.Venue) {
 			c.changeHeld(o, HeldPaused, "position data unavailable; reconcile and resume manually", false)
 			return
 		}
 		long := c.state.VenuePositionShares(o.Venue, o.Symbol)
+		if o.Held.Trail != nil && o.Side == SideCover {
+			long = -long
+		}
 		if long <= 0 {
 			reason := "no open position to size stop-sell"
 			if long < 0 {
@@ -270,7 +301,7 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 			return
 		}
 	}
-	if child.Side == SideSell {
+	if c.requiresReductionGuard(child) {
 		if ok, reason := c.checkSellLeaves(child, child.Qty, o.ID); !ok {
 			if err := c.appendAndFold(OrderRejected{V: o.Venue, OID: o.ID, Reason: "trigger gate: " + reason, Ts: c.now()}, SrcLocal); err != nil {
 				c.syslog("exec.held", "persist sell availability rejection "+o.ID+": "+err.Error())
@@ -315,6 +346,10 @@ func (c *Core) expireHeldOrders(ctx context.Context) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
 		if o.Held == nil || o.Held.DeadlineMs > c.now() {
+			continue
+		}
+		if o.Held.Trail != nil {
+			c.retireTrail(ctx, o, "session deadline reached")
 			continue
 		}
 		if o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed || o.Held.Phase == HeldPaused {
@@ -381,10 +416,10 @@ func (c *Core) pauseHeldVenue(venue VenueID, reason string) {
 	}
 }
 
-func (c *Core) pauseHeldSellVenue(venue VenueID, reason string) {
+func (c *Core) pauseHeldReducingVenue(venue VenueID, reason string) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
-		if o.Venue == venue && o.Side == SideSell && o.Held != nil &&
+		if o.Venue == venue && c.requiresReductionGuard(OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side}) && o.Held != nil &&
 			(o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
 			c.changeHeld(o, HeldPaused, reason, false)
 		}
@@ -394,7 +429,7 @@ func (c *Core) pauseHeldSellVenue(venue VenueID, reason string) {
 func (c *Core) disarmHeld(ctx context.Context, venue VenueID, cancelPretrigger bool) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
-		if !cancelPretrigger && (o.RiskEntryID != "" || o.RiskEntry != nil) {
+		if !cancelPretrigger && (o.RiskEntryID != "" || o.RiskEntry != nil || o.Held != nil && o.Held.Trail != nil) {
 			continue
 		}
 		if venue != "" && o.Venue != venue {
@@ -404,8 +439,12 @@ func (c *Core) disarmHeld(ctx context.Context, venue VenueID, cancelPretrigger b
 			continue
 		}
 		switch o.Held.Phase {
-		case HeldWaiting, HeldArmed, HeldPaused:
+		case HeldWaiting, HeldArmed, HeldPaused, HeldWaitingQuote:
 			if cancelPretrigger {
+				if o.Held.Trail != nil {
+					c.retireTrail(ctx, o, "protection canceled")
+					continue
+				}
 				if err := c.appendAndFold(OrderCanceled{V: o.Venue, OID: o.ID, Ts: c.now()}, SrcLocal); err == nil {
 					c.releaseHeld(o.ID)
 				}
@@ -420,19 +459,22 @@ func (c *Core) disarmHeld(ctx context.Context, venue VenueID, cancelPretrigger b
 
 func (c *Core) handleResumeHeld(ctx context.Context, cm ResumeHeldOrder) CmdAck {
 	o := c.order(cm.OrderID)
-	if o.ID == "" || o.Venue != cm.Venue || o.Held == nil {
+	if o.ID == "" || o.Venue != cm.Venue || o.Held == nil || !o.Working() {
 		return CmdAck{Accepted: false, Reason: "unknown held order", OrderID: cm.OrderID}
+	}
+	if o.Held.Trail != nil && (o.Held.Trail.Retired || !o.Working()) {
+		return CmdAck{Reason: "trail permanently retired", OrderID: o.ID}
 	}
 	if o.Held.Phase != HeldPaused {
 		return CmdAck{Accepted: false, Reason: "held order is not paused", OrderID: o.ID}
 	}
-	if !c.state.MasterArmed && o.RiskEntryID == "" {
+	if !c.state.MasterArmed && o.RiskEntryID == "" && o.Held.Trail == nil {
 		return CmdAck{Accepted: false, Reason: "master disarmed", OrderID: o.ID}
 	}
-	if o.Side == SideSell && c.state.Venue(o.Venue).FlattenPending {
+	if (o.Side == SideSell || o.Side == SideCover) && c.state.Venue(o.Venue).FlattenPending {
 		return CmdAck{Accepted: false, Reason: "venue flatten is awaiting authoritative reconciliation", OrderID: o.ID}
 	}
-	if o.Side == SideSell && !c.state.PositionsReady(o.Venue) {
+	if (o.Side == SideSell || o.Side == SideCover) && !c.state.PositionsReady(o.Venue) {
 		return CmdAck{Accepted: false, Reason: "position data unavailable; reconcile the venue before resuming", OrderID: o.ID}
 	}
 	if !c.printHealthy {
@@ -445,7 +487,7 @@ func (c *Core) handleResumeHeld(ctx context.Context, cm ResumeHeldOrder) CmdAck 
 	if c.heldDemand == nil {
 		return CmdAck{Accepted: false, Reason: "execution ticker demand unavailable", OrderID: o.ID}
 	}
-	if err := c.heldDemand.Acquire(ctx, o.ID, o.Symbol); err != nil {
+	if err := c.acquireHeldDemand(ctx, o); err != nil {
 		return CmdAck{Accepted: false, Reason: "execution ticker unavailable: " + err.Error(), OrderID: o.ID}
 	}
 	h := *o.Held
@@ -453,6 +495,18 @@ func (c *Core) handleResumeHeld(ctx context.Context, cm ResumeHeldOrder) CmdAck 
 	if err := c.appendAndFold(HeldOrderChanged{V: o.Venue, OID: o.ID, Held: h, Ts: c.now()}, SrcLocal); err != nil {
 		c.heldDemand.Release(o.ID)
 		return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: o.ID}
+	}
+	if o.Held.Trail != nil {
+		if o.Held.Trail.Triggered {
+			if o.Held.Trail.Config.Pricing == "QUOTE" {
+				c.changeHeld(c.order(o.ID), HeldWaitingQuote, "waiting for execution quote", false)
+				c.activateTrailQuote(ctx, c.order(o.ID))
+			} else {
+				c.activateHeld(ctx, c.order(o.ID))
+			}
+		} else if p, ok := c.lastEligible[o.Symbol]; ok && c.freshEligiblePrint(p) {
+			c.advanceTrail(ctx, c.order(o.ID), p, true)
+		}
 	}
 	return CmdAck{Accepted: true, OrderID: o.ID}
 }

@@ -332,6 +332,15 @@ func (f *OpenDFeed) WaitTickerActive(ctx context.Context, symbol string) error {
 	return f.sub.WaitActive(ctx, subKey{Symbol: symbol, Sub: feed.SubTicker})
 }
 
+func (f *OpenDFeed) WaitExecutionActive(ctx context.Context, symbol string, subs []feed.SubType) error {
+	for _, sub := range subs {
+		if err := f.sub.WaitActive(ctx, subKey{Symbol: symbol, Sub: sub}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Run blocks until ctx is done, supervising the pump, state, seed, and
 // subscription-manager goroutines. The caller runs Client.Run separately.
 func (f *OpenDFeed) Run(ctx context.Context) error {
@@ -350,12 +359,36 @@ func (f *OpenDFeed) Run(ctx context.Context) error {
 }
 
 func (f *OpenDFeed) emit(ctx context.Context, ev feed.Event) {
+	if ticks, ok := ev.(feed.TicksEvent); ok && len(ticks.Ticks) > 0 {
+		ticks.Execution = f.sub.ExecutionCoverage(ticks.Ticks[0].Symbol, feed.SubTicker)
+		ticks.Execution.Verified = ticks.Execution.Verified && ticks.Ticks[0].SourceRef().Connection == f.cli.captureGeneration.Load()
+		ev = ticks
+	}
+	if bars, ok := ev.(feed.Bars1mEvent); ok && len(bars.Bars) > 0 {
+		bars.Execution = f.sub.ExecutionCoverage(bars.Bars[0].Symbol, feed.SubKL1m)
+		bars.Execution.Verified = bars.Execution.Verified && bars.Bars[0].Source.Connection == f.cli.captureGeneration.Load()
+		ev = bars
+	}
+	if book, ok := ev.(feed.BookEvent); ok {
+		coverage := f.sub.ExecutionCoverage(book.Book.Symbol, feed.SubBook)
+		book.ExecutionVerified = coverage.Verified && f.cli != nil && book.Book.Source.Connection == f.cli.captureGeneration.Load()
+		book.ExecutionRevision = coverage.Revision
+		ev = book
+	}
 	select {
 	case f.events <- ev:
 		f.recordRoute(ev, "delivered_to_feed")
 	case <-ctx.Done():
 		f.recordRoute(ev, "canceled_before_feed_delivery")
 	}
+}
+
+func (f *OpenDFeed) TrailBookCoverage(symbol string) uint64 {
+	coverage := f.sub.ExecutionCoverage(symbol, feed.SubBook)
+	if !coverage.Verified {
+		return 0
+	}
+	return coverage.Revision
 }
 
 func (f *OpenDFeed) recordRoute(ev feed.Event, disposition string) {
@@ -385,6 +418,9 @@ func (f *OpenDFeed) pump(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case frame := <-f.cli.Pushes():
+			if frame.Source.Connection != 0 && frame.Source.Connection != f.cli.captureGeneration.Load() {
+				continue
+			}
 			evs, err := DecodePush(frame)
 			if err != nil {
 				if f.cli.opt.Recorder != nil {
@@ -397,6 +433,7 @@ func (f *OpenDFeed) pump(ctx context.Context) {
 				if n%100 == 1 { // log the 1st, 101st, ... — visible, never spammy
 					slog.Warn("push decode failure", "protoID", frame.ProtoID, "total", n, "err", err)
 				}
+				f.emit(ctx, feed.DataGapEvent{})
 				continue
 			}
 			for _, ev := range evs {

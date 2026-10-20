@@ -227,12 +227,37 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		return ack, false
 	}
 	switch name {
+	case "SubmitTrail":
+		var a wsmsg.SubmitTrailArgs
+		if json.Unmarshal(args, &a) != nil {
+			return blocked("bad args"), false
+		}
+		if a.Side != wsmsg.SideSell && a.Side != wsmsg.SideCover {
+			return blocked("trail requires SELL or COVER"), false
+		}
+		return ackFromCmd(cd.ex.Do(exec.SubmitTrail{Venue: exec.VenueID(a.Venue), Symbol: a.Symbol, Side: sideFromWire(a.Side), PositionPct: a.PositionPct, Config: trailConfigFromWire(a.Config)})), false
+	case "ConvertProtectionToTrail", "EditTrail":
+		var a wsmsg.ConfigureTrailArgs
+		if json.Unmarshal(args, &a) != nil {
+			return blocked("bad args"), false
+		}
+		if name == "ConvertProtectionToTrail" {
+			return ackFromCmd(cd.ex.Do(exec.ConvertProtectionToTrail{Venue: exec.VenueID(a.Venue), OrderID: a.OrderID, ExpectedHeldPhase: exec.HeldPhase(a.ExpectedHeldPhase), ExpectedStop: a.ExpectedStop, Config: trailConfigFromWire(a.Config)})), false
+		}
+		return ackFromCmd(cd.ex.Do(exec.EditTrail{Venue: exec.VenueID(a.Venue), OrderID: a.OrderID, ExpectedHeldPhase: exec.HeldPhase(a.ExpectedHeldPhase), ExpectedStop: a.ExpectedStop, Config: trailConfigFromWire(a.Config)})), false
 	case "SubmitRiskEntry":
 		var a wsmsg.SubmitRiskEntryArgs
 		if json.Unmarshal(args, &a) != nil {
 			return blocked("bad args"), false
 		}
 		return ackFromCmd(cd.ex.Do(exec.SubmitRiskEntry{
+			Protection: func() *exec.TrailConfig {
+				if a.Protection == nil {
+					return nil
+				}
+				c := trailConfigFromWire(*a.Protection)
+				return &c
+			}(),
 			Venue: exec.VenueID(a.Venue), Symbol: a.Symbol, BuyStop: a.BuyStop, SellStop: a.SellStop,
 			Mode: a.Mode, Value: a.Value, MaxQty: a.MaxQty,
 			BuyCushion:  exec.LimitCushion{Value: a.BuyCushion.Value, Unit: a.BuyCushion.Unit},
@@ -709,6 +734,8 @@ func orderTypeFromWire(t wsmsg.OrderType) exec.OrderType {
 		return exec.TypeStopLimit
 	case wsmsg.OrderLimitIfTouched:
 		return exec.TypeLimitIfTouched
+	case wsmsg.OrderTrailingStop:
+		return exec.TypeTrailingStop
 	default:
 		return exec.TypeMarket
 	}

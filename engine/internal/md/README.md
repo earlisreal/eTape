@@ -1,5 +1,29 @@
 # Market Data Core
 
+## Execution evidence
+
+With `ExecutionData` enabled, feed ingress and a dedicated execution event lane
+apply backpressure. Eligible live prints, verified BBO replacements and completed
+candles share that lane; chart/display channels remain independent. Candle
+updates precede the live print that observes completion, and execution rejects
+an automatic update against a causally earlier cached print.
+
+OpenD subscription acknowledgements carry coverage revisions independently of
+optional recording. Connection changes, transport losses and coverage changes
+invalidate readiness. Book evidence must match the current acknowledged lease;
+an unchanged quote remains usable during healthy continuity. Basic Quote
+timestamps do not establish execution BBO readiness.
+
+Execution candles use continuously observed real 10-second ranges and live
+authoritative one-minute K-lines; contiguous verified minutes form larger
+intraday references only after provider minute rollover proves completion.
+Seeds, display synthesis, volume-only or incomplete ranges
+do not establish execution references. After a new subscription or gap, Candle
+Trail may wait for a fully observed qualifying candle. Once used, a reference's
+identity and boundary snapshot cannot be rewritten by corrections or reloads.
+
+## Market-data projections
+
 An optional recorder observes existing MD decisions: dedup rejection, stamped
 eligibility, independent 10s/shadow lateness, sparse bucket basis/finalization
 and actual K_1M clamps. Evidence includes source references and engine-history

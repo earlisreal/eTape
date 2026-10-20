@@ -46,6 +46,15 @@ function placeRiskPair(host: HTMLElement, gesture: "drag" | "click" = "drag") {
         fireEvent.pointerUp(window, { pointerId: 1 });
     }
 }
+
+it("submits trailing protection while retaining both chart prices and reviewed sizing",async()=>{
+  const preset:RiskEntryTemplate={...template,protection:{mode:"PRICE",value:.3,sessions:{pre:true,rth:true,post:true},pricing:"CUSHION",cushion:template.sellCushion,offset:{value:0,unit:"$"},buffer:{value:0,unit:"$"}}};
+  const {host,sendCommand}=mount(true,preset);
+  initiateChartRiskEntry(preset);
+  await waitFor(()=>expect(host.querySelector("[data-risk-status]")).not.toBeNull());
+  placeRiskPair(host);
+  await waitFor(()=>expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry",expect.objectContaining({buyStop:10,sellStop:9.8,maxQty:500,protection:expect.objectContaining({mode:"PRICE",value:.3})})));
+});
 beforeEach(() => {
     cleanup();
     document.body.replaceChildren();

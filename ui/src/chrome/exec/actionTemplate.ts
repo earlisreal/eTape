@@ -1,9 +1,10 @@
 // Action templates: one saved recipe, two triggers (a hotkey binding and a ticket
 // preset button), edited in one settings screen and stored engine-side under the
 // config key `orderConfig`. (ui-design §Order entry & hotkeys.)
-import type { Side, OrderType, TIF, OrderSession, VenueID, LimitCushion } from "../../wire/contract";
+import type { Side, OrderType, TIF, OrderSession, VenueID, LimitCushion, TrailConfig } from "../../wire/contract";
 import type { SizingSpec } from "./sizing";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
+import {newTrailConfig,newConversionConfig} from "./trailing";
 
 export type DeckColor = "auto" | "green" | "red" | "bronze" | "neutral" | "danger";
 export type ChartBinding = "Ctrl" | "Alt" | "Shift" | "Ctrl+Alt" | "Ctrl+Shift" | "Alt+Shift";
@@ -15,6 +16,7 @@ export interface HotkeyDeckConfig {
 }
 
 export interface PlaceOrderTemplate {
+	trail?: TrailConfig;
   kind: "place";
   id: string; label: string;
   side: Side; type: OrderType; tif: TIF;
@@ -29,9 +31,10 @@ export interface PlaceOrderTemplate {
   deck?: boolean;   // absent => hotkey-only, not shown in deck
   deckColor?: DeckColor;   // absent => "auto"
 }
-export type ManagementAction = "CancelLast" | "CancelAllFocused" | "CancelAllEverything" | "KillSwitch";
-export interface ManagementTemplate { kind: "manage"; id: string; label: string; action: ManagementAction; hotkey?: string; deck?: boolean; deckColor?: DeckColor }
+export type ManagementAction = "CancelLast" | "CancelAllFocused" | "CancelAllEverything" | "KillSwitch" | "ConvertProtectionToTrail";
+export interface ManagementTemplate { kind: "manage"; id: string; label: string; action: ManagementAction; trail?:TrailConfig; hotkey?: string; deck?: boolean; deckColor?: DeckColor }
 export interface RiskEntryTemplate {
+	protection?: TrailConfig | undefined;
   kind: "risk"; id: string; label: string; hotkey?: string; deck?: boolean; deckColor?: DeckColor;
   mode: "Dollar" | "CashPct" | "BuyingPowerPct"; value: number;
   buyCushion: LimitCushion; sellCushion: LimitCushion;
@@ -79,16 +82,20 @@ export const DEFAULT_ORDER_CONFIG: OrderConfig = { templates: DEFAULT_TEMPLATES,
 function normalizeTemplate(t: ActionTemplate): ActionTemplate {
   if (t.kind === "risk") {
     const cushion = (c: LimitCushion | undefined): LimitCushion => ({value: Number.isFinite(c?.value) ? Math.max(0,c!.value) : 0, unit: c?.unit === "%" ? "%" : "$"});
+    const sellCushion=cushion(t.sellCushion);
     return {...t, mode: t.mode === "CashPct" || t.mode === "BuyingPowerPct" ? t.mode : "Dollar",
       value: Number.isFinite(t.value) ? Math.max(0, t.mode === "Dollar" ? t.value : Math.min(100,t.value)) : 0,
-      buyCushion: cushion(t.buyCushion), sellCushion: cushion(t.sellCushion)};
+      buyCushion: cushion(t.buyCushion), sellCushion,
+      ...(t.protection?{protection:normalizeTrail(t.protection,{...newTrailConfig(),pricing:"CUSHION",cushion:sellCushion})}:{})};
   }
+  if(t.kind==="manage" && t.action==="ConvertProtectionToTrail")return {...t,trail:normalizeTrail(t.trail,newConversionConfig())};
   if (t.kind !== "place") return t;
   let sizing = t.sizing;
   if (sizing.mode === "PositionFraction" && sizing.pct === undefined) {
     sizing = { ...sizing, pct: sizing.fraction === "half" ? 50 : 100 };
   }
   const base = { ...t };
+  if(t.type==="TRAILING_STOP")base.trail=normalizeTrail(t.trail,newTrailConfig(t.side==="COVER"?"COVER":"SELL"));
   delete base.chartBinding;
   delete base.limitCushion;
   delete base.limitCushionUnit;
@@ -101,6 +108,20 @@ function normalizeTemplate(t: ActionTemplate): ActionTemplate {
     limitCushion: cushion, limitCushionUnit: t.limitCushionUnit === "%" ? "%" : "$",
     ...(binding ? { chartBinding: binding } : {}),
   };
+}
+
+function normalizeTrail(value:unknown,defaults:TrailConfig):TrailConfig {
+  const raw=isRecord(value)?value:{};
+  const text=(key:string,fallback:string)=>typeof raw[key]==="string"?raw[key]:fallback;
+  const amount=(key:string):LimitCushion=>{
+    const input=isRecord(raw[key])?raw[key]:{};
+    const fallback=key==="cushion"?defaults.cushion:{value:0,unit:"$"};
+    return {value:typeof input.value==="number"&&Number.isFinite(input.value)?input.value:fallback.value,unit:typeof input.unit==="string"?input.unit:fallback.unit};
+  };
+  const sessions=isRecord(raw.sessions)?{pre:raw.sessions.pre===true,rth:raw.sessions.rth===true,post:raw.sessions.post===true}:defaults.sessions;
+  return {mode:text("mode",defaults.mode),value:typeof raw.value==="number"&&Number.isFinite(raw.value)?raw.value:0,
+    pricing:text("pricing",defaults.pricing),quoteSide:text("quoteSide",defaults.quoteSide??"BID"),timeframe:text("timeframe",defaults.timeframe??"1m"),
+    sessions,cushion:amount("cushion"),buffer:amount("buffer"),offset:amount("offset")};
 }
 
 export function normalizeChartBinding(value: unknown): ChartBinding | undefined {

@@ -39,14 +39,15 @@ export function chartOrderMarkers(orders: Iterable<Order>, venue: string, symbol
       out.push({ order, price: order.limitPrice, kind: "limit", draggable: !order.held?.cancelRequested && !actionPending, phase: order.held?.phase ?? "" });
       continue;
     }
-    if (order.type !== "STOP_LIMIT" && order.type !== "LIMIT_IF_TOUCHED") continue;
+    if (order.type !== "STOP_LIMIT" && order.type !== "LIMIT_IF_TOUCHED" && order.type!=="TRAILING_STOP") continue;
     const held = order.held;
     const childExists = !!held?.childClientId || held?.phase === "WORKING" || held?.phase === "ACTIVATING";
+    if(held?.trail?.retired && !childExists)continue;
     const paused = held?.phase === "PAUSED";
     const price = childExists ? order.limitPrice : order.stopPrice;
     out.push({
       order, price, kind: childExists ? "limit" : order.type === "LIMIT_IF_TOUCHED" ? "limit-if-touched" : "stop-limit",
-      draggable: !paused && !held?.cancelRequested && order.action?.phase !== "REQUESTED" && order.action?.phase !== "UNKNOWN" && (held?.phase === "WORKING" || held?.phase === "WAITING" || held?.phase === "ARMED"),
+      draggable: (!held?.trail || childExists) && !paused && !held?.cancelRequested && order.action?.phase !== "REQUESTED" && order.action?.phase !== "UNKNOWN" && (held?.phase === "WORKING" || held?.phase === "WAITING" || held?.phase === "ARMED"),
       phase: held?.phase ?? "NATIVE",
     });
   }

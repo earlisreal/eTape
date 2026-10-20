@@ -44,6 +44,13 @@ trigger print. Immediate activation rechecks print freshness after subscription.
 See the [execution core guide](internal/exec/README.md) for partial/late fills,
 disarm, cancellation, recovery and phase-checked chart amendments.
 
+Engine-held trails add price/percentage watermarks and verified completed
+intraday candles to the same durable lifecycle. SELL/COVER share commitments
+include quote-wait reservations. Position-cycle changes and engine termination
+retire trailing intent; recovery reconciles children without reposting. See
+[trailing stops](internal/exec/README.md#trailing-stops) and the
+[execution data lane](internal/md/README.md#execution-evidence).
+
 ## Price alerts
 
 Saved price alerts run independently of open charts, browser windows, trading

@@ -29,6 +29,8 @@ import {
 import { normalizeCombo } from "./hotkeys";
 import { Keycap } from "./Keycap";
 import { StepField } from "./StepField";
+import {TrailEditor} from "./TrailEditor";
+import {newTrailConfig,newConversionConfig} from "./trailing";
 
 interface PendingAcknowledgements {
   keys: Set<string>;
@@ -57,14 +59,14 @@ function publishPendingAcknowledgements(exec: ExecStore, keys: Set<string>): voi
 }
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
-const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT", "LIMIT_IF_TOUCHED"];
+const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT", "LIMIT_IF_TOUCHED", "TRAILING_STOP"];
 const TIFS: TIF[] = ["DAY", "GTC", "IOC", "FOK"];
 const SESSIONS: OrderSession[] = ["AUTO", "RTH", "EXTENDED", "OVERNIGHT"];
 const SESSION_LABEL: Record<OrderSession, string> = { AUTO: "Auto", RTH: "Regular", EXTENDED: "Extended", OVERNIGHT: "Overnight" };
 const SOURCES: PriceSource[] = ["Bid", "Ask", "Last", "Mid"];
 const MODES: SizingMode[] = ["Dollar", "CashPct", "BuyingPowerPct", "Shares", "PositionFraction"];
 const MODE_LABEL: Record<SizingMode, string> = { Dollar: "Dollar", CashPct: "Cash %", BuyingPowerPct: "BP %", Shares: "Shares", PositionFraction: "Pos %" };
-const MANAGE_ACTIONS: ManagementAction[] = ["CancelLast", "CancelAllFocused", "CancelAllEverything", "KillSwitch"];
+const MANAGE_ACTIONS: ManagementAction[] = ["CancelLast", "CancelAllFocused", "CancelAllEverything", "KillSwitch", "ConvertProtectionToTrail"];
 
 const OFFSET_STEP = 0.05;
 const CUSHION_STEP = 0.05;
@@ -356,6 +358,9 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
 
       {t.kind === "risk" ? (
         <div style={fieldRow}>
+          <label style={fieldGroup}>Protection mode <select aria-label="Protection mode" className="field" value={t.protection?.mode??"FIXED"} onChange={e=>patch(t.id,{protection:e.target.value==="FIXED"?undefined:{...(t.protection??newTrailConfig()),mode:e.target.value,pricing:"CUSHION",cushion:t.sellCushion}})}>
+            <option value="FIXED">Fixed</option><option value="PRICE">Trail Price</option><option value="PERCENT">Trail Percent</option><option value="CANDLE">Candle Trail</option></select></label>
+          {t.protection && <TrailEditor value={t.protection} lockMode lockSessions cushionOnly onChange={c=>patch(t.id,{protection:c,sellCushion:c.cushion})}/>}
           <label style={fieldGroup}>Risk budget
             <select aria-label={`risk-mode-${t.id}`} className="field" value={t.mode}
               onChange={(e) => patch(t.id,{mode:e.target.value as RiskEntryTemplate["mode"]})}>
@@ -378,6 +383,13 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
           </label>)}
           <small>Loss budget, excluding fees and execution risk. Whole shares; DAY until market data close. Both triggers are held by eTape.</small>
         </div>
+      ) : t.kind === "place" && t.type==="TRAILING_STOP" ? (
+        <div style={fieldRow}>
+          <label>Type <select aria-label={`type-${t.id}`} value={t.type} onChange={e=>patch(t.id,{type:e.target.value as OrderType})}>{TYPES.map(x=><option key={x}>{x}</option>)}</select></label>
+          <label>Side <select aria-label={`side-${t.id}`} value={t.side} onChange={e=>patch(t.id,{side:e.target.value as Side})}><option>SELL</option><option>COVER</option></select></label>
+          <label>Position % <input aria-label={`trail-pct-${t.id}`} type="number" min="0" max="100" value={t.sizing.pct??100} onChange={e=>patch(t.id,{sizing:{mode:"PositionFraction",pct:Number(e.target.value)}})}/></label>
+          <TrailEditor value={t.trail??newTrailConfig()} onChange={c=>patch(t.id,{trail:c})}/>
+        </div>
       ) : t.kind === "place" ? (
         <>
           <div style={fieldRow}>
@@ -391,6 +403,7 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
               <span style={fieldLabel}>Type</span>
               <select aria-label={`type-${t.id}`} className="field" value={t.type} onChange={(e) => {
                 const type = e.target.value as OrderType;
+                if(type==="TRAILING_STOP"){patch(t.id,{type,side:t.side==="COVER"?"COVER":"SELL",sizing:{mode:"PositionFraction",pct:100},trail:newTrailConfig(t.side==="COVER"?"COVER":"SELL")});return;}
                 if (type !== "STOP_LIMIT" && type !== "LIMIT_IF_TOUCHED") clearRawEdit(`${t.id}:cushion`);
                 patch(t.id, type === "STOP_LIMIT" || type === "LIMIT_IF_TOUCHED"
                   ? { type, limitCushion: t.limitCushion ?? 0, limitCushionUnit: t.limitCushionUnit ?? "$" }
@@ -523,10 +536,11 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
         <div style={fieldRow}>
           <div style={fieldGroup}>
             <span style={fieldLabel}>Action</span>
-            <select aria-label={`action-${t.id}`} className="field" value={t.action} onChange={(e) => patch(t.id, { action: e.target.value as ManagementAction })} style={{ width: 200 }}>
+            <select aria-label={`action-${t.id}`} className="field" value={t.action} onChange={(e) => patch(t.id, { action: e.target.value as ManagementAction,...(e.target.value==="ConvertProtectionToTrail"?{trail:t.trail??newConversionConfig()}:{}) })} style={{ width: 200 }}>
               {MANAGE_ACTIONS.map((a) => <option key={a}>{a}</option>)}
             </select>
           </div>
+          {t.action==="ConvertProtectionToTrail" && <TrailEditor value={t.trail??newConversionConfig()} lockSessions inheritCushion onChange={c=>patch(t.id,{trail:c})}/>}
         </div>
       )}
 

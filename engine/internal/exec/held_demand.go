@@ -8,3 +8,11 @@ type HeldDemandController interface {
 	Acquire(ctx context.Context, orderID, symbol string) error
 	Release(orderID string)
 }
+
+type TrailDemandController interface {
+	AcquireTrail(ctx context.Context, orderID, symbol string, config TrailConfig) error
+}
+
+// BookCoverageController verifies that cached evidence belongs to the currently
+// acknowledged lease. Zero means unavailable, even if a cached book exists.
+type BookCoverageController interface{ TrailBookCoverage(symbol string) uint64 }

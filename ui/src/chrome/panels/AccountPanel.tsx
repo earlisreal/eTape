@@ -85,6 +85,7 @@ function chipVariant(ds: DisplayStatus): ChipVariant | null {
 }
 
 function litCustodyLabel(order: Pick<Order, "type" | "held" | "action">, todayMs: number): string | null {
+  if(order.held?.trail)return `eTape ${order.held.trail.config.mode} trail · ${order.held.phase}${order.held.pausedReason?` · ${order.held.pausedReason}`:""} · run-bound · expires ${formatEtDateTime(order.held.deadlineMs,todayMs)} ET`;
   if (order.type !== "LIMIT_IF_TOUCHED" || !order.held) return null;
   const action = order.action ? `${order.action.kind} ${order.action.phase}` : "idle";
   const deadline = order.held.deadlineMs ? ` · expires ${formatEtDateTime(order.held.deadlineMs, todayMs)} ET` : "";
@@ -99,8 +100,8 @@ const ORDER_PRICE_COLUMNS: OrderColumn[] = [
   { col: "type", label: "TYPE", title: "Order type", defaultWidth: 68, minWidth: 64, align: "left", sortable: true },
 ];
 const ORDER_PRICE_ACCESSORS: Record<string, (o: Pick<Order, "type" | "limitPrice" | "stopPrice">) => number | string | null> = {
-  price: (o) => o.type === "LIMIT" || o.type === "STOP_LIMIT" || o.type === "LIMIT_IF_TOUCHED" ? o.limitPrice : null,
-  stopPrice: (o) => o.type === "STOP" || o.type === "STOP_LIMIT" || o.type === "LIMIT_IF_TOUCHED" ? o.stopPrice : null,
+  price: (o) => o.type === "LIMIT" || o.type === "STOP_LIMIT" || o.type === "LIMIT_IF_TOUCHED" || o.type==="TRAILING_STOP" && o.limitPrice>0 ? o.limitPrice : null,
+  stopPrice: (o) => o.type === "STOP" || o.type === "STOP_LIMIT" || o.type === "LIMIT_IF_TOUCHED" || o.type==="TRAILING_STOP" && o.stopPrice>0 ? o.stopPrice : null,
   type: (o) => abbrevType(o.type),
 };
 const ORDERS_COLUMNS: OrderColumn[] = [
@@ -275,7 +276,7 @@ function OrdersTable({
               <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}
                 {custody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{custody}</div>}</td>
-              <td data-column="actions">{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
+              <td data-column="actions">{order.held?.trail && !order.held.trail.retired && order.held.phase==="PAUSED" && <button type="button" aria-label="Resume trail" onClick={()=>void oc.resumeHeld(order.venue,order.id)}>Resume</button>}{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
                 style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton> : null}</td>
             </tr>;
           })}</tbody>

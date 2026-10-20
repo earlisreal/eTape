@@ -69,6 +69,7 @@ const (
 	OrderStop           OrderType = "STOP"
 	OrderStopLimit      OrderType = "STOP_LIMIT"
 	OrderLimitIfTouched OrderType = "LIMIT_IF_TOUCHED"
+	OrderTrailingStop   OrderType = "TRAILING_STOP"
 )
 
 type TIF string

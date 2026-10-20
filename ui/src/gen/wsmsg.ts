@@ -21,7 +21,7 @@ export type Topic =
 
 // ---- wire enums (mirrors wsmsg.go's typed string consts) ----
 export type Side = "BUY" | "SELL" | "SHORT" | "COVER";
-export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT" | "LIMIT_IF_TOUCHED";
+export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT" | "LIMIT_IF_TOUCHED" | "TRAILING_STOP";
 export type TIF = "DAY" | "GTC" | "IOC" | "FOK";
 export type OrderSession = "AUTO" | "RTH" | "EXTENDED" | "OVERNIGHT";
 export type OrderStatus =
@@ -214,6 +214,7 @@ export interface LimitCushion {
   unit: string;
 }
 export interface RiskEntry {
+  protection?: TrailConfig;
   stopId: string;
   budget: number /* float64 */;
   mode: string;
@@ -224,6 +225,7 @@ export interface RiskEntry {
   failure?: string;
 }
 export interface SubmitRiskEntryArgs {
+  protection?: TrailConfig;
   venue: string;
   symbol: string;
   buyStop: number /* float64 */;
@@ -235,6 +237,7 @@ export interface SubmitRiskEntryArgs {
   sellCushion: LimitCushion;
 }
 export interface HeldOrder {
+  trail?: TrailState;
   phase: string;
   deadlineMs: number /* int64 */;
   childClientId?: string;
@@ -242,6 +245,56 @@ export interface HeldOrder {
   pausedReason?: string;
   cancelRequested?: boolean;
   resolvedQty?: number /* float64 */;
+}
+export interface TrailSessions {
+  pre: boolean;
+  rth: boolean;
+  post: boolean;
+}
+export interface TrailConfig {
+  mode: string;
+  value: number /* float64 */;
+  sessions: TrailSessions;
+  pricing: string;
+  cushion: LimitCushion;
+  quoteSide?: string;
+  offset: LimitCushion;
+  timeframe?: string;
+  buffer: LimitCushion;
+}
+export interface TrailCandle {
+  symbol: string;
+  timeframe: string;
+  startMs: number /* int64 */;
+  endMs: number /* int64 */;
+  low: number /* float64 */;
+  high: number /* float64 */;
+}
+export interface TrailState {
+  positionCycle?: string;
+  floor?: number /* float64 */;
+  config: TrailConfig;
+  watermark: number /* float64 */;
+  stop: number /* float64 */;
+  limit: number /* float64 */;
+  triggered?: boolean;
+  retired?: boolean;
+  reservedQty?: number /* float64 */;
+  reference?: TrailCandle;
+}
+export interface SubmitTrailArgs {
+  venue: string;
+  symbol: string;
+  side: Side;
+  positionPct: number /* float64 */;
+  config: TrailConfig;
+}
+export interface ConfigureTrailArgs {
+  venue: string;
+  orderId: string;
+  expectedHeldPhase: string;
+  expectedStop: number /* float64 */;
+  config: TrailConfig;
 }
 export interface OrderAction {
   kind: string;

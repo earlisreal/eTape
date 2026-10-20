@@ -5,6 +5,13 @@ import { isWorking } from "../wire/orderStatus";
 export interface OptimisticOrder { args: SubmitOrderArgs; id: string; createdMs: number }
 export interface OrderView { order: Order; optimistic: boolean }
 
+function trailProgress(previous:Order|undefined,next:Order):boolean {
+  const a=previous?.held?.trail,b=next.held?.trail;
+  if(!previous || !a || !b || a.triggered!==b.triggered || a.retired!==b.retired || a.reservedQty!==b.reservedQty || JSON.stringify(a.config)!==JSON.stringify(b.config))return false;
+  const stable={...next,stopPrice:previous.stopPrice,limitPrice:previous.limitPrice,updatedMs:previous.updatedMs,held:{...next.held,trail:a}};
+  return JSON.stringify(stable)===JSON.stringify(previous);
+}
+
 function riskActivationUnknown(order: Order | undefined): boolean {
   // shortcut: engine reason text identifies activation uncertainty; use a typed outcome if wording changes.
   return !!order?.riskEntry && isWorking(order.status) && order.held?.phase === "UNKNOWN"
@@ -32,6 +39,24 @@ function synthOptimistic(o: OptimisticOrder): Order {
 }
 
 export class ExecStore extends ReactStore<ExecState> {
+  private readonly liveTrails=new Map<string,Order>();
+  private readonly trailListeners=new Set<()=>void>();
+  private trailTimer:ReturnType<typeof setTimeout>|undefined;
+  subscribeTrails(cb:()=>void):()=>void {this.trailListeners.add(cb);return()=>{this.trailListeners.delete(cb);};}
+  liveOrder(id:string):Order|undefined {return this.liveTrails.get(id)??this.getSnapshot().orders.get(id);}
+
+  private publishTrailProgress(order:Order):void {
+    this.liveTrails.set(order.id,order);
+    this.trailListeners.forEach(cb=>cb());
+    if(this.trailTimer!==undefined)return;
+    this.trailTimer=setTimeout(()=>{
+      this.trailTimer=undefined;
+      if(!this.liveTrails.size)return;
+      const current=this.getSnapshot(),orders=new Map(current.orders);
+      this.liveTrails.forEach((o,id)=>orders.set(id,o));
+      this.set({...current,orders});
+    },250);
+  }
   private readonly rejectListeners = new Set<(order: Order) => void>();
   private readonly activationUnknownListeners = new Set<(order: Order) => void>();
 
@@ -60,11 +85,19 @@ export class ExecStore extends ReactStore<ExecState> {
         this.set({ ...cur, positions: m.payload as PositionRow[] }); // full replace (snapshot & delta)
         return;
       case "exec.orders": {
+        if(m.kind==="delta") {
+          const order=m.payload as Order;
+          if(trailProgress(this.liveOrder(order.id),order)){this.publishTrailProgress(order);return;}
+        } else {
+          this.liveTrails.clear();
+          if(this.trailTimer!==undefined){clearTimeout(this.trailTimer);this.trailTimer=undefined;}
+        }
         const orders = new Map(cur.orders);
         const optimistic = new Map(cur.optimistic);
         const list = m.kind === "snapshot" ? (m.payload as Order[]) : [m.payload as Order];
         if (m.kind === "snapshot") orders.clear();
         for (const o of list) {
+          this.liveTrails.delete(o.id);
           if (m.kind === "delta" && riskActivationUnknown(o) && !riskActivationUnknown(cur.orders.get(o.id))) {
             for (const cb of this.activationUnknownListeners) {
               try { cb(o); } catch { /* a listener must never break order ingestion */ }
@@ -111,7 +144,7 @@ export class ExecStore extends ReactStore<ExecState> {
   // Real orders + not-yet-confirmed optimistic rows, newest first.
   orders(): OrderView[] {
     const cur = this.getSnapshot();
-    const views: OrderView[] = [...cur.orders.values()].map((order) => ({ order, optimistic: false }));
+    const views: OrderView[] = [...cur.orders.values()].map((order) => ({ order:this.liveOrder(order.id)??order, optimistic: false }));
     for (const o of cur.optimistic.values()) if (!cur.orders.has(o.id)) views.push({ order: synthOptimistic(o), optimistic: true });
     return views.sort((a, b) => b.order.createdMs - a.order.createdMs);
   }
@@ -119,7 +152,7 @@ export class ExecStore extends ReactStore<ExecState> {
   closedOrders(): ClosedOrder[] { return [...this.getSnapshot().closedOrders.values()]; }
 
   workingOrdersFor(symbol?: string, venue?: string): Order[] {
-    return [...this.getSnapshot().orders.values()]
+    return this.orders().filter(v=>!v.optimistic).map(v=>v.order)
       .filter((o) => isWorking(o.status) && (symbol === undefined || o.symbol === symbol)
         && (venue === undefined || o.venue === venue) && !o.held?.cancelRequested
         && !(o.action?.kind === "CANCEL" && (o.action.phase === "REQUESTED" || o.action.phase === "UNKNOWN")));

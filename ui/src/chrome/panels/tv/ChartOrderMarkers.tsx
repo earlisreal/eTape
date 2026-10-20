@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
-import type { AckMsg, Order, ReplaceOrderArgs } from "../../../wire/contract";
+import type { AckMsg, Order, ReplaceOrderArgs, TrailConfig } from "../../../wire/contract";
+import {TrailEditor} from "../../exec/TrailEditor";
+import {canConvertProtection,newTrailConfig,trailDetails,trailError,trailModeLabel} from "../../exec/trailing";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import { chartOrderMarkers, nearestPriceLines, orderActionPending, orderMarkerChipYs, snapOrderMarkerPrice, type ChartOrderMarker } from "../../../render/chart/orderMarkers";
 import type { OrderConfig, PlaceOrderTemplate } from "../../exec/actionTemplate";
@@ -9,11 +11,13 @@ import {riskEntrySize} from "../../exec/riskEntry";
 import {resolveLimitCushionPrice} from "../../exec/priceSource";
 import type { TvChrome } from "../../../render/chart/tvTheme";
 import { attachOrderPillLayer } from "./orderPillLayer";
+import type {ExecStore} from "../../../data/ExecStore";
 
 type Pending = { kind: "replace" | "cancel"; price?: number; stop: boolean; confirmedPrice?: number; outcome: "requested" | "unknown" };
 type Drag = { id: string; pointerId: number; marker: ChartOrderMarker; startX: number; startY: number; startPrice: number; price: number; moved: boolean; entryPhase:string; previewQty:number };
 
 interface Props {
+  execStore?:ExecStore;
   chrome: TvChrome;
   availableCash?: number;
   buyingPower?: number;
@@ -35,6 +39,7 @@ interface Group { key: string; price: number; kind: ChartOrderMarker["kind"]; ma
 
 function priceText(price: number): string { return price < 1 ? price.toFixed(4) : price.toFixed(2); }
 function orderTitle(marker: ChartOrderMarker): string {
+  if(marker.order.held?.trail && marker.kind!=="limit")return `${marker.order.side} ${trailModeLabel(marker.order)} TRAIL · ${marker.phase}`;
   const type = marker.order.type === "LIMIT_IF_TOUCHED" ? "LIT" : marker.kind === "limit" ? "LIMIT" : "STOP-LIMIT";
   return `${marker.order.side} ${marker.order.leavesQty.toLocaleString("en-US")} ${type}${marker.order.riskEntry ? ` · Risk Entry ${marker.phase}` : marker.order.riskEntryId ? ` · Linked Protection ${marker.phase}` : ""}`;
 }
@@ -58,7 +63,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const action = orderActionPending(marker) ?? pending.get(marker.order.id);
       const waiting = action?.kind === "replace" && action.price !== marker.price ? action : undefined;
       const price = waiting ? waiting.price! : marker.price;
-      const key = `${marker.order.side}:${marker.kind}:${price.toFixed(4)}${waiting ? `:pending:${marker.order.id}` : ""}`;
+      const key = `${marker.order.side}:${marker.kind}:${price.toFixed(4)}${marker.order.held?.trail?`:trail:${marker.order.id}`:""}${waiting ? `:pending:${marker.order.id}` : ""}`;
       const group = map.get(key) ?? { key, kind: marker.kind, price, markers: [], ...(waiting ? { pending: waiting } : {}) };
       group.markers.push(waiting ? { ...marker, price, draggable: false } : marker); map.set(key, group);
     }
@@ -73,6 +78,29 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
   props.chooserOpenRef.current = chooserLatest.current;
   const groupsLatest = useRef(groups); groupsLatest.current = groups;
   const [announcement, setAnnouncement] = useState("");
+  const [trailEdit,setTrailEdit]=useState<{order:Order;config:TrailConfig;convert:boolean}|null>(null);
+  const [trailBusy,setTrailBusy]=useState(false);
+  const openTrail=(o:Order,convert:boolean)=>{
+    o=props.execStore?.liveOrder(o.id)??o;
+    const owner=orders.find(e=>e.id===o.riskEntryId);
+    setTrailEdit({order:o,convert,config:o.held?.trail?.config??{...newTrailConfig(),pricing:"CUSHION",cushion:owner?.riskEntry?.sellCushion??{value:0,unit:"$"}}});
+  };
+  const applyTrail=async()=>{
+    if(!trailEdit || trailBusy)return;
+    const error=trailError(trailEdit.config);if(error){setAnnouncement(`Trail rejected: ${error}`);return;}
+    const {order,config,convert}=trailEdit;setTrailBusy(true);
+    try {
+      const ack=await props.sendCommand(convert?"ConvertProtectionToTrail":"EditTrail",{venue:order.venue,orderId:order.id,expectedHeldPhase:order.held!.phase,expectedStop:order.stopPrice,config});
+      if(ack.ambiguous){setAnnouncement("Trail outcome unknown; verify Orders.");setTrailEdit(null);}
+      else if(ack.status!=="accepted")setAnnouncement(`Trail rejected: ${ack.reason??"unknown reason"}`);
+      else {setAnnouncement(convert?"Protection converted to trail.":"Trail updated.");setTrailEdit(null);}
+    }catch{setAnnouncement("Trail outcome unknown; verify Orders.");setTrailEdit(null);}finally{setTrailBusy(false);}
+  };
+  const trailActions=(o:Order)=> <>
+    {o.held?.trail && !o.held.trail.retired && !o.held.trail.triggered && ["WAITING","ARMED"].includes(o.held.phase) && <button type="button" aria-label="Edit trail" onClick={()=>openTrail(o,false)}>Edit</button>}
+    {canConvertProtection(o,orders) && <button type="button" aria-label="Convert to trail" onClick={()=>openTrail(o,true)}>Trail</button>}
+    {o.held?.trail && !o.held.trail.retired && o.held.phase==="PAUSED" && <button type="button" aria-label="Resume trail" onClick={()=>void props.sendCommand("ResumeHeldOrder",{venue:o.venue,orderId:o.id}).then(a=>setAnnouncement(a.status==="accepted"?"Trail resumed; waiting for fresh data.":`Resume rejected: ${a.reason??"unknown"}`))}>Resume</button>}
+  </>;
 
   const riskProposal=(marker:ChartOrderMarker,price:number):{detail:string;qty:number;plannedQty?:number;aboveBudget?:boolean;limit?:number}=>{
     const all=Array.from(latest.current.orders);
@@ -93,6 +121,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
   };
   const sideText = (marker: ChartOrderMarker) => marker.order.side === "BUY" || marker.order.side === "COVER" ? "B" : "S";
   const tooltip = (marker: ChartOrderMarker, price = marker.price, proposed = false) => {
+    if(marker.order.held?.trail && marker.kind!=="limit")return trailDetails(marker.order);
     const risk = riskProposal(marker, price);
     const quantity = marker.order.deferredPositionPct !== undefined && marker.kind !== "limit"
       ? `${marker.order.deferredPositionPct}% position · shares determined on trigger`
@@ -108,6 +137,19 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     const host = latest.current.hostRef.current;
     const facade = latest.current.facadeRef.current;
     if (!host || !facade) return;
+    for(const el of host.querySelectorAll<HTMLElement>("[data-order-group]")) {
+      const id=el.dataset.orderIds;
+      const live=id ? latest.current.execStore?.liveOrder(id):undefined;
+      if(!live?.held?.trail || live.held.childClientId || live.held.trail.retired)continue;
+      el.dataset.price=String(live.stopPrice);
+      const label=el.querySelector<HTMLButtonElement>("[data-order-price]");
+      if(label){label.textContent=`${priceText(live.stopPrice)} ${trailModeLabel(live)} ${live.held.phase}`;label.title=trailDetails(live);label.setAttribute("aria-label",`${live.side} trail at ${priceText(live.stopPrice)}; edit parameters`);}
+    }
+    groupsLatest.current=groupsLatest.current.map(group=>{
+      if(group.markers.length!==1 || !group.markers[0].order.held?.trail || group.kind==="limit")return group;
+      const live=latest.current.execStore?.liveOrder(group.markers[0].order.id);
+      return live?{...group,price:live.stopPrice,markers:[{...group.markers[0],order:live,price:live.stopPrice}]}:group;
+    });
     const paneHeight = facade.paneHeights?.()[0] ?? host.getBoundingClientRect().height;
     const rows = [...host.querySelectorAll<HTMLElement>("[data-order-group]")].filter(el => {
       const y = facade.priceToCoordinate(Number(el.dataset.proposedPrice ?? el.dataset.price));
@@ -132,6 +174,12 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     }
     pillLayer.current?.sync();
   };
+
+  useEffect(()=>{
+    let frame:number|undefined;
+    const off=props.execStore?.subscribeTrails(()=>{if(frame===undefined)frame=requestAnimationFrame(()=>{frame=undefined;layout();});});
+    return()=>{off?.();if(frame!==undefined)cancelAnimationFrame(frame);};
+  },[props.execStore]);
 
   useEffect(() => {
     props.layoutRef.current = layout;
@@ -356,7 +404,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     };
   }, []);
 
-  useEffect(()=>{cancelDrag();pillLayer.current?.clear();setChooser(null);setLineChooser(null);},[props.venue,props.symbol,props.pinned,props.activeTool]);
+  useEffect(()=>{cancelDrag();pillLayer.current?.clear();setChooser(null);setLineChooser(null);setTrailEdit(null);},[props.venue,props.symbol,props.pinned,props.activeTool]);
 
   const cancelOrder = async (marker: ChartOrderMarker) => {
     setPending((current) => new Map(current).set(marker.order.id, { kind: "cancel", stop: false, outcome: "requested" }));
@@ -414,8 +462,9 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
             title={`${group.markers.map(marker => tooltip(marker, marker.price, !!group.pending)).join("\n\n")}${status ? `\n${status}` : ""}`}
             aria-label={group.markers.length > 1 ? `${group.markers.length} ${first.order.side} orders at ${priceText(group.price)}; choose an order` : `${orderTitle(first)} at ${priceText(group.price)}; drag or use arrow keys to adjust`}
             style={{ border:0, background:"transparent", color:"inherit", height:"100%", padding:"0 5px", cursor:first.draggable ? "ns-resize" : "pointer", font:"inherit" }}>
-            {priceText(group.price)}{group.markers.length > 1 ? ` (${group.markers.length})` : ""}
+            {priceText(group.price)}{first.order.held?.trail && first.kind!=="limit"?` ${trailModeLabel(first.order)} ${first.phase}`:""}{group.markers.length > 1 ? ` (${group.markers.length})` : ""}
           </button>
+          {group.markers.length===1 && trailActions(first.order)}
           {group.markers.length === 1 && <button type="button" disabled={action?.kind === "cancel"}
             aria-label={first.order.riskEntryId?"Cancel Protection":`Cancel ${orderTitle(first)}`} title={first.order.riskEntryId?"Cancel Protection — cancels remaining buy and linked sells; leaves shares open":`Cancel ${orderTitle(first)}`} onClick={() => void cancelOrder(first)}
             style={{ border:0, borderLeft:`1px solid ${color}`, background:"transparent", color:"inherit", height:"100%", padding:"0 5px", cursor:"pointer", font:"bold 12px system-ui" }}>×</button>}
@@ -429,6 +478,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
               style={{ flex:1, border:`1px solid ${color}`, borderRadius:3, background:"#0c1017", color, padding:"4px 6px", cursor:marker.draggable ? "ns-resize" : "pointer", textAlign:"left", font:"10px ui-monospace,monospace" }}>
               {orderTitle(marker)} · {marker.order.id.slice(-6)}
             </button>
+            {trailActions(marker.order)}
             <button type="button" aria-label={`Cancel ${orderTitle(marker)}`} onClick={() => void cancelOrder(marker)}
               style={{ border:`1px solid ${color}`, borderRadius:3, background:"#0c1017", color, padding:"3px 7px", cursor:"pointer" }}>×</button>
           </div>)}
@@ -436,6 +486,12 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         </div>}
       </div>;
     })}
+    {trailEdit && <section role="dialog" aria-label={trailEdit.convert?"Convert protection to trail":"Edit trailing stop"} data-drawing-ui="true" onKeyDown={e=>{e.stopPropagation();if(e.key==="Escape"&&!trailBusy)setTrailEdit(null);}}
+      style={{position:"absolute",left:10,right:10,top:20,padding:10,background:props.chrome.surface,color:props.chrome.text,border:"1px solid currentColor",pointerEvents:"auto",zIndex:30}}>
+      <div>{trailEdit.convert?"Convert protection to trail":"Edit trail"} · {trailEdit.order.symbol} · current stop {priceText(trailEdit.order.stopPrice)} · edits cannot loosen it</div>
+      <TrailEditor value={trailEdit.config} lockMode={!trailEdit.convert} lockSessions onChange={config=>setTrailEdit({...trailEdit,config})}/>
+      <button type="button" disabled={trailBusy} onClick={()=>void applyTrail()}>Apply trail</button><button type="button" disabled={trailBusy} onClick={()=>setTrailEdit(null)}>Close</button>
+    </section>}
     {/unknown|rejected|unavailable|zero shares/i.test(announcement) && <div role="status" style={{position:"absolute",left:10,bottom:10,maxWidth:"80%",color:"#ff9d72",background:"#0c1017",fontSize:11}}>{announcement}</div>}
     <span aria-live="polite" className="chart-order-announcement" style={{ position:"absolute", width:1, height:1, overflow:"hidden", clipPath:"inset(50%)" }}>{announcement}</span>
   </div>;

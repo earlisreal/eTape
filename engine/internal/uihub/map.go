@@ -42,6 +42,8 @@ func orderTypeToWire(t exec.OrderType) wsmsg.OrderType {
 		return wsmsg.OrderStopLimit
 	case exec.TypeLimitIfTouched:
 		return wsmsg.OrderLimitIfTouched
+	case exec.TypeTrailingStop:
+		return wsmsg.OrderTrailingStop
 	default:
 		return wsmsg.OrderMarket
 	}
@@ -159,7 +161,7 @@ func mapOrder(o exec.Order) wsmsg.Order {
 		risk = &wsmsg.RiskEntry{StopID: r.StopID, Budget: r.Budget, Mode: r.Mode,
 			BuyCushion:  wsmsg.LimitCushion{Value: r.BuyCushion.Value, Unit: r.BuyCushion.Unit},
 			SellCushion: wsmsg.LimitCushion{Value: r.SellCushion.Value, Unit: r.SellCushion.Unit},
-			Closing:     r.Closing, ProtectionCanceled: r.ProtectionCanceled, Failure: r.Failure}
+			Closing:     r.Closing, ProtectionCanceled: r.ProtectionCanceled, Failure: r.Failure, Protection: mapTrailConfig(r.Protection)}
 	}
 	return wsmsg.Order{
 		Venue: string(o.Venue), ID: o.ID, Symbol: o.Symbol,
@@ -181,7 +183,7 @@ func mapOrderAction(a exec.OrderAction) *wsmsg.OrderAction {
 
 func mapHeldOrder(h exec.HeldOrder) *wsmsg.HeldOrder {
 	return &wsmsg.HeldOrder{Phase: string(h.Phase), DeadlineMs: h.DeadlineMs, ChildClientID: h.ChildClientID,
-		ChildBrokerID: h.ChildBrokerID, PausedReason: h.PausedReason, CancelRequested: h.CancelRequested, ResolvedQty: h.ResolvedQty}
+		ChildBrokerID: h.ChildBrokerID, PausedReason: h.PausedReason, CancelRequested: h.CancelRequested, ResolvedQty: h.ResolvedQty, Trail: mapTrail(h.Trail)}
 }
 
 func mapClosedOrder(row exec.ClosedOrder) wsmsg.ClosedOrder {

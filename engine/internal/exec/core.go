@@ -126,7 +126,7 @@ type Core struct {
 	cmds    chan cmdReq
 	bevents chan BrokerEvent
 	markCh  chan Mark
-	printCh chan EligiblePrint
+	printCh chan executionInput
 	preview chan eligiblePreviewReq
 	updates chan Update
 	dropped atomic.Uint64
@@ -134,23 +134,27 @@ type Core struct {
 	state *State
 	marks markState
 
-	trades             *RoundTripAggregator
-	positionOpens      *RoundTripAggregator
-	cycles             *cycleProjection
-	closed             *closedOrders
-	heldDemand         HeldDemandController
-	printHealthy       bool
-	lastPrintGapMs     int64
-	lastPrintSeq       map[string]int64
-	lastPrintDay       map[string]int64
-	lastEligible       map[string]EligiblePrint
-	heldLiveIdentity   map[VenueID]string
-	heldLiveAck        map[VenueID]string
-	heldLiveLITAck     map[VenueID]string
-	shutdownHeld       HeldShutdownSummary
-	positionExecIDs    map[string]bool
-	protectionChecks   map[VenueID]*protectionCheck
-	protectionRevision map[VenueID]uint64
+	trades              *RoundTripAggregator
+	positionOpens       *RoundTripAggregator
+	cycles              *cycleProjection
+	closed              *closedOrders
+	heldDemand          HeldDemandController
+	printHealthy        bool
+	lastPrintGapMs      int64
+	lastPrintSeq        map[string]int64
+	lastPrintDay        map[string]int64
+	lastEligible        map[string]EligiblePrint
+	trailBooks          map[string]TrailBook
+	trailCycles         map[trailCycleKey]trailCycle
+	trailCandles        map[string]TrailCandle
+	trailBookGeneration uint64
+	heldLiveIdentity    map[VenueID]string
+	heldLiveAck         map[VenueID]string
+	heldLiveLITAck      map[VenueID]string
+	shutdownHeld        HeldShutdownSummary
+	positionExecIDs     map[string]bool
+	protectionChecks    map[VenueID]*protectionCheck
+	protectionRevision  map[VenueID]uint64
 }
 
 // CoreConfig configures NewCore.
@@ -198,7 +202,7 @@ func NewCore(cfg CoreConfig) *Core {
 		cmds:                   make(chan cmdReq),
 		bevents:                make(chan BrokerEvent, 1024),
 		markCh:                 make(chan Mark, 256),
-		printCh:                make(chan EligiblePrint, 8192),
+		printCh:                make(chan executionInput, 8192),
 		preview:                make(chan eligiblePreviewReq),
 		updates:                make(chan Update, 4096),
 		state:                  NewState(cfg.Venues),
@@ -282,7 +286,7 @@ func (c *Core) FeedMark(m Mark) {
 // make locally-held custody unsafe, so this lane backpressures at capacity.
 func (c *Core) FeedEligiblePrint(ctx context.Context, p EligiblePrint) {
 	select {
-	case c.printCh <- p:
+	case c.printCh <- executionInput{Print: p}:
 	case <-ctx.Done():
 	}
 }
@@ -472,6 +476,10 @@ func (c *Core) Recover(ctx context.Context) error {
 			continue
 		}
 		h := *o.Held
+		if h.Trail != nil {
+			c.recoverTrail(ctx, o, foundBrokerOrders[id])
+			continue
+		}
 		switch h.Phase {
 		case HeldWaiting, HeldArmed:
 			h.Phase, h.PausedReason = HeldPaused, "engine restarted; resume manually"
@@ -672,6 +680,7 @@ func (c *Core) Run(ctx context.Context) error {
 			c.refreshProtectionWarnings(ctx)
 		case be := <-c.bevents:
 			c.handleBrokerEvent(ctx, be)
+			c.checkTrailPositions(ctx)
 		case m := <-c.markCh:
 			c.marks[m.Symbol] = m.Price
 			c.cycles.mark(m.Symbol, m.Price)
@@ -679,7 +688,16 @@ func (c *Core) Run(ctx context.Context) error {
 				c.emitProjectedAccount(v)
 			}
 		case p := <-c.printCh:
-			c.handleEligiblePrint(ctx, p)
+			if p.Candle != nil {
+				c.handleTrailCandle(*p.Candle)
+			} else if p.Book != nil {
+				c.handleTrailBook(ctx, *p.Book)
+			} else {
+				c.handleEligiblePrint(ctx, p.Print)
+			}
+			if p.Done != nil {
+				close(p.Done)
+			}
 		case req := <-c.preview:
 			p, ok := c.lastEligible[req.symbol]
 			preview := EligiblePrintPreview{}
@@ -879,6 +897,12 @@ func (c *Core) emitForEvent(ev Event) {
 
 func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 	switch cm := cmd.(type) {
+	case SubmitTrail:
+		return c.handleSubmitTrail(ctx, cm)
+	case ConvertProtectionToTrail:
+		return c.configureTrail(ctx, cm.Venue, cm.OrderID, cm.ExpectedHeldPhase, cm.ExpectedStop, cm.Config, true)
+	case EditTrail:
+		return c.configureTrail(ctx, cm.Venue, cm.OrderID, cm.ExpectedHeldPhase, cm.ExpectedStop, cm.Config, false)
 	case SubmitRiskEntry:
 		return c.handleRiskEntry(ctx, cm)
 	case SubmitOrder:
@@ -926,6 +950,9 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 }
 
 func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
+	if cm.Type == TypeTrailingStop {
+		return CmdAck{Reason: "use SubmitTrail with a trailing configuration"}
+	}
 	req := OrderRequest{
 		Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: cm.Type, TIF: cm.TIF,
 		Session: cm.Session,
@@ -1013,7 +1040,7 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 		}
 		return CmdAck{Accepted: false, Reason: reason, OrderID: req.ClientOrderID}
 	}
-	if req.Side == SideSell && !deferred {
+	if c.requiresReductionGuard(req) && !deferred {
 		if good, why := c.checkSellLeaves(req, req.Qty, ""); !good {
 			return CmdAck{Accepted: false, Reason: why, OrderID: req.ClientOrderID}
 		}
@@ -1073,13 +1100,14 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 	// Append OrderSubmitted BEFORE the POST (crash-recovery rule). Append failure
 	// blocks submission.
 	o := newOrderFromRequest(req, c.now())
-	if req.Side == SideSell {
+	guarded := c.requiresReductionGuard(req)
+	if guarded {
 		o.Action = &OrderAction{Kind: ActionSubmit, Phase: ActionRequested}
 	}
 	if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcLocal); err != nil {
 		return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: req.ClientOrderID}
 	}
-	go c.postSubmit(ctx, b, req)
+	go c.postSubmit(ctx, b, req, guarded)
 	return CmdAck{Accepted: true, OrderID: req.ClientOrderID}
 }
 
@@ -1097,10 +1125,15 @@ func (c *Core) checkSellLeaves(req OrderRequest, leaves float64, excludeID strin
 		return false, "position data unavailable; reconcile the venue before selling"
 	}
 	long := c.state.VenuePositionShares(req.Venue, req.Symbol)
-	if long <= 0 {
+	if longward(req.Side) {
+		if long >= 0 {
+			return false, "no open short position to cover"
+		}
+		long = -long
+	} else if long <= 0 {
 		return false, "no open long position to sell"
 	}
-	available := long - c.state.VenueSellCommittedShares(req.Venue, req.Symbol, excludeID)
+	available := long - c.state.VenueReducingCommittedShares(req.Venue, req.Symbol, req.Side, excludeID)
 	if available < 0 {
 		available = 0
 	}
@@ -1110,14 +1143,18 @@ func (c *Core) checkSellLeaves(req OrderRequest, leaves float64, excludeID strin
 	return true, ""
 }
 
+func (c *Core) requiresReductionGuard(req OrderRequest) bool {
+	return req.Side == SideSell || req.Side == SideCover || reducesPosition(c.state, req)
+}
+
 // postSubmit performs the broker POST off the writer loop. A SELL transport
 // error is ambiguous, so its share reservation stays working until reconciliation.
-func (c *Core) postSubmit(ctx context.Context, b Broker, req OrderRequest) {
+func (c *Core) postSubmit(ctx context.Context, b Broker, req OrderRequest, guarded bool) {
 	if b == nil {
 		return
 	}
 	ack, err := b.SubmitOrder(ctx, req)
-	if req.Side == SideSell {
+	if guarded {
 		outcome := BrokerSubmitOutcome{V: req.Venue, OID: req.ClientOrderID, Accepted: err == nil && ack.Accepted}
 		if err != nil {
 			outcome.Reason = "transport: " + err.Error()
@@ -1169,7 +1206,11 @@ func (c *Core) handleCancel(ctx context.Context, cm CancelOrder) CmdAck {
 			return CmdAck{Accepted: false, Reason: "cancel already requested", OrderID: o.ID}
 		}
 		switch o.Held.Phase {
-		case HeldWaiting, HeldArmed, HeldPaused:
+		case HeldWaiting, HeldArmed, HeldPaused, HeldWaitingQuote:
+			if o.Held.Trail != nil {
+				c.retireTrail(ctx, o, "trail canceled")
+				return CmdAck{Accepted: true, OrderID: o.ID}
+			}
 			if err := c.appendAndFold(OrderCanceled{V: o.Venue, OID: o.ID, Ts: c.now()}, SrcLocal); err != nil {
 				return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: o.ID}
 			}
@@ -1268,7 +1309,7 @@ func (c *Core) handleReplaceSingle(ctx context.Context, cm ReplaceOrder) CmdAck 
 	if cm.Qty <= o.ExecutedQty {
 		return CmdAck{Accepted: false, Reason: "replacement quantity must exceed executed quantity", OrderID: o.ID}
 	}
-	if o.Side == SideSell && cm.Qty-o.ExecutedQty > o.LeavesQty+1e-9 {
+	if c.requiresReductionGuard(OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side}) && cm.Qty-o.ExecutedQty > o.LeavesQty+1e-9 {
 		req := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Qty: cm.Qty}
 		if good, reason := c.checkSellLeaves(req, cm.Qty-o.ExecutedQty, o.ID); !good {
 			return CmdAck{Accepted: false, Reason: reason, OrderID: o.ID}
@@ -1327,14 +1368,15 @@ func (c *Core) handleFlatten(ctx context.Context, cm Flatten) CmdAck {
 	if vs.FlattenPending {
 		return CmdAck{Accepted: false, Reason: "venue flatten is awaiting authoritative reconciliation"}
 	}
-	if c.state.VenueHasSellCommitments(cm.Venue) {
-		return CmdAck{Accepted: false, Reason: "cancel or resolve working SELL orders before flattening"}
+	if c.state.VenueHasReducingCommitments(cm.Venue) {
+		return CmdAck{Accepted: false, Reason: "cancel or resolve working SELL/COVER orders before flattening"}
 	}
-	c.pauseHeldSellVenue(cm.Venue, "venue flatten requested; resume manually after reconciliation")
+	c.pauseHeldReducingVenue(cm.Venue, "venue flatten requested; resume manually after reconciliation")
 	if err := c.appendAndFold(FlattenPendingChanged{V: cm.Venue, Pending: true, Ts: c.now()}, SrcLocal); err != nil {
 		return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error()}
 	}
 	c.setPositionsReady(cm.Venue, false)
+	c.checkTrailPositions(ctx)
 	go func() {
 		if err := b.Flatten(ctx); err != nil {
 			slog.Warn("exec: flatten failed", "venue", cm.Venue, "err", err)
@@ -1438,6 +1480,8 @@ func (c *Core) emitStatus() {
 }
 
 func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
+	beforeExposure := c.trailExposure()
+	defer c.retireReducedOwnership(ctx, beforeExposure)
 	defer func() {
 		switch e := be.(type) {
 		case Event:
@@ -1484,7 +1528,7 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		}
 	case BrokerSubmitOutcome:
 		o := c.order(e.OID)
-		if !o.Working() || o.Venue != e.V || o.Side != SideSell || o.Action == nil || o.Action.Kind != ActionSubmit ||
+		if !o.Working() || o.Venue != e.V || o.Action == nil || o.Action.Kind != ActionSubmit ||
 			(o.Action.Phase != ActionRequested && o.Action.Phase != ActionUnknown) {
 			return
 		}
@@ -1716,7 +1760,7 @@ func (c *Core) maybeClearFlattenPending(v VenueID) {
 
 func (c *Core) confirmSellSubmit(v VenueID, id string) {
 	o := c.order(id)
-	if !o.Working() || o.Venue != v || o.Side != SideSell || o.Action == nil || o.Action.Kind != ActionSubmit ||
+	if !o.Working() || o.Venue != v || o.Action == nil || o.Action.Kind != ActionSubmit ||
 		(o.Action.Phase != ActionRequested && o.Action.Phase != ActionUnknown) {
 		return
 	}

@@ -63,6 +63,7 @@ const (
 	TypeStop
 	TypeStopLimit
 	TypeLimitIfTouched
+	TypeTrailingStop
 )
 
 func (t OrderType) String() string {
@@ -77,6 +78,8 @@ func (t OrderType) String() string {
 		return "STOP_LIMIT"
 	case TypeLimitIfTouched:
 		return "LIMIT_IF_TOUCHED"
+	case TypeTrailingStop:
+		return "TRAILING_STOP"
 	default:
 		return fmt.Sprintf("OrderType(%d)", uint8(t))
 	}
@@ -196,6 +199,7 @@ type HeldPhase string
 
 const (
 	HeldWaiting         HeldPhase = "WAITING"
+	HeldWaitingQuote    HeldPhase = "WAITING_QUOTE"
 	HeldArmed           HeldPhase = "ARMED"
 	HeldPaused          HeldPhase = "PAUSED"
 	HeldActivating      HeldPhase = "ACTIVATING"
@@ -207,15 +211,16 @@ const (
 // HeldOrder is durable engine-side trigger state attached to the visible
 // parent order. ChildClientID is persisted before the first venue POST.
 type HeldOrder struct {
-	Phase           HeldPhase `json:"phase"`
-	DeadlineMs      int64     `json:"deadlineMs"`
-	ResumeAfterMs   int64     `json:"resumeAfterMs,omitempty"`
-	ChildClientID   string    `json:"childClientId,omitempty"`
-	ChildBrokerID   string    `json:"childBrokerId,omitempty"`
-	PausedReason    string    `json:"pausedReason,omitempty"`
-	CancelRequested bool      `json:"cancelRequested,omitempty"`
-	CancelSent      bool      `json:"cancelSent,omitempty"`
-	ResolvedQty     float64   `json:"resolvedQty,omitempty"`
+	Trail           *TrailState `json:"trail,omitempty"`
+	Phase           HeldPhase   `json:"phase"`
+	DeadlineMs      int64       `json:"deadlineMs"`
+	ResumeAfterMs   int64       `json:"resumeAfterMs,omitempty"`
+	ChildClientID   string      `json:"childClientId,omitempty"`
+	ChildBrokerID   string      `json:"childBrokerId,omitempty"`
+	PausedReason    string      `json:"pausedReason,omitempty"`
+	CancelRequested bool        `json:"cancelRequested,omitempty"`
+	CancelSent      bool        `json:"cancelSent,omitempty"`
+	ResolvedQty     float64     `json:"resolvedQty,omitempty"`
 }
 
 type OrderActionKind string

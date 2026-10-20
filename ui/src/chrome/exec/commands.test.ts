@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { OrderCommands, type CommandAdapter } from "./commands";
 import { ExecStore } from "../../data/ExecStore";
+import { fireTemplate } from "./fireTemplate";
 import type { AckMsg, Order, SubmitOrderArgs } from "../../wire/contract";
 import type { SoundApi } from "../../sound/SoundEngine";
 
@@ -31,6 +32,14 @@ const snap = (payload: Order[]) => ({ kind: "snapshot" as const, topic: "exec.or
 const order = (id: string, over: Partial<Order> = {}): Order => ({ venue: "alpaca-paper", id, symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO", qty: 10, limitPrice: 3.5, stopPrice: 0, status: "ACCEPTED", executedQty: 0, leavesQty: 10, avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, ...over });
 
 describe("OrderCommands", () => {
+  it("fires a reducing trail hotkey without requiring a display quote or unlocked entry trading", async () => {
+    const {oc,sent,pushed}=fakes();
+    fireTemplate({kind:"place",id:"trail",label:"Trail",type:"TRAILING_STOP",side:"SELL",tif:"DAY",priceSource:"Bid",priceOffset:0,sizing:{mode:"PositionFraction",pct:50},
+      trail:{mode:"PRICE",value:.3,sessions:{pre:false,rth:true,post:false},pricing:"QUOTE",quoteSide:"BID",offset:{value:0,unit:"$"},cushion:{value:0,unit:"$"},buffer:{value:0,unit:"$"}}},
+      {venue:"sim",symbol:"US.AAPL",buyingPower:0,availableCash:0,positionQty:100,armed:false,nowMs:100,extHoursMarketBufferPct:1},oc,{push:(t)=>pushed.push(t),dismiss:()=>{}},{gateArm:true});
+    await Promise.resolve();
+    expect(sent[0]).toMatchObject({name:"SubmitTrail",args:{venue:"sim",side:"SELL",positionPct:50,config:{mode:"PRICE",value:.3,quoteSide:"BID"}}});
+  });
   it("submit accepted → registers optimistic row + info flash", async () => {
     const { sent, exec, pushed, oc } = fakes({ orderId: "ET7" });
     await oc.submit(args, "BUY 10 AAPL @ 3.50 LMT");

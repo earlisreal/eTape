@@ -98,6 +98,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
     const offLink = linkGroups.subscribe(reseedForGroup);
 
     const offExec = stores.exec.subscribe(() => { forceRef.current++; });
+    const offTrails = stores.exec.subscribeTrails(() => { forceRef.current++; });
 
     // Native non-passive listener: React attaches wheel passively at the root,
     // which would ignore preventDefault and let the page/dock scroll.
@@ -189,6 +190,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
       off();
       offLink();
       offExec();
+      offTrails();
       canvas.removeEventListener("wheel", onWheel);
     };
   }, [config.id, !!displaySymbol]);

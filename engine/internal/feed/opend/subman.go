@@ -102,6 +102,7 @@ type subKey struct {
 }
 
 type subState struct {
+	revision     uint64
 	subscribedAt time.Time
 	droppedAt    time.Time // zero while still desired
 }
@@ -144,6 +145,7 @@ type subManager struct {
 	quotaPendingDone     chan struct{}
 	quotaChanged         chan struct{}
 	connectionGeneration uint64
+	coverageRevision     uint64
 	connectionDown       bool
 	connectionCtx        context.Context
 	connectionCancel     context.CancelFunc
@@ -666,7 +668,8 @@ func (m *subManager) trySubscribe(ctx context.Context, symbols []string, subs []
 			for _, s := range symbols {
 				for _, sub := range subs {
 					k := subKey{Symbol: s, Sub: sub}
-					m.active[k] = &subState{subscribedAt: now}
+					m.coverageRevision++
+					m.active[k] = &subState{subscribedAt: now, revision: m.coverageRevision}
 					m.recordCoverageLocked(k, "admitted", "ordinary")
 					delete(m.subFail, k)
 				}

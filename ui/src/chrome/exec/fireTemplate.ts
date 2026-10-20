@@ -31,6 +31,10 @@ export function fireTemplate(
     return;
   }
   if (t.kind === "place") {
+	if(t.type==="TRAILING_STOP") {
+	  if(!ctx.venue || !ctx.symbol || t.side!=="SELL" && t.side!=="COVER" || !t.trail || t.sizing.mode!=="PositionFraction") {toast.push({level:"danger",text:"Choose a venue, symbol, reducing side, position percentage and trail configuration."});return;}
+	  void oc.submitTrail({venue:ctx.venue,symbol:ctx.symbol,side:t.side,positionPct:t.sizing.pct??100,config:t.trail});return;
+	}
     if (opts.gateArm && !ctx.armed) { toast.push({ level: "warn", text: "locked — hotkey blocked" }); return; }
     if (ctx.venue === "") {
       toast.push({ level: "danger", text: "no execution venue — set one up in Settings › Venues & creds" });
@@ -61,5 +65,6 @@ export function fireTemplate(
     case "CancelAllFocused": void oc.cancelAll("focused", ctx.symbol || undefined, { feedback: "action", venue: ctx.venue }); break;
     case "CancelAllEverything": void oc.cancelAll("everything", undefined, { feedback: "action" }); break;
     case "KillSwitch": void oc.kill(); break;
+	case "ConvertProtectionToTrail": if(t.trail) void oc.convertFocusedProtection(ctx.venue,ctx.symbol,t.trail);else toast.push({level:"danger",text:"Configure the conversion trail first."}); break;
   }
 }

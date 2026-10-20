@@ -425,7 +425,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			st.ArchiveDaily(stored)
 		}
 	}
-	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs, FinalizedBar: archiveFinalizedBar, Clock: uihubClk, Recorder: recordingSink})
+	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs, FinalizedBar: archiveFinalizedBar, Clock: uihubClk, Recorder: recordingSink, ExecutionData: true})
 	coreDone := make(chan struct{})
 	go func() {
 		defer close(coreDone)
@@ -734,7 +734,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			Hysteresis:           time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
 			DisableExtendedTime:  !cfg.Feed.ExtendedTime,
 		})
-		execCore.Do(exec.ConfigureHeldDemand{Demand: engineHeldDemand{feed: fd, wait: fd.WaitTickerActive}})
+		execCore.Do(exec.ConfigureHeldDemand{Demand: engineHeldDemand{feed: fd, wait: fd.WaitTickerActive, waitExecution: fd.WaitExecutionActive, bookCoverage: fd.TrailBookCoverage}})
 		recordingProducers.Go(func() { _ = client.Run(ctx) })
 		recordingProducers.Go(func() { _ = fd.Run(ctx) })
 		pipeWG.Add(1)
@@ -1181,13 +1181,25 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 				s.SetMark(m.Symbol, m.Price)
 			}
 		case p := <-core.EligiblePrints():
-			execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, Seq: p.Seq, Gap: p.Gap})
+			if core.ExecutionEvents() == nil {
+				execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, Seq: p.Seq, Gap: p.Gap})
+			}
 			for _, a := range alerts {
 				a.Feed(pricealert.Print{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, Seq: p.Seq, Gap: p.Gap})
 			}
 		case bk := <-core.Books():
 			for _, s := range sinks {
 				s.SetBook(bk.Symbol, bk)
+			}
+		case e := <-core.ExecutionEvents():
+			if p := e.Print; p != nil {
+				execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, Seq: p.Seq, Gap: p.Gap})
+			}
+			if b := e.Book; b != nil {
+				execCore.FeedTrailBook(ctx, exec.TrailBook{Symbol: b.Symbol, Bid: b.Bid, Ask: b.Ask, Generation: b.Generation, Coverage: b.Coverage})
+			}
+			if b := e.Candle; b != nil {
+				execCore.FeedTrailCandle(ctx, exec.TrailCandle{Symbol: b.Symbol, Timeframe: b.Timeframe, StartMs: b.StartMs, EndMs: b.EndMs, Low: b.Low, High: b.High, Verified: b.Verified})
 			}
 		}
 	}
@@ -1225,8 +1237,39 @@ type demandFeeder interface {
 }
 
 type engineHeldDemand struct {
-	feed demandFeeder
-	wait func(context.Context, string) error
+	feed          demandFeeder
+	wait          func(context.Context, string) error
+	waitExecution func(context.Context, string, []feed.SubType) error
+	bookCoverage  func(string) uint64
+}
+
+func (d engineHeldDemand) TrailBookCoverage(symbol string) uint64 {
+	if d.bookCoverage == nil {
+		return 1
+	}
+	return d.bookCoverage(symbol)
+}
+
+func (d engineHeldDemand) AcquireTrail(ctx context.Context, orderID, symbol string, config exec.TrailConfig) error {
+	subs := []feed.SubType{feed.SubTicker}
+	if config.Pricing == "QUOTE" {
+		subs = append(subs, feed.SubBook)
+	}
+	if config.Mode == "CANDLE" && config.Timeframe != "10s" {
+		subs = append(subs, feed.SubKL1m)
+	}
+	id := "held-stop/" + orderID
+	d.feed.Ensure(feed.Demand{ID: id, Symbol: symbol, Subs: subs, Focused: true})
+	if d.waitExecution == nil {
+		return nil
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := d.waitExecution(waitCtx, symbol, subs); err != nil {
+		d.feed.Release(id)
+		return err
+	}
+	return nil
 }
 
 func (d engineHeldDemand) Acquire(ctx context.Context, orderID, symbol string) error {

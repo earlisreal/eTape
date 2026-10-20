@@ -246,8 +246,9 @@ func (c *Client) serveConn(ctx context.Context, conn net.Conn) (error, bool) {
 				readErr <- err
 				return
 			}
+			f.Source = feed.SourceRef{Connection: generation, Ingress: c.captureOrdinal.Add(1), Index: -1, ReceiptMs: c.clk.Now().UnixMilli(), Loss: c.pushDrops.Load()}
 			if c.opt.Recorder != nil {
-				f.Source = feed.SourceRef{Run: c.opt.Recorder.RunID(), Connection: generation, Ingress: c.captureOrdinal.Add(1), Index: -1, ReceiptMs: c.clk.Now().UnixMilli()}
+				f.Source.Run = c.opt.Recorder.RunID()
 				if captureProtocol(f.ProtoID) {
 					d := c.pending.descriptor(f)
 					d.Format = f.FmtType

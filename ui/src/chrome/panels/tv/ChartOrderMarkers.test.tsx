@@ -8,6 +8,7 @@ import { getTvChrome } from "../../../render/chart/tvTheme";
 import type { OrderConfig } from "../../exec/actionTemplate";
 import { ChartPriceAlerts } from "../../alerts/ChartPriceAlerts";
 import { PriceAlertStore } from "../../../data/PriceAlertStore";
+import {ExecStore} from "../../../data/ExecStore";
 
 const base: Order = {
   venue:"sim", id:"o1", symbol:"US.AAPL", side:"BUY", type:"LIMIT", tif:"DAY", session:"AUTO",
@@ -16,6 +17,7 @@ const base: Order = {
 };
 
 function mount(orders: Order[] = [base], config?: OrderConfig, withAlert=false) {
+  const execStore=new ExecStore();execStore.apply({kind:"snapshot",topic:"exec.orders",payload:orders});
   const host = document.createElement("div");
   host.getBoundingClientRect = () => ({ x:0, y:0, top:0, left:0, right:500, bottom:400, width:500, height:400, toJSON:() => ({}) });
   const hostRef = { current:host };
@@ -26,17 +28,35 @@ function mount(orders: Order[] = [base], config?: OrderConfig, withAlert=false) 
   document.body.append(host);
   const alertStore=new PriceAlertStore();
   alertStore.apply({kind:"snapshot",topic:"alerts.state",payload:{alerts:[{id:"a",symbol:"US.AAPL",price:100,state:"monitoring",condition:"at-or-above",label:"",sessions:{pre:true,rth:true,post:true},version:1,createdMs:1,updatedMs:1}],history:[],historyTotal:0,revision:1,error:""}});
-  const utils = render(<><ChartOrderMarkers chrome={getTvChrome("light")} orders={orders} venue="sim" symbol="US.AAPL" pinned={false}
+  const utils = render(<><ChartOrderMarkers chrome={getTvChrome("light")} orders={orders} execStore={execStore} venue="sim" symbol="US.AAPL" pinned={false}
     availableCash={100000} buyingPower={100000}
     sendCommand={sendCommand} hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={60}
     layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} {...(config ? {config} : {})} />
     {withAlert&&<ChartPriceAlerts store={alertStore} commands={{sendCommand}} symbol="US.AAPL" hostRef={hostRef} facadeRef={facadeRef} layoutRef={{current:()=>{}}} rightAxisWidth={60} paneHeight={400} enabled={true}/>}</>, { container:host });
-  return { ...utils, host, sendCommand, layoutRef };
+  return { ...utils, host, sendCommand, layoutRef,execStore };
 }
 
 beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 
 describe("ChartOrderMarkers", () => {
+  it("renders a derived trail line, disables price dragging, and submits a scoped parameter edit",async()=>{
+    const {host,sendCommand}=mount([{...base,type:"TRAILING_STOP",side:"SELL",stopPrice:99,held:{phase:"ARMED",deadlineMs:9999999999999,trail:{config:{mode:"PRICE",value:1,sessions:{pre:true,rth:true,post:true},pricing:"CUSHION",cushion:{value:0,unit:"$"},offset:{value:0,unit:"$"},buffer:{value:0,unit:"$"}},watermark:100,stop:99,limit:99}}}]);
+    const label=screen.getByTestId("order-label-o1");
+    fireEvent.keyDown(label,{key:"ArrowUp"});expect(sendCommand).not.toHaveBeenCalled();
+    expect(host.querySelector("[data-order-group]")?.getAttribute("data-price")).toBe("99");
+    fireEvent.click(screen.getByRole("button",{name:"Edit trail"}));
+    fireEvent.change(screen.getByLabelText("Trail distance"),{target:{value:"0.5"}});
+    fireEvent.click(screen.getByRole("button",{name:"Apply trail"}));
+    await waitFor(()=>expect(sendCommand).toHaveBeenCalledWith("EditTrail",expect.objectContaining({venue:"sim",orderId:"o1",expectedHeldPhase:"ARMED",expectedStop:99,config:expect.objectContaining({value:.5})})));
+  });
+  it("paints trailing progress from the imperative store without publishing every print to React",async()=>{
+    const initial:Order={...base,type:"TRAILING_STOP",side:"SELL",stopPrice:99,limitPrice:99,held:{phase:"ARMED",deadlineMs:9999999999999,trail:{config:{mode:"PRICE",value:1,sessions:{pre:true,rth:true,post:true},pricing:"CUSHION",cushion:{value:0,unit:"$"},offset:{value:0,unit:"$"},buffer:{value:0,unit:"$"}},watermark:100,stop:99,limit:99}}};
+    const {host,execStore}=mount([initial]);const notify=vi.fn();execStore.subscribe(notify);
+    execStore.apply({kind:"delta",topic:"exec.orders",payload:{...initial,stopPrice:100,limitPrice:100,held:{...initial.held!,trail:{...initial.held!.trail!,watermark:101,stop:100,limit:100}}}});
+    expect(notify).not.toHaveBeenCalled();
+    await waitFor(()=>expect(host.querySelector("[data-order-group]")?.getAttribute("data-price")).toBe("100"));
+    expect(screen.getByTestId("order-label-o1").textContent).toContain("100");
+  });
   it("keeps an order graphic above an alert at the same price",async()=>{
     const {host}=mount([base],undefined,true);
     await waitFor(()=>expect(host.querySelectorAll("[data-order-pill-visual]").length).toBeGreaterThan(1));
@@ -91,6 +111,7 @@ describe("ChartOrderMarkers", () => {
     const buy = screen.getByTestId("order-label-o1"), sell = screen.getByTestId("order-label-sell");
     const front = () => [...host.querySelectorAll<HTMLElement>("[data-order-pill-visual]")]
       .filter(el => el.style.zIndex === "11").map(el => el.dataset.orderPillVisual);
+    fireEvent.keyDown(document.body,{key:"Tab"});
     buy.focus();
     expect(front()).toEqual(["o1"]);
     fireEvent.pointerOver(sell);

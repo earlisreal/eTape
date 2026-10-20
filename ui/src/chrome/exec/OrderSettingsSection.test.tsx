@@ -52,6 +52,13 @@ function wrapWithToastAndClose(onSave = vi.fn(), toast = { push: vi.fn(), dismis
 }
 
 describe("OrderSettingsSection", () => {
+  it("saves a trailing protection mode with its explicit distance",()=>{
+    const {onSave}=wrap();fireEvent.click(screen.getByTestId("add-template"));fireEvent.click(screen.getByTestId("add-risk"));
+    fireEvent.change(screen.getByLabelText("Protection mode"),{target:{value:"PRICE"}});
+    fireEvent.change(screen.getByLabelText("Trail distance"),{target:{value:"0.3"}});
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].templates).toEqual(expect.arrayContaining([expect.objectContaining({kind:"risk",protection:expect.objectContaining({mode:"PRICE",value:.3,pricing:"CUSHION"})})]));
+  });
   it("saves a risk preset and the explicit auto-send setting together",()=>{
     const {onSave}=wrap();fireEvent.click(screen.getByTestId("add-template"));fireEvent.click(screen.getByTestId("add-risk"));
     fireEvent.click(screen.getByLabelText("Auto-send Chart Risk Entry on release / second click without preview confirmation"));

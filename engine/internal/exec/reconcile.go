@@ -148,6 +148,10 @@ func (s *State) VenueWorkingSameDir(v VenueID, symbol string, side Side) float64
 // VenueSellCommittedShares sums broker-bound SELL leaves; a local held parent
 // does not reserve shares until it has an activating child.
 func (s *State) VenueSellCommittedShares(v VenueID, symbol, excludeID string) float64 {
+	return s.VenueReducingCommittedShares(v, symbol, SideSell, excludeID)
+}
+
+func (s *State) VenueReducingCommittedShares(v VenueID, symbol string, side Side, excludeID string) float64 {
 	vs, ok := s.Venues[v]
 	if !ok {
 		return 0
@@ -155,19 +159,23 @@ func (s *State) VenueSellCommittedShares(v VenueID, symbol, excludeID string) fl
 	var qty float64
 	for id, o := range vs.Orders {
 		if id != excludeID && o.Symbol == symbol {
-			qty += sellCommitmentLeaves(o)
+			qty += reducingCommitmentLeaves(o, side)
 		}
 	}
 	for _, o := range vs.ExternalOrders {
 		if o.Symbol == symbol {
-			qty += sellCommitmentLeaves(o)
+			qty += reducingCommitmentLeaves(o, side)
 		}
 	}
 	return qty
 }
 
 func sellCommitmentLeaves(o Order) float64 {
-	if o.Side != SideSell || !o.Working() {
+	return reducingCommitmentLeaves(o, SideSell)
+}
+
+func reducingCommitmentLeaves(o Order, side Side) float64 {
+	if longward(o.Side) != longward(side) || !o.Working() {
 		return 0
 	}
 	if o.Held != nil && o.Held.ChildClientID == "" &&
@@ -199,6 +207,22 @@ func (s *State) VenueHasSellCommitments(v VenueID) bool {
 	}
 	for _, o := range vs.ExternalOrders {
 		if sellCommitmentLeaves(o) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *State) VenueHasReducingCommitments(v VenueID) bool {
+	for symbol, position := range s.Venue(v).Positions {
+		if position.Qty == 0 {
+			continue
+		}
+		side := SideSell
+		if position.Qty < 0 {
+			side = SideCover
+		}
+		if s.VenueReducingCommittedShares(v, symbol, side, "") > 0 {
 			return true
 		}
 	}
