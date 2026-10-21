@@ -6,9 +6,11 @@ import { PriceAlertEditor,type AlertCommands,type AlertEdit } from "./PriceAlert
 import { attachOrderPillLayer } from "../panels/tv/orderPillLayer";
 import { IconBell } from "../panels/tv/tvIcons";
 import { snapAlertPrice,alertPriceText } from "./price";
+import type { LinkGroup } from "../linkGroups";
 
 interface Props {
  store:PriceAlertStore;commands:AlertCommands;symbol:string;
+ group?:LinkGroup;
  hostRef:MutableRefObject<HTMLDivElement|null>;
  facadeRef:MutableRefObject<Pick<ChartApiFacade,"priceToCoordinate"|"coordinateToPrice"|"setPanZoomEnabled">|null>;
  layoutRef:MutableRefObject<()=>void>;
@@ -74,7 +76,7 @@ export function ChartPriceAlerts(props:Props):JSX.Element {
    if(y<0||y>props.paneHeight||e.clientX-r.left>r.width-props.rightAxisWidth)return;
    const price=props.facadeRef.current?.coordinateToPrice(y);
    e.preventDefault();e.stopImmediatePropagation();props.onDisarm?.();
-   if(price!==null&&price!==undefined&&price>0)setEdit({symbol:props.symbol,price:snapAlertPrice(price)});
+   if(price!==null&&price!==undefined&&price>0)setEdit({symbol:props.symbol,price:snapAlertPrice(price),sourceGroup:props.group??null});
   };
   let frame=0;
   const move=(e:PointerEvent)=>{const r=host.getBoundingClientRect();hover.current={x:e.clientX-r.left,y:e.clientY-r.top};if(!frame)frame=requestAnimationFrame(()=>{frame=0;layout();});};
@@ -85,7 +87,7 @@ export function ChartPriceAlerts(props:Props):JSX.Element {
   host.addEventListener("pointermove",move);host.addEventListener("pointerleave",leave);
   window.addEventListener("keydown",key);window.addEventListener("blur",cancel);window.addEventListener("pointercancel",cancel);host.addEventListener("contextmenu",cancel);
   return()=>{cancelAnimationFrame(frame);host.removeEventListener("pointermove",move);host.removeEventListener("pointerleave",leave);host.removeEventListener("pointerdown",down,true);window.removeEventListener("keydown",key);window.removeEventListener("blur",cancel);window.removeEventListener("pointercancel",cancel);host.removeEventListener("contextmenu",cancel);};
- },[props.armed,props.symbol,props.paneHeight,props.rightAxisWidth,props.hostRef,props.facadeRef,props.onDisarm]);
+ },[props.armed,props.symbol,props.group,props.paneHeight,props.rightAxisWidth,props.hostRef,props.facadeRef,props.onDisarm]);
  const down=(e:ReactPointerEvent,alert:PriceAlert)=>{
   const ids=e.currentTarget.parentElement?.dataset.ids?.split(",")??[];
   if(!props.enabled||ids.length>1||e.button!==0||e.altKey||e.shiftKey||e.ctrlKey||e.metaKey)return;

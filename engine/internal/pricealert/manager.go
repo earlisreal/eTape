@@ -56,22 +56,24 @@ func (s Sessions) allows(at time.Time) bool {
 }
 
 type Alert struct {
-	ID        string    `json:"id"`
-	Symbol    string    `json:"symbol"`
-	Condition Condition `json:"condition"`
-	Price     float64   `json:"price"`
-	Label     string    `json:"label"`
-	Sessions  Sessions  `json:"sessions"`
-	State     State     `json:"state"`
-	Version   uint64    `json:"version"`
-	CreatedMs int64     `json:"createdMs"`
-	UpdatedMs int64     `json:"updatedMs"`
+	ID          string    `json:"id"`
+	Symbol      string    `json:"symbol"`
+	SourceGroup string    `json:"sourceGroup,omitempty"`
+	Condition   Condition `json:"condition"`
+	Price       float64   `json:"price"`
+	Label       string    `json:"label"`
+	Sessions    Sessions  `json:"sessions"`
+	State       State     `json:"state"`
+	Version     uint64    `json:"version"`
+	CreatedMs   int64     `json:"createdMs"`
+	UpdatedMs   int64     `json:"updatedMs"`
 }
 
 type Trigger struct {
 	ID          string    `json:"id"`
 	AlertID     string    `json:"alertId"`
 	Symbol      string    `json:"symbol"`
+	SourceGroup string    `json:"sourceGroup,omitempty"`
 	Condition   Condition `json:"condition"`
 	Price       float64   `json:"price"`
 	ActualPrice float64   `json:"actualPrice"`
@@ -83,14 +85,15 @@ type Trigger struct {
 }
 
 type Draft struct {
-	ID        string
-	Version   uint64
-	Rearm     bool
-	Symbol    string
-	Condition Condition
-	Price     float64
-	Label     string
-	Sessions  Sessions
+	ID          string
+	Version     uint64
+	Rearm       bool
+	Symbol      string
+	SourceGroup string
+	Condition   Condition
+	Price       float64
+	Label       string
+	Sessions    Sessions
 }
 
 type Print struct {
@@ -225,12 +228,17 @@ func (m *Manager) Upsert(draft Draft) (Alert, error) {
 	if draft.Condition != AtOrAbove && draft.Condition != AtOrBelow {
 		return Alert{}, errors.New("invalid price alert condition")
 	}
+	switch draft.SourceGroup {
+	case "", "red", "green", "blue", "yellow":
+	default:
+		return Alert{}, errors.New("invalid price alert source group")
+	}
 	if !draft.Sessions.Pre && !draft.Sessions.RTH && !draft.Sessions.Post {
 		return Alert{}, errors.New("select at least one session")
 	}
 	now := m.clk.Now().UnixMilli()
 	alert := Alert{ID: "pa-" + rand.Text(), Symbol: draft.Symbol, Condition: draft.Condition, Price: draft.Price,
-		Label: strings.TrimSpace(draft.Label), Sessions: draft.Sessions, State: WaitingData, Version: 1, CreatedMs: now, UpdatedMs: now}
+		SourceGroup: draft.SourceGroup, Label: strings.TrimSpace(draft.Label), Sessions: draft.Sessions, State: WaitingData, Version: 1, CreatedMs: now, UpdatedMs: now}
 	if draft.ID != "" {
 		previous, ok := m.alerts[draft.ID]
 		if !ok {
@@ -243,6 +251,7 @@ func (m *Manager) Upsert(draft Draft) (Alert, error) {
 			return Alert{}, errors.New("an existing alert's symbol cannot change")
 		}
 		alert.ID, alert.CreatedMs, alert.Version = previous.ID, previous.CreatedMs, previous.Version+1
+		alert.SourceGroup = previous.SourceGroup
 		if previous.State == Triggered && !draft.Rearm {
 			alert.State = Triggered
 		}
@@ -523,7 +532,7 @@ func (m *Manager) Ingest(print Print) error {
 		alert.State, alert.UpdatedMs = Triggered, m.clk.Now().UnixMilli()
 		alert.Version++
 		trigger := Trigger{ID: "pt-" + rand.Text(), AlertID: id, Symbol: alert.Symbol, Condition: alert.Condition,
-			Price: alert.Price, ActualPrice: print.Price, Label: alert.Label, Sessions: alert.Sessions, Session: session.PhaseAt(time.UnixMilli(print.TsMs)).String(), TsMs: print.TsMs, Reason: "Target reached"}
+			SourceGroup: alert.SourceGroup, Price: alert.Price, ActualPrice: print.Price, Label: alert.Label, Sessions: alert.Sessions, Session: session.PhaseAt(time.UnixMilli(print.TsMs)).String(), TsMs: print.TsMs, Reason: "Target reached"}
 		if m.resuming[id] {
 			trigger.Reason = "Target met on resume"
 		}

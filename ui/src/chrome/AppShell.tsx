@@ -36,6 +36,7 @@ import { useHotkeys } from "./exec/useHotkeys";
 import { useAutoUnlockOnStartup } from "./exec/useAutoUnlockOnStartup";
 import { useSoundWiring } from "../sound/useSoundWiring";
 import { PriceAlertNotifications } from "./alerts/PriceAlertNotifications";
+import { AlertNavigation } from "./alerts/navigation";
 import { NewWindowModal } from "./NewWindowModal";
 import { mutateWindows, readWindows } from "./catalogs";
 import { openWorkspaceWindow } from "./windows";
@@ -144,6 +145,18 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const oc = useOrderCommands(commands, stores.exec, toast);
   const orderConfig = useOrderConfig();
   const [windowId] = useState(() => crypto.randomUUID());
+  const alertNavigation = useMemo(() => new AlertNavigation(windowId, workspaceName), [windowId, workspaceName]);
+  useEffect(() => alertNavigation.start(), [alertNavigation]);
+  useEffect(() => alertNavigation.sync(ws?.panels ?? null), [alertNavigation, ws]);
+  useEffect(() => {
+    const interact = (event: Event) => {
+      const panel = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-alerts-panel]") : null;
+      if (panel?.dataset.alertsPanel) alertNavigation.use(panel.dataset.alertsPanel);
+    };
+    window.addEventListener("pointerdown", interact, true);
+    window.addEventListener("keydown", interact, true);
+    return () => { window.removeEventListener("pointerdown", interact, true); window.removeEventListener("keydown", interact, true); };
+  }, [alertNavigation]);
   const hotkeyCoordinator = useMemo(
     () => new HotkeyTargetCoordinator(windowId, hotkeyTargetChannel),
     [hotkeyTargetChannel, windowId],
@@ -397,11 +410,11 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   useEffect(() => {
     const activateFocusedPanel = () => {
       const panel = apiRef.current?.activePanel;
-      if (panel) activatePanelTarget(panel.id);
+      if (panel) { activatePanelTarget(panel.id); alertNavigation.use(panel.id); }
     };
     window.addEventListener("focus", activateFocusedPanel);
     return () => window.removeEventListener("focus", activateFocusedPanel);
-  }, [activatePanelTarget]);
+  }, [activatePanelTarget, alertNavigation]);
   useHotkeys({ stores, commands, target: hotkeyTarget });
   // Auto-unlock-on-startup (fire-once latch — see the hook's own comment):
   // arms trading automatically once the engine connection is up, if the user
@@ -790,18 +803,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     scannerSyncRuntime.replace(next);
   }, [scannerPlan, scannerSyncRuntime, selectScannerSource, syncConfig, toggleScannerSync, workspaceName, ws]);
 
-  useEffect(()=>{
-    const view=(e:Event)=>{
-      if(!ws)return;
-      const symbol=(e as CustomEvent<string>).detail;
-      if(typeof symbol!=="string")return;
-      const existing=(wsRef.current??ws).panels.find(p=>p.panelId==="chart"&&(p.group===null?p.settings.symbol:linkGroups.symbolFor(p.group))===symbol);
-      if(existing)apiRef.current?.getPanel(existing.id)?.focus();else addPanel("chart",{symbol});
-    };
-    window.addEventListener("etape:alert-chart",view);return()=>window.removeEventListener("etape:alert-chart",view);
-  });
-
-
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
   // A stable per-panel onConfigChange MERGES a settings patch into
@@ -839,6 +840,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     const current = wsRef.current ?? ws;
     const next = { ...current, panels: current.panels.map((p) => (p.id === panelId ? { ...p, group } : p)) };
     wsRef.current = next;
+    alertNavigation.sync(next.panels);
+    alertNavigation.use(panelId);
     setWs(next);
     workspaceStore.save(next);
     refreshOwnedTarget();
@@ -881,6 +884,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     hotkeyCoordinator.clearOwned(id);
     const next = { ...current, panels: current.panels.filter((p) => p.id !== id) };
     wsRef.current = next;
+    alertNavigation.sync(next.panels);
     setWs(next);
     workspaceStore.save(next);
     apiRef.current?.getPanel(id)?.api.close();
@@ -915,6 +919,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     }
     setWs(next);
     wsRef.current = next;
+    alertNavigation.sync(next.panels);
     workspaceStore.save(next);
     // next.panels.length === 0 is deliberately excluded: the render right
     // after this setWs swaps <DockviewReact> out for <EmptyState> (same
@@ -1079,7 +1084,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       });
     }
     event.api.onDidActivePanelChange(({ panel, origin }) => {
-      if (origin === "user" && panel) activatePanelTarget(panel.id);
+      if (origin === "user" && panel) { activatePanelTarget(panel.id); alertNavigation.use(panel.id); }
     });
     // Programmatic layout restore is deliberately not treated as a user
     // activation. Only the OS-focused window may seed that restored panel.
@@ -1124,7 +1129,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           )}
         </div>
         <BootStatusBanner boot={stores.boot} />
-        <PriceAlertNotifications store={stores.priceAlerts} commands={commands} onViewAlerts={onViewAlerts}/>
+        <PriceAlertNotifications store={stores.priceAlerts} commands={commands} onViewAlerts={onViewAlerts} navigation={alertNavigation} linkGroups={linkGroups}/>
         <DemoBanner session={stores.session} />
         <FeedStatusBanner health={stores.health} boot={stores.boot} engineState={engineState} onOpenConnection={onOpenConnection} />
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}

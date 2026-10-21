@@ -1,5 +1,11 @@
 # Panels
 
+Alerts and History symbols are quiet buttons that load the panel's current
+Link Group. Pinned Alerts Panels show a choose-color instruction and disable
+symbol navigation. Watchlist also requires a color for its existing double-click
+navigation; single-click selection and list management remain available.
+Both follow live color changes and preserve explicit detachment to pinned.
+
 Dockable chart, ladder, tape, scanner, watchlist, stock-info, locates,
 account, order, and settings surfaces. The symbol-bearing Locates panel uses
 only `exec.status`, follows the existing PanelFrame symbol and venue

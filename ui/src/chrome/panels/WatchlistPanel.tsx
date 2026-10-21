@@ -48,7 +48,7 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
   // factory with a fresh config after a later swatch re-pick) — PanelFrame threads
   // the live re-picked group through as the `group` prop instead. Same pattern as
   // ChartPanel/LadderPanel/TapePanel/etc.
-  const group = groupProp ?? config.group;
+  const group = groupProp === undefined ? config.group : groupProp;
   const toast = useToasts();
   const snap = useSyncExternalStore((cb) => stores.watchlist.subscribe(cb), () => stores.watchlist.getSnapshot());
   const [sort, setSort] = useState<SortState>(null);
@@ -112,6 +112,7 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
       <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12,
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 16 }}>
         <span style={{ color: palette.textMuted }}>Add a symbol to start your watchlist</span>
+        {!group && <span>Choose a Link Group color to load symbols.</span>}
         {addInput}
       </div>
     );
@@ -122,6 +123,7 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}` }}>
         {addInput}
       </div>
+      {!group && <p style={{ padding: "0 8px" }}>Choose a Link Group color to load symbols.</p>}
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ color: palette.textMuted, textAlign: "right" }}>
@@ -139,7 +141,7 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
             return (
               <tr key={r.symbol}
                 onClick={() => setSelectedSymbol(r.symbol)}
-                onDoubleClick={() => linkGroups.focus(group ?? "green", r.symbol)}
+                onDoubleClick={() => { if (group) linkGroups.focus(group, r.symbol); }}
                 onContextMenu={(e) => { e.preventDefault(); setMenu({ clientX: e.clientX, clientY: e.clientY, symbol: r.symbol }); }}
                 onMouseEnter={() => setHoveredSymbol(r.symbol)}
                 onMouseLeave={() => setHoveredSymbol((h) => (h === r.symbol ? null : h))}

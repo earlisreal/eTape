@@ -5,9 +5,9 @@ import type { AckMsg, PriceAlert, PriceAlertPreview } from "../../wire/contract"
 import { modalTracker } from "../modalTracker";
 
 export interface AlertCommands { sendCommand(name:string,args:unknown):Promise<AckMsg> }
-export interface AlertEdit { alert?:PriceAlert; symbol:string; price?:number; rearm?:boolean }
+export interface AlertEdit { alert?:PriceAlert; symbol:string; price?:number; rearm?:boolean; sourceGroup?:string|null }
 
-export function PriceAlertEditor({commands,symbol,price,alert,rearm=false,onClose}:AlertEdit & {commands:AlertCommands;onClose:()=>void}):JSX.Element {
+export function PriceAlertEditor({commands,symbol,price,alert,rearm=false,sourceGroup,onClose}:AlertEdit & {commands:AlertCommands;onClose:()=>void}):JSX.Element {
  const [target,setTarget]=useState(String(price??alert?.price??""));
  const [condition,setCondition]=useState(alert?.condition??"at-or-above");
  const touched=useRef(!!alert);
@@ -36,7 +36,7 @@ export function PriceAlertEditor({commands,symbol,price,alert,rearm=false,onClos
   if(!Number.isFinite(value)||value<=0||!newSymbol.trim()){setError("Enter a symbol and positive target price.");return;}
   if(!sessions.pre&&!sessions.rth&&!sessions.post){setError("Select at least one session.");return;}
   setBusy(true);setError("");
-  try{const ack=await commands.sendCommand("UpsertPriceAlert",{id:alert?.id??"",version:alert?.version??0,rearm,symbol:effectiveSymbol,condition,price:value,label,sessions});
+  try{const ack=await commands.sendCommand("UpsertPriceAlert",{id:alert?.id??"",version:alert?.version??0,rearm,symbol:effectiveSymbol,sourceGroup:alert?alert.sourceGroup:sourceGroup??undefined,condition,price:value,label,sessions});
    if(ack.status!=="accepted")setError(ack.reason??"Could not save alert.");else onClose();
   }catch(e){setError(String(e));}finally{setBusy(false);}
  };

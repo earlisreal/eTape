@@ -10,6 +10,11 @@ reject stale definition edits. `PreviewPriceAlert` returns only a recent trusted
 eligible price (zero means unavailable). `QueryPriceAlertHistory` pages older
 records using `beforeId`. `ClaimPriceAlertNotification` grants popup/sound rights
 against the authenticated connection identity, once per live engine burst.
+`UpsertPriceAlert.sourceGroup` optionally captures red/green/blue/yellow at
+creation; the engine preserves it on edits/Rearm. Both definition and trigger
+DTOs expose the optional field, including history pages and live notifications.
+An omitted color supports legacy/ungrouped alerts. The browser uses it only
+when no open grouped Alerts Panel provides a navigation destination.
 
 `exec.status` includes optional per-venue `protectionWarnings`, projected by
 Core with verified current quantities or checking/unverified state. Account

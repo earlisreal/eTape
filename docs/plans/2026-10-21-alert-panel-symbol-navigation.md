@@ -1,6 +1,6 @@
 # Alert and Watchlist symbol navigation
 
-Status: approved design on 2026-10-21; implementation pending.
+Status: implemented on 2026-10-21; design approved on 2026-10-21.
 
 ## Goal and settled decisions
 
@@ -34,7 +34,9 @@ No changes to trigger evaluation, alert sound/claims, monitoring, history
 retention, order submission, other list panels, or workspace activation.
 No new dependencies or additional chart-creation path.
 
-## Current-code evidence
+## Original behavior
+
+The implementation started from these call paths and constraints:
 
 - [AlertsPanel.tsx](../../ui/src/chrome/panels/AlertsPanel.tsx) has `View chart`
   in both tabs. [PanelFrame.tsx](../../ui/src/chrome/PanelFrame.tsx) already
@@ -61,8 +63,8 @@ No new dependencies or additional chart-creation path.
   which can belong to closed Workspaces and lag live color changes.
   [windows.ts](../../ui/src/chrome/windows.ts) has main-only presence, while
   [HotkeyTargetCoordinator](../../ui/src/chrome/hotkeyTarget.ts) tracks only one
-  active panel of any type. Its channel request/replay/update/clear and revision
-  patterns can guide narrow Alerts Panel coordination without changing hotkeys.
+  active panel of any type. The existing browser storage and Web Lock patterns
+  support narrow Alerts Panel coordination without changing hotkeys.
 - [navigation.ts](../../ui/src/chrome/alerts/navigation.ts) dispatches
   `etape:alert-chart`; [AppShell.tsx](../../ui/src/chrome/AppShell.tsx) handles
   it by activating a matching chart or creating a pinned chart. Remove this
@@ -136,18 +138,20 @@ changes venues, creates charts, or activates another workspace.
    Thread source colors from chart/editor/panel callers and preserve them through
    edit/Rearm. Trigger snapshots retain their own colors. Existing JSON storage
    handles the added field without a schema migration.
-4. Add narrow cross-window Alerts Panel coordination under the existing alerts
-   module, reusing the channel/revision conventions already present. Publish
+4. Add narrow cross-window Alerts Panel coordination in the existing navigation
+   module using browser storage snapshots and Web Locks. Publish
    actual live panel identities, current colors, and the agreed selection order;
    register changes on workspace readiness, add/remove, color re-pick, and
    interaction. Include inactive tabs in an open Workspace. Handle late joiners,
-   orderly close, and abandoned owners without persisting live presence into
-   workspace layouts. Use a per-window-instance Web Lock for owner lifetime,
+   orderly close, and abandoned owners without writing presence into workspace
+   layouts. Use a per-window-instance Web Lock for owner lifetime,
    following the existing workspace-lock pattern but covering main too. Check
    owner liveness when resolving stale entries; background/minimized windows
    must not lose priority merely because a heartbeat timer was throttled.
    Saved layouts in closed windows are never candidates. This uses the same
    browser-profile scope as existing cross-window LinkGroups.
+   Storage events refresh popup previews; activation reads fresh shared state
+   for every live owner. Cleanup removes its snapshot after releasing the lock.
    Keep this separate from the hotkey target and notification sound/claim logic.
    Gate popup routing until discovery/liveness is resolved: an unavailable
    coordination API or a still-unresolved owner is not evidence that no panel
@@ -157,8 +161,8 @@ changes venues, creates charts, or activates another workspace.
 5. Route popup symbol clicks through the live registry, then the trigger's source
    color, using existing LinkGroups supplied by AppShell. Keep burst count,
    View alerts, dismissal, timeout, and notification claims. Remove the obsolete
-   chart-event helper/handler after checking every caller; repurpose the existing
-   navigation module only if it keeps this behavior together without extra layers.
+   chart-event handler after checking every caller. The existing navigation
+   module owns the presence/destination logic without a new coordination layer.
 6. Update the UI guide and Price Alerts specification for panel, popup, and
    Watchlist behavior. Update the
    [engine alert guide](../../engine/internal/pricealert/README.md) and affected
@@ -182,9 +186,9 @@ changes venues, creates charts, or activates another workspace.
 - Cover panel-color priority over source color across windows, multiple-panel
   selection, color changes and detachment, inactive tabs, late joining windows,
   panel/window close, abandoned-owner removal, and missing destinations. Use
-  injectable channel/liveness inputs for deterministic tests; keep new
+  injectable shared-storage/liveness inputs for deterministic tests; keep new
   tests under the already-included `chrome/alerts` regression-test directory.
-  Include stable startup/tie ordering, stale replay rejection, retained priority
+  Include stable startup/tie ordering, ignored stale owner snapshots, retained priority
   after switching away from Alerts, and unresolved/unavailable coordination.
 - Add a focused `ui/e2e/alert-navigation.spec.ts` using the existing demo/mock
   fixtures. Exercise real BroadcastChannel/Web Lock behavior across two windows:
@@ -192,10 +196,6 @@ changes venues, creates charts, or activates another workspace.
   Use synthetic alert data; no live account or order operation is needed.
 - Inspect light/dark themes and narrow panels for ticker focus, hover, and the
   no-color instruction.
-
-For this prose-only approved plan, validate Markdown links and run
-`git diff --check`. Engine/UI checks are skipped and hosted CI need not finish
-before handoff, per [AGENTS.md](../../AGENTS.md#validation).
 
 For implementation, run from `ui/`:
 

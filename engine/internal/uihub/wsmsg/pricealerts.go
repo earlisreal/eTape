@@ -7,22 +7,24 @@ type PriceAlertSessions struct {
 }
 
 type PriceAlert struct {
-	ID        string             `json:"id"`
-	Symbol    string             `json:"symbol"`
-	Condition string             `json:"condition"`
-	Price     float64            `json:"price"`
-	Label     string             `json:"label"`
-	Sessions  PriceAlertSessions `json:"sessions"`
-	State     string             `json:"state"`
-	Version   uint64             `json:"version"`
-	CreatedMs int64              `json:"createdMs"`
-	UpdatedMs int64              `json:"updatedMs"`
+	ID          string             `json:"id"`
+	Symbol      string             `json:"symbol"`
+	SourceGroup string             `json:"sourceGroup,omitempty"`
+	Condition   string             `json:"condition"`
+	Price       float64            `json:"price"`
+	Label       string             `json:"label"`
+	Sessions    PriceAlertSessions `json:"sessions"`
+	State       string             `json:"state"`
+	Version     uint64             `json:"version"`
+	CreatedMs   int64              `json:"createdMs"`
+	UpdatedMs   int64              `json:"updatedMs"`
 }
 
 type PriceAlertTrigger struct {
 	ID          string             `json:"id"`
 	AlertID     string             `json:"alertId"`
 	Symbol      string             `json:"symbol"`
+	SourceGroup string             `json:"sourceGroup,omitempty"`
 	Condition   string             `json:"condition"`
 	Price       float64            `json:"price"`
 	ActualPrice float64            `json:"actualPrice"`
@@ -48,14 +50,15 @@ type PriceAlertNotification struct {
 }
 
 type UpsertPriceAlertArgs struct {
-	ID        string             `json:"id"`
-	Version   uint64             `json:"version"`
-	Rearm     bool               `json:"rearm"`
-	Symbol    string             `json:"symbol"`
-	Condition string             `json:"condition"`
-	Price     float64            `json:"price"`
-	Label     string             `json:"label"`
-	Sessions  PriceAlertSessions `json:"sessions"`
+	ID          string             `json:"id"`
+	Version     uint64             `json:"version"`
+	Rearm       bool               `json:"rearm"`
+	Symbol      string             `json:"symbol"`
+	SourceGroup string             `json:"sourceGroup,omitempty"`
+	Condition   string             `json:"condition"`
+	Price       float64            `json:"price"`
+	Label       string             `json:"label"`
+	Sessions    PriceAlertSessions `json:"sessions"`
 }
 
 type PriceAlertActionArgs struct {

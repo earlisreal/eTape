@@ -1254,7 +1254,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     }
     items.push({ label: "Reset chart view", onClick: () => { controllerRef.current?.resetZoom(); forceRepaintRef.current = true; } });
     const price = facadeRef.current?.coordinateToPrice(m.y) ?? null;
-    if(price!==null&&price>0)items.push({label:`Create price alert at $${alertPriceText(price)}…`,onClick:()=>setAlertEdit({symbol:chartSymbol,price:snapAlertPrice(price)})});
+    if(price!==null&&price>0)items.push({label:`Create price alert at $${alertPriceText(price)}…`,onClick:()=>setAlertEdit({symbol:chartSymbol,price:snapAlertPrice(price),sourceGroup:group})});
     if (price !== null) items.push({ label: `Copy price ${price.toFixed(2)}`, onClick: () => void navigator.clipboard?.writeText(price.toFixed(2)) });
     items.push("separator");
     items.push({ label: "Remove all drawings", danger: true, onClick: clearAllDrawings });
@@ -1332,7 +1332,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           <ChartRiskEntry chrome={chrome} panelId={config.id} active={!!active} contextKey={timeframe} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
             symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={alertArmed?"measure":activeTool} chooserOpenRef={orderChooserOpenRef} layoutRef={riskEntryLayoutRef}
             sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
-          <ChartPriceAlerts key={`${chartSymbol}:${timeframe}`} store={stores.priceAlerts} commands={commands} symbol={chartSymbol} hostRef={hostRef} facadeRef={facadeRef} layoutRef={alertLayoutRef}
+          <ChartPriceAlerts key={`${chartSymbol}:${timeframe}`} store={stores.priceAlerts} commands={commands} symbol={chartSymbol} group={group} hostRef={hostRef} facadeRef={facadeRef} layoutRef={alertLayoutRef}
             rightAxisWidth={rightAxisWidth} paneHeight={paneOffsets[1]??height} enabled={activeTool==="select"&&!alertArmed} armed={alertArmed} onDisarm={()=>setAlertArmed(false)}/>
           {selection && (
             <TVFloatingToolbar key={selection.id} chrome={chrome} kind={selection.kind} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}

@@ -89,7 +89,7 @@ and the audio boundary are recorded in the [monitoring ADR](../../docs/adr/0008-
   monitoring. Its data is shared across Workspaces.
 - Retain a distinct Price Alert Trigger for every occurrence. Rearming or
   deleting the saved alert does not delete past trigger entries.
-- History records retain the symbol, condition, target, triggering Last-Eligible
+- History records retain the symbol, saved source Link Group when present, condition, target, triggering Last-Eligible
   Price, event time, label, session, and reason as they were at the trigger.
 - History remains until the trader explicitly deletes its entries; no automatic
   retention purge is part of the initial feature.
@@ -98,8 +98,8 @@ and the audio boundary are recorded in the [monitoring ADR](../../docs/adr/0008-
 
 - Price Alert Sound is Beacon: the audition's three rounded same-pitch pulses.
 - A trigger produces a brief nonblocking popup plus its persistent history
-  entry. The popup does not switch symbols, change Link Group focus, steal
-  keyboard focus, or move between Workspaces.
+  entry. Showing it leaves symbols, Link Group focus, keyboard focus, and the
+  current Workspace unchanged. Explicit symbol activation navigates as below.
 - Emit sound once across open Workspaces for the same trigger or burst, at the
   engine-instance scope. A second panel/window must not duplicate the cue.
 - Coalesce simultaneous triggers into one Beacon and a popup showing the count;
@@ -128,13 +128,24 @@ Saved alert definitions and trigger occurrences have separate lifecycles:
   editor, so an already-met warning is visible before confirming.
 - Pausing/resuming/editing a saved alert never erases its history. Editing a
   triggered definition does not silently rearm it; Rearm is explicit.
-- History rows show each trigger snapshot, with View chart, Delete history entry,
+- History rows show each trigger snapshot, with a clickable symbol, Delete history entry,
   and View alert when its saved definition still exists. Deleted definitions
   leave their history readable and identifiable as `Alert deleted`.
 - Popup `View alerts` opens/focuses an Alerts Panel in the current Workspace.
-  Clicking a row selects it. Only an explicit View chart action navigates:
-  focus a matching-symbol chart in the current Workspace, otherwise open a
-  pinned Chart Panel without changing the trader's Link Group symbols.
+  Clicking a row selects it; single-clicking its symbol loads that Alerts Panel's
+  current Link Group. A selected color is required. Remove View chart from the
+  panel and popup; symbol activation updates existing followers without opening
+  charts or activating another Workspace.
+- Popup symbol clicks prefer the most recently used grouped Alerts Panel open
+  anywhere in the browser profile, including inactive tabs/background windows.
+  Only if none is grouped/open do they use the trigger's saved source color.
+  If neither exists, disable symbol navigation with a choose-color instruction
+  and keep View alerts available. Showing a popup never navigates automatically.
+- Capture the initiating chart/panel's color at alert creation. Editing and
+  Rearm retain the original source, and each trigger snapshots it independently.
+  Colorless creation and existing alerts/history without source metadata stay
+  valid; never invent a green fallback. Popup bursts retain the first displayed
+  trigger's clickable symbol and their existing count.
 - Keep the first version focused on per-row management: no bulk actions,
   additional trigger sources, overnight session, modifier-click bindings,
   automatic corporate-action adjustments, or custom sound library.
@@ -169,7 +180,14 @@ Saved alert definitions and trigger occurrences have separate lifecycles:
     selected session can trigger under the resume rules.
 14. A split does not silently alter an absolute target. The feature communicates
     the need to review saved levels after splits.
-15. View chart never changes another Link Group's symbol or sends an order.
+15. A symbol click updates only its chosen Link Group across Workspaces, creates
+    no chart, changes no venue, and sends no order. Other colors/pinned charts stay.
+16. Pinned Alerts and Watchlist panels require choosing a color for navigation;
+    Watchlist retains double-click navigation and single-click selection.
+17. Popup panel color takes priority over source, then falls back after the last
+    grouped panel closes/detaches. Multiple panels use most recent interaction.
+18. Old/colorless alerts keep monitoring. Source colors survive edit, Rearm,
+    restart, and definition deletion; missing destinations disable navigation.
 
 ## Audition and visual review
 
@@ -241,3 +259,11 @@ Earl approved the complete design, including Alerts / History tabs, Add Panel
 entry, editor-based Rearm, explicit navigation without changing Link Group
 symbols, and General / Sounds Beacon enable/Preview without per-alert mute.
 Feature implementation was subsequently authorized through the implement skill.
+
+### 2026-10-21 — symbol navigation
+
+Earl approved the [navigation plan](../../docs/plans/2026-10-21-alert-panel-symbol-navigation.md):
+panel symbols use their required current color; popups prefer the most recently
+used grouped Alerts Panel anywhere, falling back to the original source color.
+Ungrouped creation stays valid, edits/Rearm preserve the source, and Watchlist
+also loses its green fallback. This supersedes the original View chart rule.

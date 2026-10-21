@@ -5,6 +5,13 @@ Last-Eligible Price lane. This package has no execution or broker dependency.
 Definitions and independent trigger snapshots are stored through the existing
 single SQLite writer, atomically saving a trigger with its definition's state.
 
+Definitions optionally retain `sourceGroup`, the red/green/blue/yellow Link
+Group captured at creation. Upsert validates supplied colors and preserves the
+saved source on edits and Rearm. Each trigger snapshots that source for popup
+navigation after definition changes/deletion. Missing metadata in old JSON or
+an ungrouped source remains valid; it affects UI navigation only, never monitoring.
+The existing JSON payload storage needs no table migration.
+
 `Run` consumes the bounded `Feed` queue and publishes only lifecycle changes;
 ordinary trades never become React updates. Queue overflow and feed gaps invalidate
 queued prices. Every create, edit, resume, restart, and selected-session transition

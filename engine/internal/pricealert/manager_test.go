@@ -15,6 +15,40 @@ import (
 
 type availableFeed struct{}
 
+func TestSourceGroupValidationAndLegacyEdits(t *testing.T) {
+	db, err := store.Open(store.Options{Path: filepath.Join(t.TempDir(), "alerts.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	manager, err := pricealert.New(pricealert.Options{Repository: db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := pricealert.Draft{Symbol: "NVDA", Condition: pricealert.AtOrAbove, Price: 139, Sessions: pricealert.Sessions{RTH: true}}
+	for _, group := range []string{"", "red", "green", "blue", "yellow"} {
+		draft.SourceGroup = group
+		alert, err := manager.Upsert(draft)
+		if err != nil || alert.SourceGroup != group {
+			t.Fatalf("group %q: %+v, %v", group, alert, err)
+		}
+		if group == "" {
+			edit := draft
+			edit.ID, edit.Version, edit.SourceGroup = alert.ID, alert.Version, "blue"
+			updated, err := manager.Upsert(edit)
+			if err != nil || updated.SourceGroup != "" {
+				t.Fatalf("legacy source changed: %+v, %v", updated, err)
+			}
+		}
+	}
+	for _, group := range []string{"purple", "BLUE", " red "} {
+		draft.SourceGroup = group
+		if _, err := manager.Upsert(draft); err == nil {
+			t.Fatalf("accepted invalid source %q", group)
+		}
+	}
+}
+
 type failingRepository struct {
 	pricealert.Repository
 	fail bool
@@ -89,7 +123,7 @@ func TestTriggerIsOneShotAndDurableAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	alert, err := manager.Upsert(pricealert.Draft{Symbol: "NVDA", Condition: pricealert.AtOrAbove, Price: 139,
+	alert, err := manager.Upsert(pricealert.Draft{Symbol: "NVDA", SourceGroup: "blue", Condition: pricealert.AtOrAbove, Price: 139,
 		Sessions: pricealert.Sessions{Pre: true, RTH: true, Post: true}})
 	if err != nil {
 		t.Fatal(err)
@@ -107,14 +141,14 @@ func TestTriggerIsOneShotAndDurableAcrossRestart(t *testing.T) {
 	if len(snapshot.History) != 1 || snapshot.Alerts[0].State != pricealert.Triggered {
 		t.Fatalf("one-shot alert: %+v", snapshot)
 	}
-	if trigger := snapshot.History[0]; trigger.AlertID != alert.ID || trigger.Price != 139 || trigger.ActualPrice != 139.25 {
+	if trigger := snapshot.History[0]; trigger.AlertID != alert.ID || trigger.Price != 139 || trigger.ActualPrice != 139.25 || trigger.SourceGroup != "blue" {
 		t.Fatalf("wrong trigger snapshot: %+v", trigger)
 	}
 	restarted, err := pricealert.New(options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := restarted.Snapshot(); len(got.History) != 1 || got.Alerts[0].State != pricealert.Triggered {
+	if got := restarted.Snapshot(); len(got.History) != 1 || got.Alerts[0].State != pricealert.Triggered || got.Alerts[0].SourceGroup != "blue" || got.History[0].SourceGroup != "blue" {
 		t.Fatalf("restart lost the one-shot trigger: %+v", got)
 	}
 }
@@ -180,7 +214,7 @@ func TestRearmAndDeleteKeepIndependentTriggerHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	draft := pricealert.Draft{Symbol: "NVDA", Condition: pricealert.AtOrAbove, Price: 139, Label: "First", Sessions: pricealert.Sessions{RTH: true}}
+	draft := pricealert.Draft{Symbol: "NVDA", SourceGroup: "blue", Condition: pricealert.AtOrAbove, Price: 139, Label: "First", Sessions: pricealert.Sessions{RTH: true}}
 	alert, err := manager.Upsert(draft)
 	if err != nil {
 		t.Fatal(err)
@@ -196,12 +230,13 @@ func TestRearmAndDeleteKeepIndependentTriggerHistory(t *testing.T) {
 	trade(1)
 	triggered := manager.Snapshot().Alerts[0]
 	draft.ID, draft.Version, draft.Label = alert.ID, triggered.Version, "Second"
+	draft.SourceGroup = "red"
 	edited, err := manager.Upsert(draft)
 	if err != nil {
 		t.Fatal(err)
 	}
 	trade(2)
-	if edited.State != pricealert.Triggered || len(manager.Snapshot().History) != 1 {
+	if edited.State != pricealert.Triggered || edited.SourceGroup != "blue" || len(manager.Snapshot().History) != 1 {
 		t.Fatal("editing silently rearmed the alert")
 	}
 	draft.Version, draft.Rearm = edited.Version, true
@@ -210,6 +245,9 @@ func TestRearmAndDeleteKeepIndependentTriggerHistory(t *testing.T) {
 	}
 	trade(3)
 	got := manager.Snapshot()
+	if got.Alerts[0].SourceGroup != "blue" || got.History[0].SourceGroup != "blue" || got.History[1].SourceGroup != "blue" {
+		t.Fatalf("edit/rearm changed the source: %+v", got)
+	}
 	if len(got.History) != 2 || got.History[0].Label != "Second" || got.History[1].Label != "First" {
 		t.Fatalf("history was replaced: %+v", got)
 	}
@@ -220,7 +258,7 @@ func TestRearmAndDeleteKeepIndependentTriggerHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := restarted.Snapshot(); len(got.Alerts) != 0 || len(got.History) != 2 {
+	if got := restarted.Snapshot(); len(got.Alerts) != 0 || len(got.History) != 2 || got.History[0].SourceGroup != "blue" || got.History[1].SourceGroup != "blue" {
 		t.Fatalf("deleting definition erased history: %+v", got)
 	}
 	if err := restarted.DeleteTrigger(got.History[0].ID); err != nil {

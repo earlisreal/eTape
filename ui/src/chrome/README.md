@@ -1,5 +1,17 @@
 # Chrome
 
+Alert popup routing reads live per-window panel snapshots in browser storage.
+Each AppShell holds an `etape.alert-panels.<instance>` Web Lock; only snapshots
+with live owners are eligible. User interaction and color changes update a
+shared logical clock, so the most recently used grouped Alerts Panel wins;
+restored ties use stable workspace/panel/owner ordering. Closed saved layouts
+and crashed owners are excluded, while inactive tabs and background windows
+remain eligible. Missing or unreadable live-owner state disables navigation
+temporarily instead of guessing a fallback. Presence is separate from hotkey
+targeting, sound claims, and persisted workspace layouts. LinkGroups continues
+to broadcast the chosen symbol. Test: `chrome/alerts/navigation.test.ts` and
+`e2e/alert-navigation.spec.ts`.
+
 Workspace shell, dock layout, settings, controls, and execution surfaces. Inputs: imperative stores plus user actions; outputs: wire commands and panel/controller lifecycle. Children: [execution UI](exec/README.md), [panels](panels/README.md), `controls`. React state stays low-frequency. Test: `npm test`.
 
 The global Top Bar places the browser-derived ET clock and weekday session-transition countdown immediately after connection latency, centers the active hotkey target (Link Group dot, symbol, venue, environment badge, and the non-interactive T-M-S Venue Instrument Eligibility group), and keeps shell actions on the right in every workspace window. The exact target venue's status supplies a static red LIVE badge or neutral PAPER/SIM badge, including while trading is locked or the venue is disconnected. Missing or unknown environment metadata hides the badge; venue IDs never determine its classification. Environment-only status changes refresh the cue without shell renders for account/P&L updates. Eligibility is queried for the exact ready target, refreshed every 60 seconds, and hidden when unsupported, unknown, or failed. Workspace launches request Chromium popup windows sized to the current monitor's available bounds so additional workspaces open app-like and maximized instead of as tabs.

@@ -104,14 +104,15 @@ describe("WatchlistPanel", () => {
     expect(focus).toHaveBeenCalledWith("blue", "US.KO");
   });
 
-  it("double-click falls back to green when the panel has no linked group", () => {
+  it("requires a color before double-click navigation", () => {
     const { watchlist, focus } = renderPanel({ group: null });
     act(() => watchlist.apply({ kind: "snapshot", topic: "watchlist.rows",
       payload: { refreshedAt: "2026-07-12T13:00:00.000Z", symbols: ["US.KO"], rows: [
         { symbol: "US.KO", changePct: 5, last: 1, volume: 1 },
       ] } }));
     fireEvent.doubleClick(screen.getByText("KO"));
-    expect(focus).toHaveBeenCalledWith("green", "US.KO");
+    expect(focus).not.toHaveBeenCalled();
+    expect(screen.getByText("Choose a Link Group color to load symbols.")).toBeTruthy();
   });
 
   // config.group is frozen at panel creation (dockview never re-invokes the panel
@@ -127,6 +128,14 @@ describe("WatchlistPanel", () => {
       ] } }));
     fireEvent.doubleClick(screen.getByText("KO"));
     expect(focus).toHaveBeenCalledWith("blue", "US.KO");
+  });
+
+  it("does not revive its original color after live detachment", () => {
+    const { watchlist, focus } = renderPanel({ group: "green" }, undefined, null);
+    act(() => watchlist.apply({ kind: "snapshot", topic: "watchlist.rows",
+      payload: { refreshedAt: "2026-07-12T13:00:00.000Z", symbols: ["US.KO"], rows: [] } }));
+    fireEvent.doubleClick(screen.getByText("KO"));
+    expect(focus).not.toHaveBeenCalled();
   });
 
   it("add-input: Enter with a non-empty value sends WatchlistAdd and clears the input on an accepted ack", async () => {

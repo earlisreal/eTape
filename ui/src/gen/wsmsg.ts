@@ -1054,6 +1054,7 @@ export interface PriceAlertSessions {
 export interface PriceAlert {
   id: string;
   symbol: string;
+  sourceGroup?: string;
   condition: string;
   price: number /* float64 */;
   label: string;
@@ -1067,6 +1068,7 @@ export interface PriceAlertTrigger {
   id: string;
   alertId: string;
   symbol: string;
+  sourceGroup?: string;
   condition: string;
   price: number /* float64 */;
   actualPrice: number /* float64 */;
@@ -1093,6 +1095,7 @@ export interface UpsertPriceAlertArgs {
   version: number /* uint64 */;
   rearm: boolean;
   symbol: string;
+  sourceGroup?: string;
   condition: string;
   price: number /* float64 */;
   label: string;

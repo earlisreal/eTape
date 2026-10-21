@@ -15,8 +15,20 @@ Add **Alerts** through Add Panel to manage engine-owned price alerts across all
 workspaces. Its Alerts tab holds saved definitions; History retains every trigger,
 including entries whose definition was deleted. Create via the chart's bell tool
 or context menu; drag a dashed amber level to preview, then confirm in the shared
-exact-price editor. Cancel and Escape discard proposals. Explicit View chart
-focuses a matching chart or opens a pinned one without changing Link Groups.
+exact-price editor. Cancel and Escape discard proposals. Click a symbol in
+Alerts or History to load the panel's selected Link Group. Choose a color first;
+ungrouped Alerts and Watchlist panels cannot navigate. Watchlist retains its
+double-click row navigation and single-click selection.
+
+Popup symbols prefer the most recently used grouped Alerts Panel across open
+Workspaces in the same browser profile, including background windows and
+inactive tabs. Without a grouped Alerts Panel, they use the source color saved
+when the alert was created. Edit and Rearm preserve that color, and trigger
+snapshots retain it after definition deletion. Older or ungrouped-source alerts
+remain valid; if neither destination exists, choose a color in an Alerts Panel.
+View alerts remains available. Symbol activation updates existing group followers
+without creating charts, changing venues, or bringing another workspace forward.
+
 The low-rate alert store is separate from live tick rendering. Live burst popups
 and Beacon audio use engine connection claims so windows cannot duplicate sound.
 Use General → Sounds for Beacon enable/Preview and existing master volume.

@@ -1,5 +1,11 @@
 # End-to-End Tests
 
+`alert-navigation.spec.ts` injects synthetic alerts into the isolated demo
+transport. It checks required panel colors, keyboard symbol activation, real
+cross-window Link Group delivery, live panel color changes, and source fallback
+after the other window closes. Narrow light/dark screenshots are retained in
+the test output. Run on a spare port: `npx playwright test e2e/alert-navigation.spec.ts`.
+
 Venue environment checks use intercepted demo status frames to verify LIVE
 badges in the Top Bar, Account, and Order Ticket Panel Headers. They cover long
 venue IDs, light/dark themes, narrow windows, and cross-window metadata updates;

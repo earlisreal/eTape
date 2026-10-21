@@ -25,12 +25,12 @@ func TestPriceAlertCommandsAndSnapshotDoNotReplayNotifications(t *testing.T) {
 	}
 	hub, _ := New(clock.System{}, Config{}, &spyExec{}, db, &spyInd{}, nil, nil, nil, nil)
 	hub.SetPriceAlerts(manager)
-	ack, _ := hub.cmd.handle(context.Background(), "UpsertPriceAlert", mustJSON(t, wsmsg.UpsertPriceAlertArgs{Symbol: "NVDA", Condition: "at-or-above", Price: 139, Sessions: wsmsg.PriceAlertSessions{RTH: true}}), 1, nil)
+	ack, _ := hub.cmd.handle(context.Background(), "UpsertPriceAlert", mustJSON(t, wsmsg.UpsertPriceAlertArgs{Symbol: "NVDA", SourceGroup: "blue", Condition: "at-or-above", Price: 139, Sessions: wsmsg.PriceAlertSessions{RTH: true}}), 1, nil)
 	if ack.Status != wsmsg.AckAccepted {
 		t.Fatalf("create=%+v", ack)
 	}
 	snapshot := MapPriceAlertState(manager.Snapshot())
-	if len(snapshot.Alerts) != 1 || snapshot.Alerts[0].State != "waiting-data" {
+	if len(snapshot.Alerts) != 1 || snapshot.Alerts[0].State != "waiting-data" || snapshot.Alerts[0].SourceGroup != "blue" {
 		t.Fatalf("state=%+v", snapshot)
 	}
 	hub.m.applyPub(staged{Topic: wsmsg.TopicAlertsState, Payload: snapshot})
@@ -43,5 +43,15 @@ func TestPriceAlertCommandsAndSnapshotDoNotReplayNotifications(t *testing.T) {
 	ack, _ = hub.cmd.handle(context.Background(), "ClaimPriceAlertNotification", []byte(`{"id":"old","kind":"sound"}`), 2, nil)
 	if ack.Status != wsmsg.AckAccepted || ack.Value != false {
 		t.Fatalf("stale claim=%+v", ack)
+	}
+}
+
+func TestPriceAlertHistoryAndNotificationKeepSourceColor(t *testing.T) {
+	triggers := []pricealert.Trigger{{ID: "trigger", AlertID: "deleted", SourceGroup: "yellow"}}
+	state := MapPriceAlertState(pricealert.Snapshot{History: triggers})
+	notification := MapPriceAlertNotification(pricealert.Notification{Triggers: triggers})
+	if len(state.History) != 1 || state.History[0].SourceGroup != "yellow" ||
+		len(notification.Triggers) != 1 || notification.Triggers[0].SourceGroup != "yellow" {
+		t.Fatalf("lost trigger source: state=%+v notification=%+v", state, notification)
 	}
 }

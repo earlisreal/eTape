@@ -11,13 +11,13 @@ import (
 func (h *Hub) SetPriceAlerts(manager *pricealert.Manager) { h.cmd.priceAlerts.Store(manager) }
 
 func mapPriceAlert(a pricealert.Alert) wsmsg.PriceAlert {
-	return wsmsg.PriceAlert{ID: a.ID, Symbol: a.Symbol, Condition: string(a.Condition), Price: a.Price, Label: a.Label,
+	return wsmsg.PriceAlert{ID: a.ID, Symbol: a.Symbol, SourceGroup: a.SourceGroup, Condition: string(a.Condition), Price: a.Price, Label: a.Label,
 		Sessions: wsmsg.PriceAlertSessions(a.Sessions), State: string(a.State), Version: a.Version, CreatedMs: a.CreatedMs, UpdatedMs: a.UpdatedMs}
 }
 func mapPriceAlertTriggers(triggers []pricealert.Trigger) []wsmsg.PriceAlertTrigger {
 	out := make([]wsmsg.PriceAlertTrigger, 0, len(triggers))
 	for _, t := range triggers {
-		out = append(out, wsmsg.PriceAlertTrigger{ID: t.ID, AlertID: t.AlertID, Symbol: t.Symbol, Condition: string(t.Condition), Price: t.Price, ActualPrice: t.ActualPrice, Label: t.Label, Sessions: wsmsg.PriceAlertSessions(t.Sessions), Session: t.Session, TsMs: t.TsMs, Reason: t.Reason})
+		out = append(out, wsmsg.PriceAlertTrigger{ID: t.ID, AlertID: t.AlertID, Symbol: t.Symbol, SourceGroup: t.SourceGroup, Condition: string(t.Condition), Price: t.Price, ActualPrice: t.ActualPrice, Label: t.Label, Sessions: wsmsg.PriceAlertSessions(t.Sessions), Session: t.Session, TsMs: t.TsMs, Reason: t.Reason})
 	}
 	return out
 }
@@ -60,7 +60,7 @@ func (cd *commands) handlePriceAlert(name string, args json.RawMessage, connecti
 		if !strings.HasPrefix(a.Symbol, "US.") {
 			a.Symbol = "US." + a.Symbol
 		}
-		alert, err := manager.Upsert(pricealert.Draft{ID: a.ID, Version: a.Version, Rearm: a.Rearm, Symbol: a.Symbol, Condition: pricealert.Condition(a.Condition), Price: a.Price, Label: a.Label, Sessions: pricealert.Sessions(a.Sessions)})
+		alert, err := manager.Upsert(pricealert.Draft{ID: a.ID, Version: a.Version, Rearm: a.Rearm, Symbol: a.Symbol, SourceGroup: a.SourceGroup, Condition: pricealert.Condition(a.Condition), Price: a.Price, Label: a.Label, Sessions: pricealert.Sessions(a.Sessions)})
 		if err != nil {
 			return blocked(err.Error()), true
 		}
