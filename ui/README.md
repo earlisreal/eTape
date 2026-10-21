@@ -1,5 +1,10 @@
 # UI
 
+The Windows Chrome app uses the transparent favicon artwork for its taskbar and
+title-bar icons. Favicon and manifest derivatives share the existing `.exe` mark's
+bars and colors without its background tile; the native `.exe`/tray icon stays tiled.
+Regenerate browser assets with the [icon generator](../scripts/gen-icons.sh).
+
 Choose **Trailing Stop** in the order ticket, or save a `TRAILING_STOP` order
 template for a hotkey/Deck button. Configure a positive price/percent distance
 or an intraday candle reference, position percentage, daytime sessions and

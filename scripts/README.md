@@ -4,6 +4,11 @@ Repository-level build, packaging, and asset helpers. `gen-icons.sh` derives ico
 
 Inputs: checked-in sources/toolchains; outputs: generated/build artifacts. Generated outputs must not become hand-maintained. Verify affected build or generation command after changes.
 
+`bash scripts/gen-icons.sh` requires `rsvg-convert` and ImageMagick 7 (`magick`).
+It renders every favicon and transparent manifest icon at its final size from
+`ui/public/favicon.svg`, and generates the separate tiled Windows `.exe`/tray icon
+from `engine/cmd/etape/assets/etape-mark.svg`. The Apple touch icon stays tiled.
+
 ## Linux release smoke check
 
 Run it from the repository root with a staged archive:
