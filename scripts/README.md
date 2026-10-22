@@ -6,8 +6,10 @@ Inputs: checked-in sources/toolchains; outputs: generated/build artifacts. Gener
 
 `bash scripts/gen-icons.sh` requires `rsvg-convert` and ImageMagick 7 (`magick`).
 It renders every favicon and transparent manifest icon at its final size from
-`ui/public/favicon.svg`, and generates the separate tiled Windows `.exe`/tray icon
-from `engine/cmd/etape/assets/etape-mark.svg`. The Apple touch icon stays tiled.
+`ui/public/favicon.svg`, and generates the separate tiled Windows `.exe`/tray/taskbar
+icon from `engine/cmd/etape/assets/etape-mark.svg`. Its mark fills 75% of the tile's
+width. Native 16/20/24/32/40/48/64/96/128/256 px ICO entries are rendered separately
+for Windows DPI scaling. The Apple touch icon stays tiled.
 
 ## Linux release smoke check
 

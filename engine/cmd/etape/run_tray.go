@@ -11,7 +11,6 @@ package main
 
 import (
 	"context"
-	_ "embed"
 	"log/slog"
 	"os"
 	"sync"
@@ -21,9 +20,6 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/openbrowser"
 )
-
-//go:embed assets/etape.ico
-var trayIcon []byte
 
 func main() {
 	systray.Run(onReady, onExit)
@@ -51,7 +47,7 @@ func currentAddr() string {
 }
 
 func onReady() {
-	systray.SetIcon(trayIcon)
+	systray.SetIcon(appIcon)
 	systray.SetTitle("eTape")
 	systray.SetTooltip("eTape")
 

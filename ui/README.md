@@ -1,9 +1,10 @@
 # UI
 
-The Windows Chrome app uses the transparent favicon artwork for its taskbar and
-title-bar icons. Favicon and manifest derivatives use the mark's original small-icon
-grid so all five bar rows stay separate at 16–40 px, with fixed colors and no
-background tile; the native `.exe`/tray icon stays tiled.
+The Windows title-bar favicon stays transparent and uses the original small-icon
+grid so all five bar rows stay separate at 16–40 px. The engine gives its owned
+Chrome windows a separate native taskbar icon matching the `.exe`/tray's pale
+rounded tile, with the mark filling 75% of its width. Fallback browsers keep their
+normal favicon behavior. Favicon and manifest derivatives remain transparent.
 Regenerate browser assets with the [icon generator](../scripts/gen-icons.sh).
 
 Choose **Trailing Stop** in the order ticket, or save a `TRAILING_STOP` order

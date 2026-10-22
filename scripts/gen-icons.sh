@@ -34,10 +34,15 @@ magick \
   "$repo/ui/public/favicon-64.png" \
   "$browser_ico"
 
-# Windows tray + .exe mark: light squircle tile, deep bars, 6-size .ico.
+# Native Windows taskbar + tray + .exe mark: tiled 75% artwork.
+# Render native DPI sizes directly rather than downsampling one large raster.
 tmp="$(mktemp -d)"
-rsvg-convert -w 1024 -h 1024 "$mark" -o "$tmp/mark-1024.png"
-magick "$tmp/mark-1024.png" -define icon:auto-resize=256,128,64,48,32,16 "$ico"
+images=()
+for s in 16 20 24 32 40 48 64 96 128 256; do
+  rsvg-convert -w "$s" -h "$s" "$mark" -o "$tmp/mark-$s.png"
+  images+=("$tmp/mark-$s.png")
+done
+magick "${images[@]}" "$ico"
 rm -rf "$tmp"
 
 echo "icons regenerated: favicon-{16,20,24,32,40,48,64}.png, favicon.ico, icon-{192,512}.png, etape.ico"

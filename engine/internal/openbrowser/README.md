@@ -25,3 +25,26 @@ foreground activation, flashes the taskbar when Windows declines ownership, and
 opens exactly one replacement in the same profile when main was closed. Fallback
 browsers, tray launches, and non-Windows platforms keep best-effort browser
 focus.
+
+Owned Windows Chrome windows use a native BIG icon from the same tiled 75% mark
+as the `.exe`/tray; the SMALL title-bar favicon remains transparent. A 500 ms
+check verifies the process's PID/start token, finds new owned windows, and restores
+the BIG icon if Chrome rewrites it. Native ICO entries are selected using each
+window's DPI. Messages have a 200 ms timeout; unrelated processes are never targeted.
+The release callback is deferred by boot for fresh and adopted browsers, so it
+stops and joins the monitor before engine exit or restart. It clears only its own
+BIG handles before destroying them, without restoring stale Chrome-owned handles.
+Unowned/manual browser launches keep Chrome's normal favicon behavior.
+
+Focused checks: `go test -race ./internal/openbrowser`. The opt-in native smoke
+test uses a separate temporary Chrome profile and checks the actual BIG/SMALL
+bitmaps, favicon refresh, and restart adoption:
+
+```bash
+go test -tags taskbar_smoke ./internal/openbrowser -run 'Test(ChromeTaskbarIcons|WindowsExecutableIcon)' -v
+```
+
+Set `ETAPE_ICON_CAPTURE_DIR` to save the extracted native icon PNGs. The test
+never attaches to an existing eTape or personal Chrome session. The executable
+check reads the built `dist/etape-windows-amd64.exe`; build it first to include
+native PE resource verification.

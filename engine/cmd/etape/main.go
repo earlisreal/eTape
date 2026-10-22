@@ -628,6 +628,14 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			log.Warn("open browser", "err", openErr)
 		}
 	}
+	if browser := startupBrowser.Load(); browser != nil {
+		releaseIcon, err := browser.SetTaskbarIcon(appIcon)
+		if err != nil {
+			log.Warn("set startup browser taskbar icon", "err", err)
+		} else {
+			defer releaseIcon()
+		}
+	}
 
 	// --- moomoo auto-config (live boots only) ---
 	// Gated on `live` (never -demo), the same gate config.

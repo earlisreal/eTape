@@ -4,6 +4,8 @@ package openbrowser
 
 import "fmt"
 
+func (*OwnedBrowser) SetTaskbarIcon([]byte) (func(), error) { return func() {}, nil }
+
 func restoreOwnedProcessWindows(int, uint64, string, string, []WindowSpec, func(uintptr)) {}
 
 func focusOwnedMainLocked(*OwnedBrowser) error {
