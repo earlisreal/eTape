@@ -28,13 +28,12 @@ func taskbarTestData(t *testing.T) []byte {
 
 func testTaskbarIcons(t *testing.T, data []byte) *taskbarIcons {
 	t.Helper()
-	t.Setenv("LOCALAPPDATA", t.TempDir())
 	pid := int(windows.GetCurrentProcessId())
 	token, err := ownedProcessStartTime(pid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	shell, err := newTaskbarShell(data, nil)
+	shell, err := newTaskbarShell(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +145,7 @@ func TestTaskbarIconPreservesSmallIconAndHandlesChromeReplacement(t *testing.T) 
 	if err := icons.apply(hwnd); err != nil {
 		t.Fatal(err)
 	}
-	if got := readTaskbarProperty(t, hwnd, 5); got != "eTape.Desktop" {
+	if got := readTaskbarProperty(t, hwnd, 5); got != taskbarAppID {
 		t.Fatalf("taskbar identity = %q; a BIG icon alone leaves Explorer using the transparent favicon", got)
 	}
 	if got := readTaskbarProperty(t, hwnd, 3); got == "" {
@@ -211,10 +210,8 @@ func TestTaskbarIconPreservesSmallIconAndHandlesChromeReplacement(t *testing.T) 
 	}
 }
 
-func TestTaskbarShellCacheAndLaunchCommand(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", t.TempDir())
-	data := taskbarTestData(t)
-	shell, err := newTaskbarShell(data, []string{"-config", `C:\with spaces\config.toml`, "-demo"})
+func TestTaskbarShellLaunchCommand(t *testing.T) {
+	shell, err := newTaskbarShell([]string{"-config", `C:\with spaces\config.toml`, "-demo"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,22 +222,8 @@ func TestTaskbarShellCacheAndLaunchCommand(t *testing.T) {
 	if len(args) != 4 || args[1] != "-config" || args[2] != `C:\with spaces\config.toml` || args[3] != "-demo" {
 		t.Fatalf("taskbar command = %q", args)
 	}
-	again, err := newTaskbarShell(data, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if again.values[1] != shell.values[1] {
-		t.Fatal("same icon data did not reuse the durable resource")
-	}
-	path := shell.values[1][:len(shell.values[1])-2]
-	if err := os.WriteFile(path, []byte("truncated"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := newTaskbarShell(data, nil); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, data) {
-		t.Fatalf("cache was not repaired: %v", err)
+	if shell.values[1] != args[0]+",0" {
+		t.Fatalf("taskbar must use the executable's icon resource, got %q", shell.values[1])
 	}
 }
 

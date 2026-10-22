@@ -26,7 +26,7 @@ opens exactly one replacement in the same profile when main was closed. Fallback
 browsers, tray launches, and non-Windows platforms keep best-effort browser
 focus.
 
-Owned Windows Chrome windows use the `eTape.Desktop` AppUserModelID and an explicit
+Owned Windows Chrome windows use the `eTape.ChromeApp` AppUserModelID and an explicit
 taskbar icon resource matching the `.exe`/tray's tiled 75% mark. Setting only the
 native BIG icon is insufficient: Explorer can still display Chrome's transparent
 favicon. The SMALL title-bar favicon remains transparent; the native BIG icon
@@ -34,8 +34,10 @@ also supplies the tiled Alt+Tab image. A 500 ms check verifies the process's
 PID/start token, finds new owned windows, and restores shell properties and BIG
 icons if Chrome rewrites them. Native ICO entries follow each window's DPI.
 Messages have a 200 ms timeout; unrelated processes are never targeted.
-The icon file is cached by content under `%LOCALAPPDATA%/eTape/icons/` so engine
-handoff and taskbar pins retain a readable resource. Relaunch metadata preserves
+Explorer uses the running executable's PE icon resource: a standalone ICO can
+display a generic file symbol through this taskbar property. `run.ps1` generates
+the PE resource before `go run`, just as the Windows release target does.
+Relaunch metadata preserves
 the config, UI directory, log path, and demo/live mode, and opens a fresh UI.
 Pin release builds rather than `go run`'s temporary executable.
 The release callback is deferred by boot for fresh and adopted browsers, so it
@@ -51,10 +53,11 @@ identity/icon resource, the actual BIG/SMALL bitmaps, favicon refresh, and resta
 adoption:
 
 ```bash
-go test -tags taskbar_smoke ./internal/openbrowser -run 'Test(ChromeTaskbarIcons|WindowsExecutableIcon)' -v
+go test -tags taskbar_smoke ./internal/openbrowser -run 'Test(ChromeTaskbarIcons|Windows.*Icon)' -v
 ```
 
 Set `ETAPE_ICON_CAPTURE_DIR` to save the extracted native icon PNGs. The test
-never attaches to an existing eTape or personal Chrome session. The executable
-check reads the built `dist/etape-windows-amd64.exe`; build it first to include
-native PE resource verification.
+never attaches to an existing eTape or personal Chrome session. Build
+`dist/etape-windows-amd64.exe` first: the checks verify that the Shell can extract
+both the pale tile and colored mark from that PE resource, then use it for the
+isolated Chrome window.

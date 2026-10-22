@@ -343,8 +343,11 @@ on `127.0.0.1:11111` (`[opend]` section).
 ## Windows
 
 `run.cmd` mirrors `./run.sh` exactly — same modes, same arguments — and needs nothing
-beyond Go, Node.js, and (for live mode) OpenD for Windows. For a self-contained
-distributable there's also:
+beyond Go, Node.js, and (for live mode) OpenD for Windows. Live/demo launches
+generate the Windows PE icon resource with the same pinned Go tool used by
+release builds, so development taskbar icons match the `.exe`. Its first run may
+download the tool. For manual `go run`/`go build`, run `make windows-icon` in
+`engine` first. For a self-contained distributable there's also:
 
 ```bash
 cd engine && make release-windows

@@ -53,6 +53,19 @@ function Build-UI {
     }
 }
 
+function Build-WindowsIcon {
+    Log 'embedding Windows icon resource'
+    Push-Location $EngineDir
+    try {
+        & go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0 `
+            -64 -arm=false -icon cmd/etape/assets/etape.ico `
+            -o cmd/etape/etape_windows_amd64.syso cmd/etape/versioninfo.json
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } finally {
+        Pop-Location
+    }
+}
+
 # Parse args WITHOUT a param() block so engine flags like -log=... pass
 # through verbatim (PowerShell parameter binding would try to interpret them).
 $Mode = 'live'
@@ -63,6 +76,7 @@ if ($args.Count -ge 2) { $Rest = @($args[1..($args.Count - 1)]) }
 switch ($Mode) {
     'live' {
         Build-UI
+        Build-WindowsIcon
         Log 'booting engine (live) -- open http://127.0.0.1:8686'
         Set-Location $EngineDir
         $env:SLOG_LEVEL = 'info'
@@ -80,6 +94,7 @@ switch ($Mode) {
         }
 
         Build-UI
+        Build-WindowsIcon
 
         Log 'booting engine (demo synthetic market) -- open http://127.0.0.1:8686'
         Set-Location $EngineDir

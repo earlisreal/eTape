@@ -57,7 +57,7 @@ func (b *OwnedBrowser) SetTaskbarIcon(data []byte, launchArgs []string) (func(),
 	if _, err := icons.icon(32); err != nil {
 		return nil, err
 	}
-	shell, err := newTaskbarShell(data, launchArgs)
+	shell, err := newTaskbarShell(launchArgs)
 	if err != nil {
 		icons.release()
 		return nil, err

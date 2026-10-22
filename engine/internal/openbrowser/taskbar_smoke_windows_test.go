@@ -65,9 +65,65 @@ func TestWindowsExecutableIcon(t *testing.T) {
 	t.Logf("Windows extracts the approved %dpx tiled icon from the built executable", actual.Bounds().Dx())
 }
 
+func useBuiltTaskbarExecutable(t *testing.T) {
+	t.Helper()
+	path, err := filepath.Abs("../../../dist/etape-windows-amd64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("build the Windows release before running native taskbar checks: %v", err)
+	}
+	original := taskbarExecutable
+	taskbarExecutable = func() (string, error) { return path, nil }
+	t.Cleanup(func() { taskbarExecutable = original })
+}
+
+func TestWindowsTaskbarResourceIcon(t *testing.T) {
+	useBuiltTaskbarExecutable(t)
+	shell, err := newTaskbarShell(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := windows.UTF16PtrFromString(shell.values[1][:len(shell.values[1])-2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var big, small uintptr
+	hr, _, _ := windows.NewLazySystemDLL("shell32.dll").NewProc("SHDefExtractIconW").Call(
+		uintptr(unsafe.Pointer(path)), 0, 0, uintptr(unsafe.Pointer(&big)), uintptr(unsafe.Pointer(&small)), 32|16<<16)
+	if int32(hr) < 0 || big == 0 {
+		t.Fatalf("extract shell taskbar resource: HRESULT %#x, BIG %x", hr, big)
+	}
+	defer func() { _, _, _ = destroyIcon.Call(big); _, _, _ = destroyIcon.Call(small) }()
+	bitmap, err := nativeIconBitmap(big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pale, green, red := 0, 0, 0
+	for y := range bitmap.Bounds().Dy() {
+		for x := range bitmap.Bounds().Dx() {
+			p := bitmap.RGBAAt(x, y)
+			if p.A == 255 && p.R == 242 && p.G == 243 && p.B == 248 {
+				pale++
+			}
+			if p.A == 255 && p.R == 23 && p.G == 122 && p.B == 88 {
+				green++
+			}
+			if p.A == 255 && p.R == 194 && p.G == 51 && p.B == 77 {
+				red++
+			}
+		}
+	}
+	if pale < 100 || green < 10 || red < 2 {
+		t.Fatalf("shell resource is not the tiled mark: pale=%d green=%d red=%d", pale, green, red)
+	}
+	t.Logf("shell extracts tiled mark: pale=%d green=%d red=%d", pale, green, red)
+}
+
 // Opt-in: launches only a temporary Chrome profile, never the running eTape session.
 func TestChromeTaskbarIcons(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", t.TempDir())
+	useBuiltTaskbarExecutable(t)
 	chrome := findChrome()
 	if chrome == "" {
 		t.Fatal("Chrome is required for the taskbar smoke test")
@@ -185,8 +241,9 @@ func TestChromeTaskbarIcons(t *testing.T) {
 		if len(resource) < 3 || resource[len(resource)-2:] != ",0" {
 			t.Fatalf("Explorer taskbar resource = %q", resource)
 		}
-		if data, err := os.ReadFile(resource[:len(resource)-2]); err != nil || !bytes.Equal(data, taskbarTestData(t)) {
-			t.Fatalf("Explorer's icon file differs from the approved tile: %v", err)
+		exe, err := taskbarExecutable()
+		if err != nil || resource != exe+",0" {
+			t.Fatalf("Explorer must use the verified executable resource: %q, %v", resource, err)
 		}
 		if got := readTaskbarProperty(t, hwnd, 4); got != "eTape" {
 			t.Fatalf("taskbar display name = %q", got)

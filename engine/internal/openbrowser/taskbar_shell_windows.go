@@ -3,26 +3,23 @@
 package openbrowser
 
 import (
-	"bytes"
-	"crypto/sha256"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"syscall"
 	"unsafe"
 
-	"github.com/earlisreal/eTape/engine/internal/atomicfile"
 	"golang.org/x/sys/windows"
 )
 
-const taskbarAppID = "eTape.Desktop"
+const taskbarAppID = "eTape.ChromeApp"
 
 var (
 	getTaskbarStore   = windows.NewLazySystemDLL("shell32.dll").NewProc("SHGetPropertyStoreForWindow")
 	clearTaskbarValue = windows.NewLazySystemDLL("ole32.dll").NewProc("PropVariantClear")
 	taskbarStoreIID   = windows.GUID{Data1: 0x886d8eeb, Data2: 0x8cf2, Data3: 0x4446, Data4: [8]byte{0x8d, 0x02, 0xcd, 0xba, 0x1d, 0xbd, 0xcf, 0x99}}
 	taskbarKeyFormat  = windows.GUID{Data1: 0x9f4c2855, Data2: 0x9f79, Data3: 0x4b39, Data4: [8]byte{0xa8, 0xd0, 0xe1, 0xd4, 0x2d, 0xe1, 0xd5, 0xf3}}
+	taskbarExecutable = os.Executable
 )
 
 type taskbarShell struct {
@@ -30,29 +27,14 @@ type taskbarShell struct {
 	previous map[windows.HWND][4]string
 }
 
-func newTaskbarShell(data []byte, launchArgs []string) (*taskbarShell, error) {
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		return nil, err
-	}
-	dir := filepath.Join(cache, "eTape", "icons")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	// A durable, content-addressed file also survives engine handoff and taskbar pins.
-	digest := sha256.Sum256(data)
-	path := filepath.Join(dir, fmt.Sprintf("etape-%x.ico", digest[:16]))
-	if old, err := os.ReadFile(path); err != nil || !bytes.Equal(old, data) {
-		if err := atomicfile.Write(path, data, 0o600); err != nil {
-			return nil, err
-		}
-	}
-	exe, err := os.Executable()
+func newTaskbarShell(launchArgs []string) (*taskbarShell, error) {
+	exe, err := taskbarExecutable()
 	if err != nil {
 		return nil, err
 	}
 	return &taskbarShell{
-		values:   [4]string{windows.ComposeCommandLine(append([]string{exe}, launchArgs...)), path + ",0", "eTape", taskbarAppID},
+		// Explorer displays the PE resource reliably; a standalone ICO can fall back to a generic file icon.
+		values:   [4]string{windows.ComposeCommandLine(append([]string{exe}, launchArgs...)), exe + ",0", "eTape", taskbarAppID},
 		previous: make(map[windows.HWND][4]string),
 	}, nil
 }
