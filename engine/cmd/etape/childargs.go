@@ -14,6 +14,15 @@ type baseFlags struct {
 // is mid-session in an open browser tab, so a relaunch must never pop a new
 // one.
 func childArgs(base baseFlags, demo bool) []string {
+	argv := baseArgs(base)
+	argv = append(argv, "-no-open")
+	if demo {
+		argv = append(argv, "-demo")
+	}
+	return argv
+}
+
+func baseArgs(base baseFlags) []string {
 	argv := []string{"-config", base.ConfigPath}
 	if base.DistDir != "" {
 		argv = append(argv, "-dist", base.DistDir)
@@ -21,9 +30,14 @@ func childArgs(base baseFlags, demo bool) []string {
 	if base.LogPath != "" {
 		argv = append(argv, "-log", base.LogPath)
 	}
-	argv = append(argv, "-no-open")
-	if demo {
-		argv = append(argv, "-demo")
-	}
 	return argv
+}
+
+// Taskbar launches open a fresh browser and never inherit an old Chrome identity.
+func taskbarLaunchArgs(base baseFlags, demo bool) []string {
+	args := baseArgs(base)
+	if demo {
+		args = append(args, "-demo")
+	}
+	return args
 }

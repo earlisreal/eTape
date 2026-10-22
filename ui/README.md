@@ -2,8 +2,8 @@
 
 The Windows title-bar favicon stays transparent and uses the original small-icon
 grid so all five bar rows stay separate at 16–40 px. The engine gives its owned
-Chrome windows a separate native taskbar icon matching the `.exe`/tray's pale
-rounded tile, with the mark filling 75% of its width. Fallback browsers keep their
+Chrome windows an explicit taskbar identity and icon resource matching the
+`.exe`/tray's pale rounded tile, with the mark filling 75% of its width. Fallback browsers keep their
 normal favicon behavior. Favicon and manifest derivatives remain transparent.
 Regenerate browser assets with the [icon generator](../scripts/gen-icons.sh).
 

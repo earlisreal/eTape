@@ -67,6 +67,7 @@ func TestWindowsExecutableIcon(t *testing.T) {
 
 // Opt-in: launches only a temporary Chrome profile, never the running eTape session.
 func TestChromeTaskbarIcons(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	chrome := findChrome()
 	if chrome == "" {
 		t.Fatal("Chrome is required for the taskbar smoke test")
@@ -162,14 +163,36 @@ func TestChromeTaskbarIcons(t *testing.T) {
 		return nil
 	}
 	waitIcon(iconSmall, false)
+	originalAppID := readTaskbarProperty(t, hwnd, 5)
 	browser := &OwnedBrowser{pid: pid, startToken: token}
-	release, err := browser.SetTaskbarIcon(taskbarTestData(t))
+	release, err := browser.SetTaskbarIcon(taskbarTestData(t), []string{"-demo"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
 	big := waitIcon(iconBig, true)
 	small := waitIcon(iconSmall, false)
+	checkShell := func() {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for readTaskbarProperty(t, hwnd, 5) != taskbarAppID && time.Now().Before(deadline) {
+			time.Sleep(25 * time.Millisecond)
+		}
+		if got := readTaskbarProperty(t, hwnd, 5); got != taskbarAppID {
+			t.Fatalf("Explorer taskbar identity = %q", got)
+		}
+		resource := readTaskbarProperty(t, hwnd, 3)
+		if len(resource) < 3 || resource[len(resource)-2:] != ",0" {
+			t.Fatalf("Explorer taskbar resource = %q", resource)
+		}
+		if data, err := os.ReadFile(resource[:len(resource)-2]); err != nil || !bytes.Equal(data, taskbarTestData(t)) {
+			t.Fatalf("Explorer's icon file differs from the approved tile: %v", err)
+		}
+		if got := readTaskbarProperty(t, hwnd, 4); got != "eTape" {
+			t.Fatalf("taskbar display name = %q", got)
+		}
+	}
+	checkShell()
 	dpi, _, _ := getDpiForWindowCall(uintptr(hwnd))
 	wantSize, _, _ := getMetricsForDpi.Call(11, dpi)
 	if big.Bounds().Dx() != int(wantSize) {
@@ -181,6 +204,7 @@ func TestChromeTaskbarIcons(t *testing.T) {
 		t.Fatal("favicon reload not observed")
 	}
 	time.Sleep(time.Second)
+	checkShell()
 	chromeSmall, err := iconMessage(hwnd, wmGetIcon, iconSmall, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -191,6 +215,9 @@ func TestChromeTaskbarIcons(t *testing.T) {
 	waitIcon(iconBig, true)
 	waitIcon(iconSmall, false)
 	release()
+	if got := readTaskbarProperty(t, hwnd, 5); got != originalAppID {
+		t.Fatalf("handoff did not restore Chrome's taskbar identity: %q, want %q", got, originalAppID)
+	}
 	if got, err := iconMessage(hwnd, wmGetIcon, iconBig, 0); err != nil || got != 0 {
 		t.Fatalf("handoff left an engine-owned icon: %v, %v", got, err)
 	}
@@ -198,13 +225,14 @@ func TestChromeTaskbarIcons(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	releaseAdopted, err := adopted.SetTaskbarIcon(taskbarTestData(t))
+	releaseAdopted, err := adopted.SetTaskbarIcon(taskbarTestData(t), []string{"-demo"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer releaseAdopted()
 	waitIcon(iconBig, true)
 	waitIcon(iconSmall, false)
+	checkShell()
 	if dir := os.Getenv("ETAPE_ICON_CAPTURE_DIR"); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)

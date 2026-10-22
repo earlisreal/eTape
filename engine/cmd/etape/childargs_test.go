@@ -30,3 +30,14 @@ func TestChildArgsDemo(t *testing.T) {
 		t.Fatalf("childArgs demo:\n got=%v\nwant=%v", got, want)
 	}
 }
+
+func TestTaskbarLaunchArgsOpenUIAndPreserveMode(t *testing.T) {
+	base := baseFlags{ConfigPath: "-no-open", DistDir: `C:\UI files`, LogPath: `C:\log file`}
+	want := []string{"-config", "-no-open", "-dist", base.DistDir, "-log", base.LogPath, "-demo"}
+	if got := taskbarLaunchArgs(base, true); !reflect.DeepEqual(got, want) {
+		t.Fatalf("taskbar launch args = %q, want %q", got, want)
+	}
+	if got := taskbarLaunchArgs(baseFlags{ConfigPath: "/c.toml"}, false); !reflect.DeepEqual(got, []string{"-config", "/c.toml"}) {
+		t.Fatalf("live taskbar launch args = %q", got)
+	}
+}

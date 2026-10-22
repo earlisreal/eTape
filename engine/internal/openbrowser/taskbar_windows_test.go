@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"syscall"
 	"testing"
 	"unsafe"
 
@@ -27,13 +28,61 @@ func taskbarTestData(t *testing.T) []byte {
 
 func testTaskbarIcons(t *testing.T, data []byte) *taskbarIcons {
 	t.Helper()
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	pid := int(windows.GetCurrentProcessId())
 	token, err := ownedProcessStartTime(pid)
 	if err != nil {
 		t.Fatal(err)
 	}
+	shell, err := newTaskbarShell(data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return &taskbarIcons{pid: pid, startToken: token, data: data,
-		icons: make(map[int]uintptr), touched: make(map[windows.HWND]struct{})}
+		icons: make(map[int]uintptr), touched: make(map[windows.HWND]struct{}), shell: shell}
+}
+
+func readTaskbarProperty(t *testing.T, hwnd windows.HWND, id uint32) string {
+	t.Helper()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := windows.CoInitializeEx(0, 0); err != nil && err != windows.Errno(1) {
+		t.Fatal(err)
+	}
+	defer windows.CoUninitialize()
+	iid, _ := windows.GUIDFromString("{886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99}")
+	var store *struct{ Vtable *[8]uintptr }
+	hr, _, _ := windows.NewLazySystemDLL("shell32.dll").NewProc("SHGetPropertyStoreForWindow").Call(
+		uintptr(hwnd), uintptr(unsafe.Pointer(&iid)), uintptr(unsafe.Pointer(&store)))
+	if int32(hr) < 0 {
+		t.Fatalf("read taskbar property store: HRESULT %#x", hr)
+	}
+	defer func() { _, _, _ = syscall.SyscallN(store.Vtable[2], uintptr(unsafe.Pointer(store))) }()
+	format, _ := windows.GUIDFromString("{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}")
+	key := struct {
+		Format windows.GUID
+		ID     uint32
+	}{format, id}
+	var value struct {
+		Type     uint16
+		Reserved [3]uint16
+		Text     *uint16
+		Extra    uintptr
+	}
+	hr, _, _ = syscall.SyscallN(store.Vtable[5], uintptr(unsafe.Pointer(store)), uintptr(unsafe.Pointer(&key)), uintptr(unsafe.Pointer(&value)))
+	defer func() {
+		_, _, _ = windows.NewLazySystemDLL("ole32.dll").NewProc("PropVariantClear").Call(uintptr(unsafe.Pointer(&value)))
+	}()
+	if int32(hr) < 0 {
+		t.Fatalf("read taskbar property %d: HRESULT %#x", id, hr)
+	}
+	if value.Type == 0 {
+		return ""
+	}
+	if value.Type != 31 {
+		t.Fatalf("taskbar property %d has unexpected type %d", id, value.Type)
+	}
+	return windows.UTF16PtrToString(value.Text)
 }
 
 func TestTaskbarIconNativeSizes(t *testing.T) {
@@ -97,6 +146,12 @@ func TestTaskbarIconPreservesSmallIconAndHandlesChromeReplacement(t *testing.T) 
 	if err := icons.apply(hwnd); err != nil {
 		t.Fatal(err)
 	}
+	if got := readTaskbarProperty(t, hwnd, 5); got != "eTape.Desktop" {
+		t.Fatalf("taskbar identity = %q; a BIG icon alone leaves Explorer using the transparent favicon", got)
+	}
+	if got := readTaskbarProperty(t, hwnd, 3); got == "" {
+		t.Fatal("Explorer has no explicit taskbar icon resource")
+	}
 	big, err := iconMessage(hwnd, wmGetIcon, iconBig, 0)
 	if err != nil || big == 0 || big == small {
 		t.Fatalf("BIG icon = %v, error %v; want separate native taskbar icon", big, err)
@@ -121,6 +176,11 @@ func TestTaskbarIconPreservesSmallIconAndHandlesChromeReplacement(t *testing.T) 
 	}
 	getDpiForWindowCall = originalDpi
 	icons.release()
+	for _, id := range []uint32{2, 3, 4, 5} {
+		if got := readTaskbarProperty(t, hwnd, id); got != "" {
+			t.Fatalf("cleanup retained taskbar property %d: %q", id, got)
+		}
+	}
 	if got, err := iconMessage(hwnd, wmGetIcon, iconBig, 0); err != nil || got != 0 {
 		t.Fatalf("restart cleanup retained an engine-owned BIG handle: %v, %v", got, err)
 	}
@@ -133,16 +193,61 @@ func TestTaskbarIconPreservesSmallIconAndHandlesChromeReplacement(t *testing.T) 
 	if _, err := iconMessage(hwnd, wmSetIcon, iconBig, small); err != nil {
 		t.Fatal(err)
 	}
+	store, releaseStore, err := openTaskbarStore(hwnd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.set(3, "foreign.ico,0")
+	releaseStore()
+	if err != nil {
+		t.Fatal(err)
+	}
 	icons.release()
+	if got := readTaskbarProperty(t, hwnd, 3); got != "foreign.ico,0" {
+		t.Fatalf("cleanup replaced a foreign taskbar resource: %q", got)
+	}
 	if got, err := iconMessage(hwnd, wmGetIcon, iconBig, 0); err != nil || got != small {
 		t.Fatalf("cleanup changed a foreign icon: %v, %v", got, err)
+	}
+}
+
+func TestTaskbarShellCacheAndLaunchCommand(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	data := taskbarTestData(t)
+	shell, err := newTaskbarShell(data, []string{"-config", `C:\with spaces\config.toml`, "-demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := windows.DecomposeCommandLine(shell.values[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(args) != 4 || args[1] != "-config" || args[2] != `C:\with spaces\config.toml` || args[3] != "-demo" {
+		t.Fatalf("taskbar command = %q", args)
+	}
+	again, err := newTaskbarShell(data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.values[1] != shell.values[1] {
+		t.Fatal("same icon data did not reuse the durable resource")
+	}
+	path := shell.values[1][:len(shell.values[1])-2]
+	if err := os.WriteFile(path, []byte("truncated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newTaskbarShell(data, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("cache was not repaired: %v", err)
 	}
 }
 
 func TestTaskbarIconMonitorCanStopConcurrently(t *testing.T) {
 	icons := testTaskbarIcons(t, taskbarTestData(t))
 	browser := &OwnedBrowser{pid: icons.pid, startToken: icons.startToken}
-	release, err := browser.SetTaskbarIcon(icons.data)
+	release, err := browser.SetTaskbarIcon(icons.data, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

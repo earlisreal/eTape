@@ -629,7 +629,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		}
 	}
 	if browser := startupBrowser.Load(); browser != nil {
-		releaseIcon, err := browser.SetTaskbarIcon(appIcon)
+		releaseIcon, err := browser.SetTaskbarIcon(appIcon, taskbarLaunchArgs(base, *demo))
 		if err != nil {
 			log.Warn("set startup browser taskbar icon", "err", err)
 		} else {

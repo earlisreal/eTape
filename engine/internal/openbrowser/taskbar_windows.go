@@ -40,12 +40,13 @@ type taskbarIcons struct {
 	data       []byte
 	icons      map[int]uintptr
 	touched    map[windows.HWND]struct{}
+	shell      *taskbarShell
 }
 
-// SetTaskbarIcon keeps owned Chrome windows' BIG icons separate from their
-// transparent SMALL title icons. Release must run before the engine exits,
-// including a restart that leaves Chrome alive for the next engine to adopt.
-func (b *OwnedBrowser) SetTaskbarIcon(data []byte) (func(), error) {
+// SetTaskbarIcon sets owned Chrome windows' shell identity, taskbar resource,
+// and BIG icons separately from transparent SMALL title icons. Release must run
+// before engine exit, including a restart that leaves Chrome alive for adoption.
+func (b *OwnedBrowser) SetTaskbarIcon(data []byte, launchArgs []string) (func(), error) {
 	if err := verifyOwnedProcess(b.pid, b.startToken); err != nil {
 		return nil, err
 	}
@@ -56,6 +57,12 @@ func (b *OwnedBrowser) SetTaskbarIcon(data []byte) (func(), error) {
 	if _, err := icons.icon(32); err != nil {
 		return nil, err
 	}
+	shell, err := newTaskbarShell(data, launchArgs)
+	if err != nil {
+		icons.release()
+		return nil, err
+	}
+	icons.shell = shell
 	stop, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
@@ -110,6 +117,12 @@ func (icons *taskbarIcons) apply(hwnd windows.HWND) error {
 	if !validOwnedWindow(hwnd, uint32(icons.pid)) {
 		return nil
 	}
+	icons.touched[hwnd] = struct{}{}
+	if icons.shell != nil {
+		if err := icons.shell.apply(hwnd); err != nil {
+			return err
+		}
+	}
 	dpi, _, _ := getDpiForWindowCall(uintptr(hwnd))
 	if dpi == 0 {
 		dpi = 96
@@ -123,7 +136,6 @@ func (icons *taskbarIcons) apply(hwnd windows.HWND) error {
 	if err != nil || current == icon || !validOwnedWindow(hwnd, uint32(icons.pid)) {
 		return err
 	}
-	icons.touched[hwnd] = struct{}{}
 	_, err = iconMessage(hwnd, wmSetIcon, iconBig, icon)
 	return err
 }
@@ -138,6 +150,11 @@ func (icons *taskbarIcons) release() {
 		for hwnd := range icons.touched {
 			if !validOwnedWindow(hwnd, uint32(icons.pid)) {
 				continue
+			}
+			if icons.shell != nil {
+				if err := icons.shell.restore(hwnd); err != nil {
+					slog.Warn("restore Chrome taskbar properties", "err", err)
+				}
 			}
 			current, err := iconMessage(hwnd, wmGetIcon, iconBig, 0)
 			if err == nil {
