@@ -129,6 +129,7 @@ export default defineConfig({
         test: {
           name: 'chrome-regressions',
           include: [
+            'test/icons.test.ts',
             'src/sound/**/*.test.{ts,tsx}',
             'src/chrome/alerts/**/*.test.{ts,tsx}',
             'src/data/PriceAlertStore.test.ts',
