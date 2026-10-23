@@ -176,7 +176,7 @@ export function chartOptions(p: Palette, timeframe: string): DeepChartOptions {
       vertLine: { color: p.crosshair },
       horzLine: { color: p.crosshair },
     },
-    // Keep the right-axis gutter stable so changing label widths cannot shift the plot.
+    // Initial gutter; ChartPanel retains wider measured labels to prevent resize feedback.
     rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS_WITHOUT_VOLUME, minimumWidth: 56 },
     localization: { timeFormatter: (time) => timeFormatter(time, timeframe) },
     timeScale: {

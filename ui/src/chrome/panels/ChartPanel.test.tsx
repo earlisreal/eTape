@@ -15,7 +15,7 @@ const timeScaleApi = { timeToCoordinate: vi.fn(() => 0), scrollToRealTime: vi.fn
   setVisibleRange: vi.fn(), setVisibleLogicalRange: vi.fn() };
 // priceScaleApi is a stable object (not a fresh literal per call) so a test can hold
 // a reference to applyOptions and assert it was invoked by the SUT (mirrors timeScaleApi above).
-const priceScaleApi = { applyOptions: vi.fn(), width: vi.fn(() => 60) };
+const priceScaleApi = { applyOptions: vi.fn(), width: vi.fn(() => 60), options: vi.fn(() => ({ minimumWidth: 56 })) };
 // paneApis is a stable array (not a fresh literal per `panes()` call) so setPaneStretchFactor
 // calls made through one `panes()` read are visible to a later `panes()` read in the same
 // test — mirrors why timeScaleApi/priceScaleApi above are hoisted instead of inlined.

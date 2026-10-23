@@ -88,15 +88,23 @@ const sendCommand = async (name, args) => {
   }
   throw new Error(`Unsupported simulated command: ${name}`);
 };
-const chartBars = Array.from({ length: 80 }, (_, i) => {
+const axisFlicker = location.search === "?axis-flicker";
+const chartTimeframe = axisFlicker ? "5m" : "1m";
+// The edge low straddles zero after autoscale margins, making a minus sign resize the axis.
+const chartBars = axisFlicker ? Array.from({ length: 90 }, (_, i) => {
+  const c = i < 45 ? 0.2021 + i * 0.0003 : i < 67 ? 0.22 + (i - 45) * 0.024 : 0.72 - (i - 67) * 0.01;
+  return { symbol: "US.AAPL", timeframe: chartTimeframe,
+    bucketStart: new Date(Date.parse("2026-10-23T03:15:00Z") + i * 300_000).toISOString(),
+    o: c, h: i === 67 ? 0.7459 : c + 0.001, l: i <= 11 ? 0.2 : c - 0.001, c, v: 100 + i, inProgress: i === 89 };
+}) : Array.from({ length: 80 }, (_, i) => {
   const bucketStart = new Date(Date.parse("2026-10-01T13:30:00.000Z") + i * 60_000).toISOString();
   const close = 5.3 - i * 0.01;
   return { symbol: "US.AAPL", timeframe: "1m", bucketStart, o: close + 0.03, h: close + 0.1,
     l: close - 0.1, c: close, v: 100 + i, inProgress: false };
 });
 const sendQuery = async (name, args) => {
-  if (name === "QueryChartWindow") return { ...(args ?? {}), symbol: "US.AAPL", timeframe: "1m",
-    fromMs: Date.parse(chartBars[0].bucketStart), toMs: Date.parse(chartBars.at(-1).bucketStart) + 60_000,
+  if (name === "QueryChartWindow") return { ...(args ?? {}), symbol: "US.AAPL", timeframe: chartTimeframe,
+    fromMs: Date.parse(chartBars[0].bucketStart), toMs: Date.parse(chartBars.at(-1).bucketStart) + (axisFlicker ? 300_000 : 60_000),
     bars: chartBars, indicators: [], historyRevision: 1 };
   if (name === "QueryFills") return [];
   return { route: "ENGINE_HELD", effectiveSession: "EXTENDED", deadlineMs: Date.now() + 3600000,
@@ -187,9 +195,13 @@ function ConfigReadyProbe() {
   const { loaded } = useOrderConfig();
   const { setMode } = useTheme();
   useEffect(() => {
-    window.chartPanelProbe = { isReady: () => loaded && stores.bars.series("US.AAPL", "1m").length === chartBars.length
+    window.chartPanelProbe = { isReady: () => loaded && stores.bars.series("US.AAPL", chartTimeframe).length === chartBars.length
       && !!document.querySelector("[data-testid='chart-host'] .tv-lightweight-charts"),
-      errors: [], setTheme: setMode, startRisk() {
+      errors: [], setTheme: setMode, updateBar(frame) {
+        const bar = chartBars.at(-1);
+        stores.bars.apply({ kind: "delta", topic: "md.bars", key: `US.AAPL:${chartTimeframe}`,
+          payload: { ...bar, c: bar.c + (frame % 2) * 0.0001, v: bar.v + frame } });
+      }, startRisk() {
         stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { ...stores.exec.accounts()[0], tsMs: Date.now() } });
         return initiateChartRiskEntry(riskTemplate);
       } };
@@ -206,10 +218,10 @@ function ProductionChartPanel() {
   }));
   useEffect(() => { scheduler.start(); return () => scheduler.stop(); }, [scheduler]);
   const chartConfig = { id: "chart-order-layout", panelId: "chart", group: "green",
-    settings: { symbol: "US.AAPL", timeframe: "1m" } };
+    settings: { symbol: "US.AAPL", timeframe: chartTimeframe } };
   const demandRegistry = { ensure: async () => ({ kind: "ack", corrId: "demand", status: "accepted" }), release() {} };
   const panelApi = { isActive: true, onDidActiveChange: () => ({ dispose() {} }) };
-  return <div data-testid="panel-shell" style={{ position: "absolute", left: 80, top: 100, width: 760, height: 560 }}>
+  return <div data-testid="panel-shell" style={{ position: "absolute", left: 80, top: 100, width: axisFlicker ? 554 : 760, height: axisFlicker ? 436 : 560 }}>
     <ThemeProvider><ToastProvider><OrderConfigProvider commands={{ sendCommand }}>
       <ConfigReadyProbe />
       <PanelFrame config={chartConfig} stores={stores} scheduler={scheduler} linkGroups={linkGroups} demandRegistry={demandRegistry}
@@ -218,4 +230,4 @@ function ProductionChartPanel() {
   </div>;
 }
 
-createRoot(document.getElementById("root")).render(location.search === "?production" ? <ProductionChartPanel /> : <App />);
+createRoot(document.getElementById("root")).render(axisFlicker || location.search === "?production" ? <ProductionChartPanel /> : <App />);

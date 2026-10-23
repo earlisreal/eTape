@@ -934,6 +934,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const offs = heights.map((_, i) => heights.slice(0, i).reduce((a, b) => a + b, 0));
         setPaneOffsets((prev) => (prev.length === offs.length && prev.every((v, i) => v === offs[i]) ? prev : offs));
         const axisW = facade.priceScaleWidth();
+        // Shrinking the gutter can reveal an edge candle that widens it again every frame.
+        const priceScale = chart.priceScale("right");
+        if (axisW > priceScale.options().minimumWidth) priceScale.applyOptions({ minimumWidth: axisW });
         setRightAxisWidth((prev) => (prev === axisW ? prev : axisW));
         // Anchor on the newest eligible raw exchange bar, not only an
         // in-progress tail. Quiet/delayed buckets retain the last confirmed

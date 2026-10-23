@@ -21,6 +21,38 @@ try {
   await page.goto(`http://127.0.0.1:${port}`);
   await page.waitForFunction(() => window.repro?.ready);
   await page.waitForTimeout(100);
+
+  const axisPage = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+  const axisErrors = [];
+  axisPage.on("pageerror", error => axisErrors.push(error.message));
+  await axisPage.clock.setFixedTime(new Date("2026-10-23T10:42:00Z"));
+  await axisPage.goto(`http://127.0.0.1:${port}/?axis-flicker`);
+  await axisPage.waitForFunction(() => window.chartPanelProbe?.isReady());
+  await axisPage.getByTestId("bar-close-timer").waitFor({ state: "visible" });
+  for (const theme of ["light", "dark"]) {
+    await axisPage.evaluate(theme => window.chartPanelProbe.setTheme(theme), theme);
+    await axisPage.waitForFunction(theme => document.documentElement.dataset.theme === theme, theme);
+    for (const live of [false, true]) {
+      const sizes = await axisPage.evaluate(async live => {
+        for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame);
+        const host = document.querySelector('[data-testid="chart-host"]');
+        const sizes = [];
+        for (let frame = 0; frame < 100; frame++) {
+          if (live) window.chartPanelProbe.updateBar(frame);
+          await new Promise(requestAnimationFrame);
+          const cells = host.querySelector(".tv-lightweight-charts table").rows[0].cells;
+          sizes.push({ plot: cells[1].getBoundingClientRect().width, axis: cells[2].getBoundingClientRect().width });
+        }
+        return sizes;
+      }, live);
+      assert.equal(new Set(sizes.map(size => size.axis)).size, 1, `${theme} ${live ? "live" : "idle"}: the price axis must not alternate widths`);
+      assert.equal(new Set(sizes.map(size => size.plot)).size, 1, `${theme} ${live ? "live" : "idle"}: candles must not jump sideways`);
+    }
+  }
+  assert.deepEqual(axisErrors, []);
+  assert.deepEqual(await axisPage.evaluate(() => window.chartPanelProbe.errors), []);
+  await axisPage.close();
+
   const measure = () => page.evaluate(() => window.repro.measure(280));
   const checkGesturePrice = async target => {
     const label = target.locator("[data-entry-preview-price]");

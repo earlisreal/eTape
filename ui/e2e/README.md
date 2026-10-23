@@ -23,6 +23,9 @@ two-decimal total P&L. Screenshots are saved with the test output.
 
 The chart layout regression verifies compact side-colored axis chips, hover
 retention, separate BUY/SELL groups, same-side choosers and nearby-price spacing.
+It also samples every browser frame of a fixed sub-dollar 5-minute chart with
+Volume in light/dark themes, both idle and streaming, to catch price-axis width
+feedback that shifts candles sideways faster than a screen recording captures.
 Risk setup covers native tooltips without risk amounts, theme colors, axis
 dragging, Enter submission and draft cancellation in light/dark and narrow
 multi-pane charts. Screenshots are saved in `.report/`.

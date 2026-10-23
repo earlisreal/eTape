@@ -42,6 +42,10 @@ bars immediately.
 
 ## Viewport behavior
 
+The right price axis retains a wider measured gutter as its minimum, preventing
+autoscale near zero from repeatedly including/excluding an edge candle and
+shifting the whole plot. Longer labels can still widen the gutter.
+
 For `10s`, an appended bar follows when the previous newest displayed slot is
 at least partially visible. If it is completely outside the view, the current
 range and zoom are preserved. Future Buffer space is consumed until four empty
