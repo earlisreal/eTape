@@ -57,12 +57,12 @@ describe("VenueSetupPrompt", () => {
 
   it("dismisses on scrim click (outer overlay), not on a click inside the card", () => {
     const onDismiss = vi.fn();
-    const { container } = render(<AppProviders><VenueSetupPrompt onConfigure={() => {}} onDismiss={onDismiss} onTryDemo={() => {}} /></AppProviders>);
+    render(<AppProviders><VenueSetupPrompt onConfigure={() => {}} onDismiss={onDismiss} onTryDemo={() => {}} /></AppProviders>);
     // Click inside the card body (not on a button) must NOT dismiss — the card's
     // own onClick stopPropagation stops the scrim's handler from firing.
     fireEvent.click(screen.getByText("Add a broker to trade live"));
     expect(onDismiss).not.toHaveBeenCalled();
-    const scrim = container.firstChild as HTMLElement;
+    const scrim = screen.getByRole("dialog", { name: "Add a broker to trade live" }).parentElement!;
     fireEvent.click(scrim);
     expect(onDismiss).toHaveBeenCalledWith(false);
   });

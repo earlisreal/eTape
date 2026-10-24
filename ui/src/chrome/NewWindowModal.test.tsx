@@ -7,6 +7,24 @@ import { NewWindowModal } from "./NewWindowModal";
 describe("NewWindowModal", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("renames a saved workspace inline and closes on Escape", async () => {
+    const commands = { sendCommand: vi.fn(async (name: string) => name === "GetConfig"
+      ? { status: "accepted", value: { version: 1, entries: [{ id: "desk", name: "Desk" }] } }
+      : { status: "accepted" }) };
+    const close = vi.fn();
+    render(<ThemeProvider><NewWindowModal open currentId="main" commands={commands} onClose={close} /></ThemeProvider>);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Rename" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    fireEvent.change(screen.getByLabelText("Rename workspace"), { target: { value: "Trading desk" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Trading desk" })).toBeTruthy());
+    expect(commands.sendCommand).toHaveBeenCalledWith("SetConfig", { key: "windows.v1", value: {
+      version: 1, entries: [{ id: "desk", name: "Trading desk" }],
+    } });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("shows Monitoring as a protected workspace and reuses its named window", async () => {
     const commands = {
       sendCommand: vi.fn(async (name: string) => name === "GetConfig"

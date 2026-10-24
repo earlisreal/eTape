@@ -1,5 +1,12 @@
 # TradingView Chart Integration
 
+Canvas series retain the TradingView palette. Toolbar, menu, and editor chrome
+derive from the workspace palette and IBM Plex typography. `TVDialog` uses the
+[shared dialog](../../controls/README.md) and buttons, preserving draggable
+headers while clamping movement to the viewport and recentering on resize.
+Chart, DOM Ladder, Tape, and indicator settings therefore share dismissal,
+focus, and light/dark styling with app Settings.
+
 The bell tool and chart menu open the shared price-alert editor. Amber dashed
 levels and bell tags follow chart coordinates imperatively without changing
 autoscale; overlapping tags open a chooser. Dragging previews a price and opens

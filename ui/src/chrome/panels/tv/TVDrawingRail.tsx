@@ -15,6 +15,8 @@ import type { Tool } from "../../../render/chart/drawings/interaction";
 import { IconGrip, IconTrend, IconHLine, IconExtended, IconRect, IconMeasure, IconEye, IconEyeOff, IconTrash } from "./tvIcons";
 import { HoverButton } from "../../controls/HoverButton";
 import { IconBell } from "./tvIcons";
+import { Button } from "../../controls/Button";
+import { useDismissibleLayer } from "../../controls/useDismissibleLayer";
 
 export interface RailPos { x: number; y: number }
 
@@ -31,6 +33,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), M
 
 export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, stylesReady, onSelectTool, onToggleHideAll, hasSelection, onDeleteSelection, onClearAll, initialPos, onPosChange,alertArmed,onAlertTool }: TVDrawingRailProps): JSX.Element {
   const [confirm, setConfirm] = useState(false);
+  const confirmRef = useRef<HTMLDivElement>(null);
+  const trashRef = useRef<HTMLButtonElement>(null);
+  useDismissibleLayer(confirmRef, () => setConfirm(false), { enabled: confirm, anchor: trashRef.current });
   const [pos, setPos] = useState<RailPos | null>(initialPos ?? null);
   const railRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
@@ -130,21 +135,13 @@ export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, stylesReady
         {hideAll ? <IconEyeOff size={16} /> : <IconEye size={16} />}
       </HoverButton>
       <div style={{ position: "relative" }}>
-        <HoverButton aria-label="delete" title="Clear all drawings" style={btn(false)} hoverStyle={toolHover(false)} onClick={onTrash}><IconTrash size={16} /></HoverButton>
+        <HoverButton ref={trashRef} aria-label="delete" title="Clear all drawings" style={btn(false)} hoverStyle={toolHover(false)} onClick={onTrash}><IconTrash size={16} /></HoverButton>
         {confirm && (
-          <div role="dialog" style={{ ...popover, left: "auto", right: 0, padding: 10, width: 200 }}>
+          <div ref={confirmRef} className="popover" role="dialog" aria-label="Clear drawings" style={{ ...popover, left: "auto", right: 0, padding: 10, width: 220 }}>
             <div style={{ marginBottom: 8 }}>Clear all drawings for {bare}?</div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <HoverButton title="Cancel" onClick={() => setConfirm(false)} hoverStyle={{ background: chrome.hover, color: chrome.text }}
-                style={{ padding: "4px 10px", background: "transparent", border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, color: chrome.text, cursor: "pointer" }}>Cancel</HoverButton>
-              <HoverButton title="Clear" onClick={() => { setConfirm(false); onClearAll(); }}
-                // Danger button — flattening to chrome.hover/chrome.text right
-                // before a destructive click would erase the danger signal, so
-                // hover keeps the red background/white text and adds a ring
-                // instead of washing to neutral (same ring technique as the
-                // swatch/active-tool hovers elsewhere in this file/TVFloatingToolbar).
-                hoverStyle={{ background: chrome.down, color: "#fff", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.5)" }}
-                style={{ padding: "4px 10px", background: chrome.down, border: "none", borderRadius: TV_GEOM.radius, color: "#fff", cursor: "pointer" }}>Clear</HoverButton>
+              <Button title="Cancel" onClick={() => setConfirm(false)}>Cancel</Button>
+              <Button variant="danger" title="Clear" onClick={() => { setConfirm(false); onClearAll(); }}>Clear</Button> {/* confirm-external: the containing popover asks for confirmation. */}
             </div>
           </div>
         )}

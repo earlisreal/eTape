@@ -1,8 +1,10 @@
 // ui/src/chrome/panels/tv/IndicatorPickerPopover.tsx
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { INDICATOR_CATALOG, type IndicatorType } from "../../../render/chart/indicatorSeries";
 import type { Palette } from "../../../render/palette";
+import { useDismissibleLayer } from "../../controls/useDismissibleLayer";
+import { Button } from "../../controls/Button";
 
 export interface IndicatorPickerPopoverProps {
   palette: Palette; anchor: HTMLElement | null; onClose: () => void; onAdd: (type: IndicatorType) => void;
@@ -37,16 +39,7 @@ export function IndicatorPickerPopover({ palette, anchor, onClose, onAdd, volume
     return () => window.removeEventListener("resize", place);
   }, [anchor]);
 
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (ref.current && !ref.current.contains(t) && !(anchor && anchor.contains(t))) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
-  }, [anchor, onClose]);
+  useDismissibleLayer(ref, onClose, { anchor });
 
   if (!pos && anchor) return null; // first-tick guard: position not measured yet
 
@@ -58,13 +51,12 @@ export function IndicatorPickerPopover({ palette, anchor, onClose, onAdd, volume
     }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {entries.map((e) => (
-          <button key={e.type} aria-label={`add ${e.label}`} onClick={() => { onAdd(e.type); onClose(); }}
+          <Button key={e.type} aria-label={`add ${e.label}`} onClick={() => { onAdd(e.type); onClose(); }}
             style={{ textAlign: "left", padding: "8px 10px", background: "transparent", border: "none", borderRadius: 4,
               color: palette.text, cursor: "pointer" }}
-            onMouseEnter={(ev) => (ev.currentTarget.style.background = palette.surface)}
-            onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}>
+            hoverStyle={{ background: palette.surface }}>
             {e.label}
-          </button>
+          </Button>
         ))}
       </div>
     </div>,

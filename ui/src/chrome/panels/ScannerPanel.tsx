@@ -10,6 +10,7 @@ import { formatFilterSummary } from "./scannerFilter";
 import { toggleSort, sortIndicator, type SortState } from "../sortColumns";
 import { bareSymbol } from "../exec/orderStatus";
 import { Button } from "../controls/Button";
+import { useDismissibleLayer } from "../controls/useDismissibleLayer";
 import { TVContextMenu, type MenuEntry } from "./tv/TVContextMenu";
 import { menuChrome } from "../menuChrome";
 import { PanelHeaderSlotContext } from "./headerSlot";
@@ -156,24 +157,8 @@ export function ScannerPanel(
 
   const openFilters = () => { setColumnsOpen(false); setDraft(filters); setFiltersOpen(true); };
   const openColumns = () => { setFiltersOpen(false); setColumnsOpen(true); };
-  useEffect(() => {
-    if (!filtersOpen && !columnsOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (!filtersRef.current?.contains(target) && !filterTriggerRef.current?.contains(target)) setFiltersOpen(false);
-      if (!columnsRef.current?.contains(target) && !columnsTriggerRef.current?.contains(target)) setColumnsOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFiltersOpen(false); };
-    const onColumnsKey = (e: KeyboardEvent) => { if (e.key === "Escape") setColumnsOpen(false); };
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keydown", onColumnsKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("keydown", onColumnsKey);
-    };
-  }, [filtersOpen, columnsOpen]);
+  useDismissibleLayer(filtersRef, () => setFiltersOpen(false), { enabled: filtersOpen, anchor: filterTriggerRef.current });
+  useDismissibleLayer(columnsRef, () => setColumnsOpen(false), { enabled: columnsOpen, anchor: columnsTriggerRef.current });
   const invalidPriceRange = !Number.isFinite(draft.minPrice) || !Number.isFinite(draft.maxPrice)
     || draft.minPrice < 0 || draft.maxPrice < 0
     || draft.minPrice > 0 && draft.maxPrice > 0 && draft.minPrice > draft.maxPrice;

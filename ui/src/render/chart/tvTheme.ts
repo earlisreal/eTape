@@ -2,7 +2,7 @@
 // TV_LIGHT/TV_DARK satisfy the existing Palette interface so ChartController,
 // chartTheme, and the primitives re-theme with zero changes — the chart panel
 // simply hands them a TV palette instead of the Daylight-Ledger one.
-import type { Palette, ThemeMode } from "../palette";
+import { FONTS, getPalette, type Palette, type ThemeMode } from "../palette";
 
 export const TV_LIGHT: Palette = {
   bg: "#FFFFFF",
@@ -104,10 +104,7 @@ export function getTvPalette(mode: ThemeMode): Palette {
   return mode === "dark" ? TV_DARK : TV_LIGHT;
 }
 
-// DOM chrome tokens for the toolbar/legend/menu/dialogs. These are NOT the same
-// as the CSS vars the app-wide ThemeProvider publishes (those are Daylight-Ledger
-// colors) — TV chrome components import these directly so the chart panel stays a
-// self-contained visual island.
+// Chart controls share the workspace chrome; canvas colors remain TV palettes.
 export interface TvChrome {
   bg: string;
   surface: string;
@@ -120,39 +117,18 @@ export interface TvChrome {
   down: string;
 }
 
-const CHROME_LIGHT: TvChrome = {
-  bg: "#FFFFFF",
-  surface: "#FFFFFF",
-  border: "#E0E3EB",
-  text: "#131722",
-  muted: "#787B86",
-  hover: "#F0F3FA",
-  accent: "#2962FF",
-  up: "#089981",
-  down: "#F23645",
-};
-
-const CHROME_DARK: TvChrome = {
-  bg: "#131722",
-  surface: "#1E222D",
-  border: "#2A2E39",
-  text: "#D1D4DC",
-  muted: "#787B86",
-  hover: "#2A2E39",
-  accent: "#2962FF",
-  up: "#089981",
-  down: "#F23645",
-};
-
 export function getTvChrome(mode: ThemeMode): TvChrome {
-  return mode === "dark" ? CHROME_DARK : CHROME_LIGHT;
+  const p = getPalette(mode);
+  const chart = getTvPalette(mode);
+  return { bg: p.bg, surface: p.surface, border: p.borderStrong, text: p.text, muted: p.textMuted,
+    hover: p.border, accent: p.accent, up: chart.up, down: chart.down };
 }
 
 // Preset color swatches shared by every style editor in the TV chrome (drawing
 // floating toolbar, indicator settings dialog) — one palette, no color wheel.
 export const TV_SWATCHES = ["#2962FF", "#089981", "#F23645", "#FF6D00", "#7E57C2", "#787B86", "#131722", "#FFFFFF"] as const;
 
-export const TV_FONT = `-apple-system, "Trebuchet MS", Roboto, Ubuntu, sans-serif`;
+export const TV_FONT = FONTS.sans;
 
 export const TV_GEOM = {
   iconBtn: 28,

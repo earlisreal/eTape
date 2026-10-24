@@ -1,5 +1,12 @@
 # UI
 
+Settings groups appearance, sound, workspace backup, trading controls, and broker
+connections behind persistent navigation. Dialogs share light/dark styling and
+close with Escape, their close button, or a click outside; nested confirmations
+close first. General preferences save as you go. Orders & hotkeys requires Save
+before closing or switching sections. See the [chrome guide](src/chrome/README.md)
+for the interaction conventions.
+
 The Windows title-bar favicon stays transparent and uses the original small-icon
 grid so all five bar rows stay separate at 16–40 px. The engine gives its owned
 Chrome windows an explicit taskbar identity and icon resource matching the

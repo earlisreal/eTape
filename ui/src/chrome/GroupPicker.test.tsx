@@ -20,7 +20,7 @@ describe("GroupPicker", () => {
 
   it("hovering an unselected group row shows the hover tint, cleared on mouse-leave", () => {
     render(<ThemeProvider><GroupPicker group="blue" onPick={() => {}} onClose={() => {}} /></ThemeProvider>);
-    const row = screen.getByText(/red group/i).closest('[role="button"]') as HTMLElement;
+    const row = screen.getByRole("button", { name: /red group/i });
     expect(row.style.background).toBe("transparent");
     fireEvent.mouseEnter(row);
     expect(row.style.background).toBe("rgba(154, 106, 27, 0.06)");
@@ -30,7 +30,7 @@ describe("GroupPicker", () => {
 
   it("hovering the selected row leaves its selected background unchanged", () => {
     render(<ThemeProvider><GroupPicker group="blue" onPick={() => {}} onClose={() => {}} /></ThemeProvider>);
-    const row = screen.getByText(/blue group/i).closest('[role="button"]') as HTMLElement;
+    const row = screen.getByRole("button", { name: /blue group/i });
     const selectedBackground = row.style.background;
     expect(selectedBackground).not.toBe("transparent");
     fireEvent.mouseEnter(row);
@@ -39,7 +39,7 @@ describe("GroupPicker", () => {
 
   it("hovering the pinned row uses the same hover tint as a group row, independent of the null sentinel", () => {
     render(<ThemeProvider><GroupPicker group="blue" onPick={() => {}} onClose={() => {}} /></ThemeProvider>);
-    const pinnedRow = screen.getByText(/pinned/i).closest('[role="button"]') as HTMLElement;
+    const pinnedRow = screen.getByRole("button", { name: /pinned/i });
     expect(pinnedRow.style.background).toBe("transparent");
     fireEvent.mouseEnter(pinnedRow);
     expect(pinnedRow.style.background).toBe("rgba(154, 106, 27, 0.06)");

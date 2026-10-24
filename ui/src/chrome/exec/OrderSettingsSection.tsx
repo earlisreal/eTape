@@ -17,6 +17,7 @@ import { useTheme } from "../ThemeProvider";
 import { FONTS, type Palette } from "../../render/palette";
 import { HoverButton } from "../controls/HoverButton";
 import { Button } from "../controls/Button";
+import { Dialog } from "../controls/Dialog";
 import type { AckMsg, Side, OrderType, TIF, OrderSession } from "../../wire/contract";
 import type { ToastApi } from "../Toast";
 import type { ExecStore } from "../../data/ExecStore";
@@ -853,7 +854,8 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
       </div>
 
       <label style={{display:"block",marginTop:12}}><input type="checkbox" checked={riskAutoSend} onChange={(e) => setRiskAutoSend(e.target.checked)} /> Auto-send Chart Risk Entry on release / second click without preview confirmation</label>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
+      <div className="settings-save" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 12 }}>
+        <span className="dialog-hint">Template, hotkey and Deck edits require Save.</span>
         <Button
           variant="primary" size="md" data-testid="save" disabled={hasConflict}
           onClick={() => {
@@ -866,24 +868,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
           Save
         </Button>
       </div>
-      {chartDisclosure && <div onClick={() => closeChartDisclosure(false)} style={{ position: "fixed", inset: 0, zIndex: 10001,
-        display: "flex", alignItems: "center", justifyContent: "center", padding: 16, background: "rgba(0,0,0,.55)" }}>
-        <section role="dialog" aria-modal="true" aria-labelledby="chart-gesture-disclosure-title" data-drawing-ui="true"
-          onClick={(e) => e.stopPropagation()} onKeyDown={(e) => {
-            if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeChartDisclosure(false); }
-            if (e.key === "Tab") {
-              const focusable = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(
-                'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-              ));
-              const first = focusable[0];
-              const last = focusable[focusable.length - 1];
-              if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
-              else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
-            }
-          }}
-          style={{ boxSizing: "border-box", width: "min(540px, 100%)", maxHeight: "85vh", overflowY: "auto", padding: 18,
-            border: `1px solid ${palette.borderStrong}`, borderRadius: 6, background: palette.surface, color: palette.text, boxShadow: "0 8px 30px #000a" }}>
-          <h2 id="chart-gesture-disclosure-title" style={{ fontFamily: FONTS.serif, fontSize: 17, margin: "0 0 10px" }}>Chart Order Gesture disclosure</h2>
+      {chartDisclosure && <Dialog title="Chart Order Gesture disclosure" onClose={() => closeChartDisclosure(false)} width={540}>
           <p style={{ fontSize: 12, lineHeight: 1.5, color: palette.textMuted }}>
             The selected modifier + click places this STOP_LIMIT or LIT Action Template at the clicked chart price using the chart&apos;s Link Group Execution Venue.
             When a live order is held by eTape, there is no broker order or protection before the trigger. eTape watches primary moomoo OpenD
@@ -920,8 +905,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
               {chartDisclosure.binding ? "Continue setup" : "Done"}
             </Button>
           </div>
-        </section>
-      </div>}
+      </Dialog>}
     </div>
   );
 }

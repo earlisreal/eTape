@@ -38,6 +38,8 @@ export interface TopBarProps {
   armed: boolean;
   onArmToggle: () => void;
   onAddPanel: () => void;
+  addPanelRef?: React.Ref<HTMLButtonElement>;
+  addPanelOpen?: boolean;
   onNewWindow: () => void;
   onOpenSettings: () => void;
   onOpenConnection: () => void;
@@ -177,7 +179,7 @@ export function TopBar(p: TopBarProps): JSX.Element {
         <TargetCue cue={cue} venueStatus={p.targetVenue} palette={palette} commands={p.commands} />
       </div>
       <div className="top-bar-actions" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, minWidth: 0 }}>
-        <Button onClick={p.onAddPanel}>+ Add panel</Button>
+        <Button ref={p.addPanelRef} aria-expanded={p.addPanelOpen ?? false} aria-haspopup="dialog" onClick={p.onAddPanel}>+ Add panel</Button>
         <Button onClick={p.onNewWindow}>⧉ New window</Button>
         <Button aria-label="Practice" title="Practice: synthetic demo market" onClick={p.onOpenPractice}>▶ Practice</Button>
         <Button aria-label="Settings" onClick={p.onOpenSettings}>⚙ Settings</Button>

@@ -156,31 +156,24 @@ describe("TVDrawingRail", () => {
     expect(measureBtn.style.background).toBe("transparent");
   });
 
-  it("Cancel confirm button shows the plain hover overlay (genuinely neutral)", () => {
+  it("uses the shared neutral button for Cancel", () => {
     render(<TVDrawingRail {...base} hasSelection={() => false} />);
     fireEvent.click(screen.getByLabelText("delete"));
     const cancelBtn = screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
 
     fireEvent.mouseEnter(cancelBtn);
-    expect(cancelBtn.style.background).toBe(cssColor(chrome.hover));
-    expect(cancelBtn.style.color).toBe(cssColor(chrome.text));
+    expect(cancelBtn.classList.contains("btn")).toBe(true);
+    expect(cancelBtn.style.background).toBe("var(--surface)");
   });
 
-  it("Clear confirm button keeps its danger color under hover (ring, not a flat wash)", () => {
+  it("keeps Clear visibly destructive and only clears after confirmation", () => {
     render(<TVDrawingRail {...base} hasSelection={() => false} />);
     fireEvent.click(screen.getByLabelText("delete"));
     const clearBtn = screen.getByRole("button", { name: "Clear" }) as HTMLButtonElement;
-    const bgBefore = clearBtn.style.background;
-    expect(bgBefore).toBe(cssColor(chrome.down));
-    expect(clearBtn.style.color).toBe(cssColor("#fff"));
-
+    expect(clearBtn.classList.contains("btn-danger")).toBe(true);
     fireEvent.mouseEnter(clearBtn);
-    expect(clearBtn.style.background).toBe(bgBefore);
-    expect(clearBtn.style.color).toBe(cssColor("#fff"));
-    expect(clearBtn.style.boxShadow).toBe("inset 0 0 0 1px rgba(255,255,255,.5)");
-
-    fireEvent.mouseLeave(clearBtn);
-    expect(clearBtn.style.background).toBe(bgBefore);
-    expect(clearBtn.style.boxShadow).toBe("");
+    expect(clearBtn.classList.contains("btn-danger")).toBe(true);
+    fireEvent.click(clearBtn);
+    expect(base.onClearAll).toHaveBeenCalled();
   });
 });

@@ -7,7 +7,8 @@
 // wires the button, the file dialog, and the confirm/toast flow for its part.
 import { useRef, useState } from "react";
 import { useTheme } from "./ThemeProvider";
-import { HoverButton } from "./controls/HoverButton";
+import { Button } from "./controls/Button";
+import { Dialog } from "./controls/Dialog";
 import type { ToastApi } from "./Toast";
 import { WORKSPACE_LAYOUT_VERSION, type Workspace } from "./workspace";
 import type { ActionTemplate, HotkeyDeckConfig, OrderConfig } from "./exec/actionTemplate";
@@ -38,6 +39,7 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
   const { palette } = useTheme();
   const [importData, setImportData] = useState<SettingsExport | null>(null);
   const [selectedFileName, setSelectedFileName] = useState("");
+  const [confirmImport, setConfirmImport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Placeholders for whichever field buildExport's `sel` tells it not to
@@ -70,6 +72,7 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
   const onFileSelected = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setConfirmImport(false);
     setSelectedFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => {
@@ -91,11 +94,9 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
   const applyImport = (): void => {
     if (!importData || !partPresent) return;
     if (props.part === "layout") {
-      if (!window.confirm("Replace your current layout with the imported one?")) return;
       props.onImportWorkspace(prepareImportedWorkspace(importData.layout as Workspace, props.getWorkspace().name));
       props.toast.push({ level: "info", text: "Imported layout." });
     } else {
-      if (!window.confirm("Replace your current hotkeys with the imported ones?")) return;
       const incomingTemplates = importData.hotkeys?.templates ?? [];
       const chartConflicts = detectChartBindingConflicts(incomingTemplates);
       const next = prepareImportedOrderConfig(importData.hotkeys as { templates: ActionTemplate[]; hotkeyDeck?: unknown }, props.orderConfig);
@@ -111,6 +112,7 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
     }
 
     setImportData(null);
+    setConfirmImport(false);
     setSelectedFileName("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -127,13 +129,12 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
     <div style={{ color: palette.text }}>
       <div style={{ ...noteStyle, marginBottom: 14 }} data-testid="scope-note">{scopeNote}</div>
 
-      <HoverButton
-        className="btn" data-testid="download-json" onClick={download}
+      <Button
+        data-testid="download-json" onClick={download}
         style={{ marginBottom: 10 }}
-        hoverStyle={{ background: palette.surface }}
       >
         Download JSON
-      </HoverButton>
+      </Button>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <input
@@ -141,12 +142,11 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
           data-testid="import-file" ref={fileInputRef} onChange={onFileSelected}
           style={{ display: "none" }}
         />
-        <HoverButton
-          className="btn" data-testid="choose-file" onClick={() => fileInputRef.current?.click()}
-          hoverStyle={{ background: palette.surface }}
+        <Button
+          data-testid="choose-file" onClick={() => fileInputRef.current?.click()}
         >
           Choose File
-        </HoverButton>
+        </Button>
         <span data-testid="selected-file-name" style={{ fontSize: 12, color: palette.text }}>
           {selectedFileName || "No file chosen"}
         </span>
@@ -154,16 +154,19 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
 
       {importData && (
         partPresent ? (
-          <HoverButton
-            className="btn" data-testid="apply-import" onClick={applyImport}
-            hoverStyle={{ background: palette.surface }}
+          <Button
+            data-testid="apply-import" onClick={() => setConfirmImport(true)}
           >
             Apply import
-          </HoverButton>
+          </Button>
         ) : (
           <div style={noteStyle}>{props.part === "layout" && layoutPresent ? "Invalid layout" : missingText}</div>
         )
       )}
+      {confirmImport && <Dialog title={`Import ${props.part === "layout" ? "layout" : "hotkeys"}`} width={420} onClose={() => setConfirmImport(false)}
+        footer={<><Button onClick={() => setConfirmImport(false)}>Cancel</Button><Button variant="primary" onClick={applyImport}>Replace {props.part === "layout" ? "layout" : "hotkeys"}</Button></>}>
+        <p style={{ margin: 0, lineHeight: 1.6 }}>Replace your current {props.part === "layout" ? "layout" : "hotkeys and Deck"} with <strong>{selectedFileName}</strong>?</p>
+      </Dialog>}
     </div>
   );
 }

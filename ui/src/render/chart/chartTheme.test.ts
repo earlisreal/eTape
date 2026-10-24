@@ -1,11 +1,21 @@
 import { describe, it, expect } from "vitest";
 import { LIGHT, DARK } from "../palette";
+import { getTvChrome, getTvPalette } from "./tvTheme";
 import {
   chartOptions, candleOptions, volumeOptions, RIGHT_OFFSET_BARS, clampRightScroll,
   boundedOverlayAutoscale, OVERLAY_AUTOSCALE_FACTOR,
 } from "./chartTheme";
 
 describe("chartTheme", () => {
+  it.each(["light", "dark"] as const)("shares %s workspace chrome while preserving canvas direction colors", (mode) => {
+    const palette = mode === "light" ? LIGHT : DARK;
+    const chrome = getTvChrome(mode);
+    expect(chrome.accent).toBe(palette.accent);
+    expect(chrome.surface).toBe(palette.surface);
+    expect(chrome.text).toBe(palette.text);
+    expect(chrome.up).toBe(getTvPalette(mode).up);
+    expect(chrome.down).toBe(getTvPalette(mode).down);
+  });
   it("maps palette surfaces onto chart layout + grid", () => {
     const o = chartOptions(LIGHT, "1m");
     expect(o.layout?.background).toEqual({ type: "solid", color: LIGHT.bg });

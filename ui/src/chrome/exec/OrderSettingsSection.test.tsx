@@ -260,7 +260,7 @@ describe("OrderSettingsSection", () => {
     const continueSetup = screen.getByRole("button", { name: "Continue setup" });
     continueSetup.focus();
     fireEvent.keyDown(continueSetup, { key: "Tab" });
-    const cancel = screen.getByRole("button", { name: "Not now" });
+    const cancel = screen.getByRole("button", { name: "Close dialog" });
     expect(document.activeElement).toBe(cancel);
     fireEvent.keyDown(cancel, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Chart Order Gesture disclosure" })).toBeNull();

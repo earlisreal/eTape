@@ -9,12 +9,12 @@ import {
   type FillSoundId, type RejectSoundId, type ScannerSoundId,
 } from "./SoundConfig";
 import { useTheme } from "../chrome/ThemeProvider";
+import { Button } from "../chrome/controls/Button";
 
 export function SoundsSection(): JSX.Element {
   const { config, save } = useSoundConfig();
   const { palette } = useTheme();
-  const inp = { background: palette.bg, color: palette.text, border: `1px solid ${palette.border}`, fontSize: 12, padding: "1px 4px" } as const;
-  const row = { display: "flex", gap: 6, alignItems: "center", padding: "3px 0", borderTop: `1px solid ${palette.border}` } as const;
+  const inp = { background: palette.bg, color: palette.text, border: `1px solid ${palette.borderStrong}`, borderRadius: 4, fontSize: 12, padding: "5px 6px", width: "100%", minWidth: 0 } as const;
 
   // remembered picks for re-checking after an unchecked (off) state
   const [lastPick, setLastPick] = useState<{ fill: FillSoundId; reject: RejectSoundId; scanner: ScannerSoundId }>({
@@ -30,72 +30,72 @@ export function SoundsSection(): JSX.Element {
     <div>
       <div className="col-head serif" style={{ marginBottom: 8 }}>Sounds</div>
 
-      <label style={row}>
+      <label className="sound-row" style={{ display: "flex" }}>
         <input data-testid="sound-enabled" type="checkbox" checked={config.enabled} onChange={(e) => save({ ...config, enabled: e.target.checked })} />
         <span>Enable sounds</span>
       </label>
 
-      <div style={row}>
-        <input data-testid="sound-session-on" type="checkbox" checked={config.sessionVoiceEnabled}
+      <div className="sound-row">
+        <label><input data-testid="sound-session-on" type="checkbox" checked={config.sessionVoiceEnabled}
           onChange={(e) => save({ ...config, sessionVoiceEnabled: e.target.checked })} />
-        <span style={{ width: 90 }}>Session voice</span>
-        <select data-testid="sound-session-voice" disabled={!config.sessionVoiceEnabled} value={config.sessionVoice} style={inp}
+        Session voice</label>
+        <select aria-label="Session voice" data-testid="sound-session-voice" disabled={!config.sessionVoiceEnabled} value={config.sessionVoice} style={inp}
           onChange={(e) => save({ ...config, sessionVoice: e.target.value as typeof config.sessionVoice })}>
           {SESSION_VOICE_IDS.map((id) => <option key={id} value={id}>{SESSION_VOICE_LABELS[id]}</option>)}
         </select>
-        <button data-testid="sound-preview-session" aria-label="Preview session voice" title="Preview session voice" disabled={!config.sessionVoiceEnabled}
-          style={{ ...inp, cursor: config.sessionVoiceEnabled ? "pointer" : "not-allowed" }}
-          onClick={() => soundEngine.previewSessionVoice()}>▶</button>
+        <Button iconOnly data-testid="sound-preview-session" aria-label="Preview session voice" title="Preview session voice" disabled={!config.sessionVoiceEnabled}
+          onClick={() => soundEngine.previewSessionVoice()}>▶</Button>
       </div>
 
-      <div style={row}>
-        <input data-testid="sound-fill-on" type="checkbox" checked={fillOn}
+      <div className="sound-row">
+        <label><input data-testid="sound-fill-on" type="checkbox" checked={fillOn}
           onChange={(e) => save({ ...config, fillSound: e.target.checked ? lastPick.fill : "off" })} />
-        <span style={{ width: 90 }}>Fill</span>
-        <select data-testid="sound-fill" disabled={!fillOn} value={fillOn ? config.fillSound : lastPick.fill} style={inp}
+        Fill</label>
+        <select aria-label="Fill sound" data-testid="sound-fill" disabled={!fillOn} value={fillOn ? config.fillSound : lastPick.fill} style={inp}
           onChange={(e) => { const v = e.target.value as FillSoundId; setLastPick((p) => ({ ...p, fill: v })); save({ ...config, fillSound: v }); }}>
           {FILL_SOUND_IDS.map((id) => <option key={id} value={id}>{FILL_SOUND_LABELS[id]}</option>)}
         </select>
-        <button data-testid="sound-preview-fill" disabled={!fillOn} style={{ ...inp, cursor: fillOn ? "pointer" : "not-allowed" }}
-          onClick={() => soundEngine.preview("fill", fillOn ? config.fillSound : lastPick.fill)}>▶</button>
+        <Button iconOnly aria-label="Preview fill sound" title="Preview fill sound" data-testid="sound-preview-fill" disabled={!fillOn}
+          onClick={() => soundEngine.preview("fill", fillOn ? config.fillSound : lastPick.fill)}>▶</Button>
       </div>
 
-      <label style={row}>
+      <label className="sound-row" style={{ display: "flex" }}>
         <input data-testid="sound-place" type="checkbox" checked={config.placeClick} onChange={(e) => save({ ...config, placeClick: e.target.checked })} />
         <span>Placement click</span>
       </label>
 
-      <div style={row}>
-        <input data-testid="sound-reject-on" type="checkbox" checked={rejectOn}
+      <div className="sound-row">
+        <label><input data-testid="sound-reject-on" type="checkbox" checked={rejectOn}
           onChange={(e) => save({ ...config, rejectSound: e.target.checked ? lastPick.reject : "off" })} />
-        <span style={{ width: 90 }}>Reject</span>
-        <select data-testid="sound-reject" disabled={!rejectOn} value={rejectOn ? config.rejectSound : lastPick.reject} style={inp}
+        Reject</label>
+        <select aria-label="Reject sound" data-testid="sound-reject" disabled={!rejectOn} value={rejectOn ? config.rejectSound : lastPick.reject} style={inp}
           onChange={(e) => { const v = e.target.value as RejectSoundId; setLastPick((p) => ({ ...p, reject: v })); save({ ...config, rejectSound: v }); }}>
           {REJECT_SOUND_IDS.map((id) => <option key={id} value={id}>{REJECT_SOUND_LABELS[id]}</option>)}
         </select>
-        <button data-testid="sound-preview-reject" disabled={!rejectOn} style={{ ...inp, cursor: rejectOn ? "pointer" : "not-allowed" }}
-          onClick={() => soundEngine.preview("reject", rejectOn ? config.rejectSound : lastPick.reject)}>▶</button>
+        <Button iconOnly aria-label="Preview reject sound" title="Preview reject sound" data-testid="sound-preview-reject" disabled={!rejectOn}
+          onClick={() => soundEngine.preview("reject", rejectOn ? config.rejectSound : lastPick.reject)}>▶</Button>
       </div>
 
-      <div style={row}>
-        <input data-testid="sound-scanner-on" type="checkbox" checked={scannerOn}
+      <div className="sound-row">
+        <label><input data-testid="sound-scanner-on" type="checkbox" checked={scannerOn}
           onChange={(e) => save({ ...config, scannerSound: e.target.checked ? lastPick.scanner : "off" })} />
-        <span style={{ width: 90 }}>Scanner</span>
-        <select data-testid="sound-scanner" disabled={!scannerOn} value={scannerOn ? config.scannerSound : lastPick.scanner} style={inp}
+        Scanner</label>
+        <select aria-label="Scanner sound" data-testid="sound-scanner" disabled={!scannerOn} value={scannerOn ? config.scannerSound : lastPick.scanner} style={inp}
           onChange={(e) => { const v = e.target.value as ScannerSoundId; setLastPick((p) => ({ ...p, scanner: v })); save({ ...config, scannerSound: v }); }}>
           {SCANNER_SOUND_IDS.map((id) => <option key={id} value={id}>{SCANNER_SOUND_LABELS[id]}</option>)}
         </select>
-        <button data-testid="sound-preview-scanner" disabled={!scannerOn} style={{ ...inp, cursor: scannerOn ? "pointer" : "not-allowed" }}
-          onClick={() => soundEngine.preview("scanner", scannerOn ? config.scannerSound : lastPick.scanner)}>▶</button>
+        <Button iconOnly aria-label="Preview scanner sound" title="Preview scanner sound" data-testid="sound-preview-scanner" disabled={!scannerOn}
+          onClick={() => soundEngine.preview("scanner", scannerOn ? config.scannerSound : lastPick.scanner)}>▶</Button>
       </div>
 
-      <div style={row}>
-        <span style={{ width: 90 }}>Volume</span>
-        <input data-testid="sound-volume" type="range" min={0} max={1} step={0.05} value={config.volume} onChange={(e) => save({ ...config, volume: Number(e.target.value) })} />
+      <div className="sound-row">
+        <label htmlFor="sound-volume">Volume</label>
+        <input id="sound-volume" data-testid="sound-volume" type="range" min={0} max={1} step={0.05} value={config.volume} onChange={(e) => save({ ...config, volume: Number(e.target.value) })} />
+        <output htmlFor="sound-volume" style={{ fontSize: 10, color: palette.textMuted }}>{Math.round(config.volume * 100)}%</output>
       </div>
-      <div style={row}>
+      <div className="sound-row" style={{ gridTemplateColumns: "1fr auto", borderBottom: 0 }}>
         <label><input data-testid="sound-price-alert-on" type="checkbox" checked={config.priceAlertEnabled} onChange={e=>save({...config,priceAlertEnabled:e.target.checked})}/>Price alert · Beacon</label>
-        <button aria-label="Preview price alert sound" disabled={!config.priceAlertEnabled} onClick={()=>soundEngine.previewPriceAlert()}>▶</button>
+        <Button iconOnly aria-label="Preview price alert sound" title="Preview price alert sound" disabled={!config.priceAlertEnabled} onClick={()=>soundEngine.previewPriceAlert()}>▶</Button>
       </div>
     </div>
   );

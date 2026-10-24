@@ -48,20 +48,16 @@ describe("SettingsModal", () => {
       const [section, setSection] = useState<SettingsSection>("general");
       return <AppProviders><ToastProvider><SettingsModal open section={section} onSection={setSection} onClose={() => {}} commands={commands} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={mkToast()} /></ToastProvider></AppProviders>;
     }
-    const { container } = render(<Wrapper />);
+    render(<Wrapper />);
 
     const nav = screen.getByRole("navigation");
     expect(within(nav).getAllByRole("button")).toHaveLength(4);
 
-    const panel = (container.firstChild as HTMLElement).firstChild as HTMLElement;
-    expect(panel.style.width).toBe("920px");
-    // Fixed-size modal: constant height regardless of active section, and no
-    // maxHeight left over from the old shrink-wrap-to-content behavior.
-    expect(panel.style.height).toBe("min(640px, 85vh)");
-    expect(panel.style.maxHeight).toBe("");
-    // Only the content pane scrolls — the nav stays pinned.
-    const content = panel.children[1] as HTMLElement;
-    expect(content.style.overflow).toBe("auto");
+    const panel = screen.getByRole("dialog", { name: "Settings" });
+    expect(panel.getAttribute("aria-modal")).toBe("true");
+    expect(screen.getByRole("button", { name: "General" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: "Close settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /venues & creds/i }));
     await waitFor(() => expect(commands.sendCommand).toHaveBeenCalledWith("GetVenueSetup", {}));

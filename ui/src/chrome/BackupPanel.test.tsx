@@ -106,7 +106,7 @@ describe("BackupPanel", () => {
       const parsed = JSON.parse(text) as SettingsExport;
       expect(parsed.app).toBe("eTape");
       expect(parsed.kind).toBe("settings-export");
-      expect(parsed.layout).toEqual(props.getWorkspace());
+      expect(parsed.layout).toEqual({ ...props.getWorkspace(), panels: [{ ...props.getWorkspace().panels[0], settings: {} }] });
       expect(parsed.hotkeys).toBeUndefined();
 
       const anchor = clickSpy.mock.instances[0] as unknown as HTMLAnchorElement;
@@ -164,7 +164,6 @@ describe("BackupPanel", () => {
       });
 
       it("applies the imported layout on confirm, forcing the current workspace name, and toasts info", () => {
-        vi.spyOn(window, "confirm").mockReturnValue(true);
         const importedLayout = makeWorkspace("other-machine");
         const fileData: SettingsExport = {
           app: "eTape", kind: "settings-export", version: 1, exportedAt: new Date().toISOString(),
@@ -175,13 +174,12 @@ describe("BackupPanel", () => {
         selectFile(JSON.stringify(fileData));
         fireEvent.click(screen.getByTestId("apply-import"));
 
-        expect(window.confirm).toHaveBeenCalledWith("Replace your current layout with the imported one?");
+        fireEvent.click(screen.getByRole("button", { name: "Replace layout" }));
         expect(props.onImportWorkspace).toHaveBeenCalledWith({ ...importedLayout, name: "main" });
         expect(props.toast.push).toHaveBeenCalledWith({ level: "info", text: "Imported layout." });
       });
 
       it("does not import when confirm is declined", () => {
-        vi.spyOn(window, "confirm").mockReturnValue(false);
         const fileData: SettingsExport = {
           app: "eTape", kind: "settings-export", version: 1, exportedAt: new Date().toISOString(),
           layout: makeWorkspace("other"),
@@ -191,7 +189,9 @@ describe("BackupPanel", () => {
         selectFile(JSON.stringify(fileData));
         fireEvent.click(screen.getByTestId("apply-import"));
 
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
         expect(props.onImportWorkspace).not.toHaveBeenCalled();
+        expect(screen.queryByRole("dialog")).toBeNull();
       });
 
       it("shows a danger toast and no Apply button for invalid JSON", () => {
@@ -288,7 +288,6 @@ describe("BackupPanel", () => {
 
       it("applies the imported hotkeys on confirm, regenerating ids, and toasts info", () => {
         vi.spyOn(crypto, "randomUUID").mockReturnValue("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-        vi.spyOn(window, "confirm").mockReturnValue(true);
         const importedTemplates = [makeTemplate("import-1", "Ctrl+9")];
         const fileData: SettingsExport = {
           app: "eTape", kind: "settings-export", version: 1, exportedAt: new Date().toISOString(),
@@ -299,18 +298,18 @@ describe("BackupPanel", () => {
         selectFile(JSON.stringify(fileData));
         fireEvent.click(screen.getByTestId("apply-import"));
 
-        expect(window.confirm).toHaveBeenCalledWith("Replace your current hotkeys with the imported ones?");
+        fireEvent.click(screen.getByRole("button", { name: "Replace hotkeys" }));
         expect(props.onImportOrderConfig).toHaveBeenCalledWith({
           templates: [{ ...importedTemplates[0], id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", deck: false }],
           activeVenue: props.orderConfig.activeVenue,
           extHoursMarketBufferPct: 1,
+          chartRiskAutoSend: false,
           hotkeyDeck: { rows: [], showHotkeyLabels: false },
         });
         expect(props.toast.push).toHaveBeenCalledWith({ level: "info", text: "Imported hotkeys." });
       });
 
       it("remaps imported Deck Layout ids while preserving row order and labels", () => {
-        vi.spyOn(window, "confirm").mockReturnValue(true);
         const importedTemplates = [makeTemplate("old-1"), makeTemplate("old-2")];
         const fileData: SettingsExport = {
           app: "eTape", kind: "settings-export", version: 1, exportedAt: new Date().toISOString(),
@@ -321,6 +320,7 @@ describe("BackupPanel", () => {
         selectFile(JSON.stringify(fileData));
         fireEvent.click(screen.getByTestId("apply-import"));
 
+        fireEvent.click(screen.getByRole("button", { name: "Replace hotkeys" }));
         const imported = props.onImportOrderConfig.mock.calls[0][0] as OrderConfig;
         expect(imported.hotkeyDeck).toEqual({
           rows: [[imported.templates[1].id, imported.templates[0].id]],
@@ -330,7 +330,6 @@ describe("BackupPanel", () => {
       });
 
       it("accepts malformed optional Deck Layout data and normalizes it safely", () => {
-        vi.spyOn(window, "confirm").mockReturnValue(true);
         const fileData = {
           app: "eTape", kind: "settings-export", version: 1, exportedAt: new Date().toISOString(),
           hotkeys: { templates: [makeTemplate("old-1")], hotkeyDeck: { rows: "bad", showHotkeyLabels: true } },
@@ -340,13 +339,13 @@ describe("BackupPanel", () => {
         expect(() => {
           selectFile(JSON.stringify(fileData));
           fireEvent.click(screen.getByTestId("apply-import"));
+          fireEvent.click(screen.getByRole("button", { name: "Replace hotkeys" }));
         }).not.toThrow();
         expect((props.onImportOrderConfig.mock.calls[0][0] as OrderConfig).hotkeyDeck).toEqual({ rows: [], showHotkeyLabels: true });
       });
 
       it("pushes a warn toast (in addition to the info toast) when imported hotkeys conflict", () => {
         vi.spyOn(crypto, "randomUUID").mockReturnValue("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-        vi.spyOn(window, "confirm").mockReturnValue(true);
         const importedTemplates = [makeTemplate("import-1", "Ctrl+9"), makeTemplate("import-2", "Ctrl+9")];
         const fileData: SettingsExport = {
           app: "eTape", kind: "settings-export", version: 1, exportedAt: new Date().toISOString(),
@@ -357,6 +356,7 @@ describe("BackupPanel", () => {
         selectFile(JSON.stringify(fileData));
         fireEvent.click(screen.getByTestId("apply-import"));
 
+        fireEvent.click(screen.getByRole("button", { name: "Replace hotkeys" }));
         expect(props.toast.push).toHaveBeenCalledWith({
           level: "warn", text: "Imported hotkeys have conflicting bindings: Ctrl+9",
         });
@@ -364,7 +364,6 @@ describe("BackupPanel", () => {
       });
 
       it("does not import when confirm is declined", () => {
-        vi.spyOn(window, "confirm").mockReturnValue(false);
         const fileData: SettingsExport = {
           app: "eTape", kind: "settings-export", version: 1, exportedAt: new Date().toISOString(),
           hotkeys: { templates: [makeTemplate("import-1", "Ctrl+9")] },
@@ -374,7 +373,9 @@ describe("BackupPanel", () => {
         selectFile(JSON.stringify(fileData));
         fireEvent.click(screen.getByTestId("apply-import"));
 
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
         expect(props.onImportOrderConfig).not.toHaveBeenCalled();
+        expect(screen.queryByRole("dialog")).toBeNull();
       });
 
       it("shows a danger toast and no Apply button for invalid JSON", () => {

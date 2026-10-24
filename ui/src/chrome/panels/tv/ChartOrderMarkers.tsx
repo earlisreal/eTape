@@ -10,6 +10,8 @@ import type { Tool } from "../../../render/chart/drawings/interaction";
 import {riskEntrySize} from "../../exec/riskEntry";
 import {resolveLimitCushionPrice} from "../../exec/priceSource";
 import type { TvChrome } from "../../../render/chart/tvTheme";
+import { Dialog } from "../../controls/Dialog";
+import { Button } from "../../controls/Button";
 import { attachOrderPillLayer } from "./orderPillLayer";
 import type {ExecStore} from "../../../data/ExecStore";
 
@@ -484,12 +486,11 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         </div>}
       </div>;
     })}
-    {trailEdit && <section role="dialog" aria-label="Edit trailing stop" data-drawing-ui="true" onKeyDown={e=>{e.stopPropagation();if(e.key==="Escape"&&!trailBusy)setTrailEdit(null);}}
-      style={{position:"absolute",left:10,right:10,top:20,padding:10,background:props.chrome.surface,color:props.chrome.text,border:"1px solid currentColor",pointerEvents:"auto",zIndex:30}}>
+    {trailEdit && <Dialog title="Edit trailing stop" onClose={() => setTrailEdit(null)} dismissible={!trailBusy} width={520}>
       <div>Edit trail · {trailEdit.order.symbol} · current stop {priceText(trailEdit.order.stopPrice)} · edits cannot loosen it</div>
       <TrailEditor value={trailEdit.config} lockMode lockSessions onChange={config=>setTrailEdit({...trailEdit,config})}/>
-      <button type="button" disabled={trailBusy} onClick={()=>void applyTrail()}>Apply trail</button><button type="button" disabled={trailBusy} onClick={()=>setTrailEdit(null)}>Close</button>
-    </section>}
+      <div className="dialog-actions" style={{marginTop:16}}><Button type="button" loading={trailBusy} variant="primary" onClick={()=>void applyTrail()}>Apply trail</Button><Button type="button" disabled={trailBusy} onClick={()=>setTrailEdit(null)}>Close</Button></div>
+    </Dialog>}
     {/unknown|rejected|unavailable|zero shares/i.test(announcement) && <div role="status" style={{position:"absolute",left:10,bottom:10,maxWidth:"80%",color:"#ff9d72",background:"#0c1017",fontSize:11}}>{announcement}</div>}
     <span aria-live="polite" className="chart-order-announcement" style={{ position:"absolute", width:1, height:1, overflow:"hidden", clipPath:"inset(50%)" }}>{announcement}</span>
   </div>;

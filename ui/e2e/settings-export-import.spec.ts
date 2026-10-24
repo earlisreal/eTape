@@ -28,7 +28,8 @@ test.describe("settings export/import", () => {
     await openGeneral(page);
 
     await expect(page.getByTestId("download-json")).toBeVisible();
-    await expect(page.getByTestId("import-file")).toBeVisible();
+    await expect(page.getByTestId("import-file")).toBeAttached();
+    await expect(page.getByTestId("choose-file")).toBeVisible();
   });
 
   test("opening Settings -> Orders & hotkeys renders the hotkeys download/import controls", async ({ page }) => {
@@ -36,7 +37,8 @@ test.describe("settings export/import", () => {
     await openOrdersHotkeys(page);
 
     await expect(page.getByTestId("download-json")).toBeVisible();
-    await expect(page.getByTestId("import-file")).toBeVisible();
+    await expect(page.getByTestId("import-file")).toBeAttached();
+    await expect(page.getByTestId("choose-file")).toBeVisible();
   });
 
   test("downloading from General's Layout group triggers a download named etape-layout-<date>.json", async ({ page }) => {
@@ -60,11 +62,6 @@ test.describe("settings export/import", () => {
   });
 
   test("importing a hotkeys-only fixture with an unbound combo adds its template to Orders & hotkeys", async ({ page }) => {
-    // applyImport() always runs a native window.confirm before applying —
-    // same pattern as smoke.spec.ts's preset-replace-confirmation test:
-    // register the auto-accept handler before the click that triggers it.
-    page.on("dialog", (d) => { void d.accept(); });
-
     await gotoBlank(page, "e2e-backup-import-hotkeys");
     await openOrdersHotkeys(page);
 
@@ -74,7 +71,8 @@ test.describe("settings export/import", () => {
     await expect(page.getByTestId("apply-import")).toBeVisible();
 
     await page.getByTestId("apply-import").click();
-    await expect(page.getByRole("alert")).toContainText("Imported hotkeys.");
+    await page.getByRole("button", { name: "Replace hotkeys", exact: true }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "Imported hotkeys." })).toBeVisible();
 
     // No nav switch needed: the cheat sheet (rendered by OrderSettingsSection,
     // above the hotkeys import panel in this same "Orders & hotkeys" pane)
@@ -85,15 +83,13 @@ test.describe("settings export/import", () => {
     // across every spec file in one `npm run e2e` run): reset now, while the
     // modal is already open to "Orders & hotkeys".
     await page.getByTestId("reset-defaults").click();
-    await page.getByTestId("reset-confirm").click();
+    await page.getByTestId("reset-defaults").click();
     await page.getByTestId("save").click();
 
     await page.mouse.click(5, 5); // close via backdrop
   });
 
   test("importing a layout-only fixture replaces the panel layout", async ({ page }) => {
-    page.on("dialog", (d) => { void d.accept(); });
-
     await gotoBlank(page, "e2e-backup-import-layout");
     await expect(page.locator(".ledger-header")).toHaveCount(0);
 
@@ -102,7 +98,8 @@ test.describe("settings export/import", () => {
     await expect(page.getByTestId("apply-import")).toBeVisible();
 
     await page.getByTestId("apply-import").click();
-    await expect(page.getByRole("alert")).toContainText("Imported layout.");
+    await page.getByRole("button", { name: "Replace layout", exact: true }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "Imported layout." })).toBeVisible();
 
     await page.mouse.click(5, 5); // close via backdrop
     await expect(page.locator(".ledger-header", { hasText: "Scanner" })).toBeVisible({ timeout: 10_000 });
@@ -118,7 +115,7 @@ test.describe("settings export/import", () => {
 
     await page.getByTestId("empty-import-file").setInputFiles("fixtures/settings-export-layout.json");
 
-    await expect(page.getByRole("alert")).toContainText("Imported layout.");
+    await expect(page.getByRole("alert").filter({ hasText: "Imported layout." })).toBeVisible();
     await expect(page.locator(".ledger-header", { hasText: "Scanner" })).toBeVisible({ timeout: 10_000 });
   });
 });

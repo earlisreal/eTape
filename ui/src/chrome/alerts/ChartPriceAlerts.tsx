@@ -7,6 +7,8 @@ import { attachOrderPillLayer } from "../panels/tv/orderPillLayer";
 import { IconBell } from "../panels/tv/tvIcons";
 import { snapAlertPrice,alertPriceText } from "./price";
 import type { LinkGroup } from "../linkGroups";
+import { useDismissibleLayer } from "../controls/useDismissibleLayer";
+import { Button } from "../controls/Button";
 
 interface Props {
  store:PriceAlertStore;commands:AlertCommands;symbol:string;
@@ -28,6 +30,8 @@ export function ChartPriceAlerts(props:Props):JSX.Element {
  const suppressClick=useRef(false);
  const [edit,setEdit]=useState<AlertEdit|null>(null);
  const [choices,setChoices]=useState<PriceAlert[]|null>(null);
+ const choicesRef=useRef<HTMLDivElement>(null);
+ useDismissibleLayer(choicesRef,()=>setChoices(null),{enabled:!!choices});
  const open=(alert:PriceAlert,price=alert.price)=>{props.onEdit?.();setChoices(null);setEdit({symbol:alert.symbol,alert,price});};
  const layout=()=>{
   const p=latest.current,facade=p.facadeRef.current;
@@ -117,7 +121,7 @@ export function ChartPriceAlerts(props:Props):JSX.Element {
    </div>)}
   </div>
   {props.armed&&<div data-drawing-ui="true" style={{position:"absolute",left:12,bottom:12,zIndex:9,pointerEvents:"none",background:"#191b20",color:"#e9b55e",padding:6}}>Click a price to create an alert · Esc to cancel</div>}
-  {choices&&<div data-drawing-ui="true" className="popover" role="dialog" aria-label="Choose price alert" style={{position:"absolute",right:props.rightAxisWidth+6,top:40,zIndex:15,padding:8,display:"grid",gap:5}}>{choices.map(a=><button key={a.id} onClick={()=>open(a)}>{a.label||a.symbol} · {a.condition==="at-or-above"?"≥":"≤"} {a.price}</button>)}<button onClick={()=>setChoices(null)}>Cancel</button></div>}
+  {choices&&<div ref={choicesRef} data-drawing-ui="true" className="popover" role="dialog" aria-label="Choose price alert" style={{position:"absolute",right:props.rightAxisWidth+6,top:40,zIndex:15,padding:8,display:"grid",gap:5}}>{choices.map(a=><Button key={a.id} onClick={()=>open(a)}>{a.label||a.symbol} · {a.condition==="at-or-above"?"≥":"≤"} {a.price}</Button>)}<Button onClick={()=>setChoices(null)}>Cancel</Button></div>}
   {edit&&<PriceAlertEditor {...edit} commands={props.commands} onClose={()=>setEdit(null)}/>}
  </>;
 }

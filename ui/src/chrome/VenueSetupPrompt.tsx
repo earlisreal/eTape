@@ -7,9 +7,9 @@
 // prompt: it only renders its own checkbox state and reports that state back
 // on either action. Always mounted only while AppShell wants it shown (no
 // internal `open` prop), same lifetime contract as TVDialog.
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTheme } from "./ThemeProvider";
-import { modalTracker } from "./modalTracker";
+import { Dialog } from "./controls/Dialog";
 import { Button } from "./controls/Button";
 
 const BROKER_CHIPS = ["TradeZero", "Alpaca", "moomoo"];
@@ -26,28 +26,8 @@ export function VenueSetupPrompt({ onConfigure, onDismiss, onTryDemo }: {
   const { palette } = useTheme();
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
-  // Mirrors TVDialog's pattern exactly: this component only ever exists in the
-  // tree while the prompt is showing, so mount == open and unmount == closed —
-  // no `open` prop to gate on, so the tracker call can't get stuck true.
-  useEffect(() => {
-    modalTracker.setOpen(true);
-    return () => modalTracker.setOpen(false);
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onDismiss(dontShowAgain); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onDismiss, dontShowAgain]);
-
   return (
-    <div onClick={() => onDismiss(dontShowAgain)}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 }}>
-      <div onClick={(e) => e.stopPropagation()} className="venue-setup-prompt" role="dialog" aria-modal="true" aria-label="Add a broker to trade live"
-        style={{ background: palette.surface, border: `1px solid ${palette.borderStrong}`, borderRadius: 6, width: 460, padding: 20, boxSizing: "border-box" }}>
-        <div className="serif" style={{ fontSize: 16, fontWeight: 600, color: palette.text, marginBottom: 8 }}>
-          Add a broker to trade live
-        </div>
+    <Dialog title="Add a broker to trade live" onClose={() => onDismiss(dontShowAgain)} width={500} className="venue-setup-prompt">
         <p style={{ fontSize: 12, color: palette.textMuted, lineHeight: 1.5, margin: "0 0 14px" }}>
           You already have a paper Sim practice venue, so you can place orders right away.
           To trade real money, fill in one of the broker cards — moomoo configures itself from
@@ -71,7 +51,6 @@ export function VenueSetupPrompt({ onConfigure, onDismiss, onTryDemo }: {
           <Button aria-label="Try demo" onClick={onTryDemo} style={{ color: palette.demo, borderColor: palette.demo }}>Try demo</Button>
           <Button variant="primary" aria-label="Configure venues" onClick={() => onConfigure(dontShowAgain)}>Configure venues</Button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

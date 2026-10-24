@@ -1,10 +1,11 @@
 // ui/src/chrome/panels/ExportTradesPopover.tsx
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Palette } from "../../render/palette";
 import type { ExportFillsResult } from "../../wire/contract";
 import type { ToastApi } from "../Toast";
-import { HoverButton } from "../controls/HoverButton";
+import { Button } from "../controls/Button";
+import { useDismissibleLayer } from "../controls/useDismissibleLayer";
 
 type Preset = "today" | "week" | "month" | "all" | "custom";
 
@@ -53,16 +54,7 @@ export function ExportTradesPopover(
     return () => window.removeEventListener("resize", place);
   }, [anchor]);
 
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (ref.current && !ref.current.contains(t) && !(anchor && anchor.contains(t))) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
-  }, [anchor, onClose]);
+  useDismissibleLayer(ref, onClose, { anchor });
 
   if (!pos && anchor) return null; // first-tick guard: position not measured yet
 
@@ -111,12 +103,11 @@ export function ExportTradesPopover(
             {rangeInvalid && <span style={{ fontSize: 11, color: palette.danger }}>From must be on or before To</span>}
           </>
         )}
-        <HoverButton data-testid="export-download" onClick={download}
+        <Button variant="primary" data-testid="export-download" onClick={download}
           disabled={preset === "custom" && (!from || !to || rangeInvalid)}
-          style={{ marginTop: 4, padding: "5px 8px", border: `1px solid ${palette.border}`, borderRadius: 4, background: "transparent", color: palette.text, cursor: "pointer", fontSize: 12 }}
-          hoverStyle={{ background: palette.surface }}>
+          style={{ marginTop: 4 }}>
           Download CSV
-        </HoverButton>
+        </Button>
       </div>
     </div>,
     document.body,

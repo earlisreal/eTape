@@ -36,24 +36,20 @@ export function GeneralSection(
     oc.save({ ...oc.config, extHoursMarketBufferPct: clamped });
   };
 
-  // Every group after the first gets a hairline top border + top spacing so
-  // the stack reads as clearly separated groups, not one long list. The first
-  // group (Theme) sits flush under the modal's own padding instead.
-  const groupStyle = { borderTop: `1px solid ${palette.border}`, marginTop: 14, paddingTop: 14 };
   const headStyle = { marginBottom: 8 };
   const noteStyle = { fontSize: 12, color: palette.textMuted, marginBottom: 8 };
 
   return (
     <div style={{ color: palette.text }}>
-      <AppearanceSection />
+      <div className="settings-group"><AppearanceSection /></div>
 
-      <div style={groupStyle}>
+      <div className="settings-group">
         <SoundsSection />
       </div>
 
-      <div style={groupStyle}>
+      <div className="settings-group">
         <div className="col-head serif" style={headStyle}>Extended hours</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, color: palette.text }}>Ext-hours market buffer %</span>
           <StepField
             ariaLabel="ext-buffer"
@@ -72,13 +68,13 @@ export function GeneralSection(
         <div style={{ ...noteStyle, marginTop: 6, marginBottom: 0 }}>Buffer added to market orders placed outside regular hours.</div>
       </div>
 
-      <div style={groupStyle}>
+      <div className="settings-group">
         <div className="col-head serif" style={headStyle}>Layout</div>
         <div style={noteStyle}>Save this window's panel layout to a file, or restore it.</div>
         <BackupPanel part="layout" getWorkspace={getWorkspace} onImportWorkspace={onImportWorkspace} toast={toast} />
       </div>
 
-      <div style={groupStyle}>
+      <div className="settings-group">
         <div className="col-head serif" style={headStyle}>Trading</div>
         <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <input type="checkbox" aria-label="auto-unlock-startup"

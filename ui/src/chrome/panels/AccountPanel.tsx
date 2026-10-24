@@ -1,5 +1,7 @@
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import { Dialog } from "../controls/Dialog";
+import { Button } from "../controls/Button";
 import type { PanelProps } from "./registry";
 import { HoverButton } from "../controls/HoverButton";
 import type { ClosedOrder, Fill, Order, PositionRow, Quote, TrailConfig } from "../../wire/contract";
@@ -246,13 +248,12 @@ function OrdersTable({
   );
   return (
     <div data-testid="orders-table" style={{ height, flexShrink: 0, overflow: "hidden", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontSize: 12 }}>
-      {trailEdit && createPortal(<section role="dialog" aria-label="Edit trailing stop" onKeyDown={e=>{e.stopPropagation();if(e.key==="Escape"&&!trailBusy)setTrailEdit(null);}}
-        style={{position:"fixed",left:"20%",right:"20%",top:"20%",padding:12,background:palette.surface,color:palette.text,border:`1px solid ${palette.border}`,zIndex:1000}}>
+      {trailEdit && <Dialog title="Edit trailing stop" onClose={() => setTrailEdit(null)} dismissible={!trailBusy} width={520}>
         <div>Edit trail · {trailEdit.order.symbol} · edits cannot loosen its stop</div>
         <TrailEditor value={trailEdit.config} lockMode lockSessions onChange={config=>setTrailEdit({...trailEdit,config})}/>
-        <button type="button" disabled={trailBusy} onClick={()=>void applyTrail()}>Apply trail</button>
-        <button type="button" disabled={trailBusy} onClick={()=>setTrailEdit(null)}>Close</button>
-      </section>,document.body)}
+        <div className="dialog-actions" style={{marginTop:16}}><Button type="button" loading={trailBusy} variant="primary" onClick={()=>void applyTrail()}>Apply trail</Button>
+        <Button type="button" disabled={trailBusy} onClick={()=>setTrailEdit(null)}>Close</Button></div>
+      </Dialog>}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
         {upperTab(`Open Orders (${views.length})`, tab === "open", () => setTab("open"), "open-orders-tab")}
         {upperTab(`Closed Orders (${closedRows.length})`, tab === "closed", () => setTab("closed"), "closed-orders-tab")}

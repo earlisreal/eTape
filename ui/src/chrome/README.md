@@ -1,5 +1,22 @@
 # Chrome
 
+Settings uses the shared dialog surface with a pinned header, section navigation,
+and footer. Content scrolls independently; narrow windows move navigation into
+a horizontal row. General changes save immediately, order templates/hotkeys/Deck
+require Save, and broker changes use each card's controls. Closing or leaving
+Orders & hotkeys discards unsaved template edits. Imports ask for confirmation
+in a nested dialog; dismissing it leaves Settings open. New Window renames
+workspaces inline and uses the shared two-click delete confirmation.
+
+App dialogs and chart settings share the workspace light/dark palette, typography,
+buttons, focus rings, and backdrop. Outside clicks and Escape dismiss the current
+surface; modal focus returns to its opener. Pending alert/trail saves and demo
+startup block dismissal until their outcome arrives. Add Panel, Link Group,
+Scanner filters/columns, indicators, exports, context menus, and drawing-clear
+confirmation use the same outside-input and Escape handling. See
+[shared controls](controls/README.md). Browser coverage:
+[`ui-consistency.spec.ts`](../../e2e/ui-consistency.spec.ts).
+
 Alert popup routing reads live per-window panel snapshots in browser storage.
 Each AppShell holds an `etape.alert-panels.<instance>` Web Lock; only snapshots
 with live owners are eligible. User interaction and color changes update a

@@ -4,8 +4,8 @@ import { OrderSettingsSection } from "./exec/OrderSettingsSection";
 import { VenuesSection } from "./exec/VenuesSection";
 import { BackupPanel } from "./BackupPanel";
 import { useOrderConfig } from "./exec/useOrderConfig";
-import { useTheme } from "./ThemeProvider";
 import { Button } from "./controls/Button";
+import { Dialog } from "./controls/Dialog";
 import type { AckMsg } from "../wire/contract";
 import type { ToastApi } from "./Toast";
 import type { Workspace } from "./workspace";
@@ -15,11 +15,11 @@ import type { ExecStore } from "../data/ExecStore";
 import type { SessionStore } from "../data/SessionStore";
 
 export type SettingsSection = "general" | "orders" | "venues" | "about";
-const NAV: { id: SettingsSection; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "orders", label: "Orders & hotkeys" },
-  { id: "venues", label: "Venues & creds" },
-  { id: "about", label: "About" },
+const NAV: { id: SettingsSection; label: string; detail: string; note: string }[] = [
+  { id: "general", label: "General", detail: "Appearance, sound & workspace", note: "Make eTape feel right for you. Changes save as you go." },
+  { id: "orders", label: "Orders & hotkeys", detail: "Templates, shortcuts & Deck", note: "Configure your trading controls. Save template edits before leaving this section." },
+  { id: "venues", label: "Venues & creds", detail: "Brokers & connections", note: "Manage your broker connections. Test and save changes on each broker card." },
+  { id: "about", label: "About", detail: "Version & diagnostics", note: "Application details and connection diagnostics." },
 ];
 
 export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast, engineState, health, exec, session }:
@@ -49,42 +49,28 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
     // same reason as health/exec above.
     session?: SessionStore | undefined;
   }): JSX.Element | null {
-  const { palette } = useTheme();
   const oc = useOrderConfig();
+  const current = NAV.find((n) => n.id === section)!;
   if (!open) return null;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: palette.surface, border: `1px solid ${palette.borderStrong}`, borderRadius: 6, width: 920, height: "min(640px, 85vh)", display: "grid", gridTemplateColumns: "208px 1fr" }}>
-        <nav style={{ borderRight: `1px solid ${palette.border}`, padding: "16px 12px", background: palette.surface }}>
-          <div className="serif" style={{ fontSize: 16, fontWeight: 600, color: palette.text, paddingBottom: 10, marginBottom: 12, borderBottom: `3px double ${palette.borderStrong}` }}>
-            Settings
-          </div>
+    <Dialog title="Settings" onClose={onClose} width={1000} className="settings-dialog" closeLabel="Close settings"
+      footer={<><span className="dialog-hint">Esc or click outside to close</span><Button size="md" onClick={onClose}>Done</Button></>}>
+        <nav className="settings-nav" aria-label="Settings sections">
           {NAV.map((n) => (
-            <Button key={n.id} aria-label={n.label} onClick={() => onSection(n.id)}
-              style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 2, background: section === n.id ? palette.bg : "transparent",
-                borderColor: "transparent", borderRadius: 4, borderLeft: `4px solid ${section === n.id ? palette.accent : "transparent"}`,
-                color: section === n.id ? palette.text : palette.textMuted, fontWeight: section === n.id ? 600 : 500,
-                fontSize: 12, padding: "9px 10px" }}
-              // This row sets a permanent inline background too, which would
-              // permanently defeat a plain CSS :hover rule (see HoverButton's
-              // own doc comment). Active rows already sit on palette.bg
-              // (bridging to the content pane below, which is the same
-              // color); hovering an inactive row previews that same bg so it
-              // reads as "about to become current." The border-left accent
-              // stripe stays the true active/inactive differentiator, so it
-              // never washes out.
-              hoverStyle={{ background: palette.bg, color: palette.text }}>
-              {n.label}
+            <Button key={n.id} aria-label={n.label} aria-current={section === n.id ? "page" : undefined}
+              onClick={() => onSection(n.id)} hoverStyle={{ background: "var(--bg)", color: "var(--text)" }}>
+              <strong>{n.label}</strong><small>{n.detail}</small>
             </Button>
           ))}
         </nav>
-        <section style={{ padding: 16, overflow: "auto", minHeight: 0, background: palette.bg }}>
+        <section key={section} className="settings-content" aria-label={current.label}>
+          <div className="settings-section-header"><h3>{current.label}</h3><p>{current.note}</p></div>
           {section === "general" && <GeneralSection getWorkspace={getWorkspace} onImportWorkspace={onImportWorkspace} toast={toast} />}
           {section === "orders" && (
             <>
               <OrderSettingsSection config={oc.config} onSave={oc.save} toast={toast} onClose={onClose}
                 commands={commands} exec={exec} />
-              <div style={{ borderTop: `1px solid ${palette.border}`, marginTop: 14, paddingTop: 14 }}>
+              <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>
                 <div className="col-head serif" style={{ marginBottom: 8 }}>Import & export hotkeys & deck</div>
                 <BackupPanel part="hotkeys" orderConfig={oc.config} onImportOrderConfig={oc.save} toast={toast} />
               </div>
@@ -93,7 +79,6 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
           {section === "venues" && <VenuesSection commands={commands} engineState={engineState} health={health} exec={exec} session={session} />}
           {section === "about" && <AboutSection commands={commands} />}
         </section>
-      </div>
-    </div>
+    </Dialog>
   );
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "./ThemeProvider";
 import type { AckMsg } from "../wire/contract";
-import { modalTracker } from "./modalTracker";
+import { Dialog } from "./controls/Dialog";
+import { Button } from "./controls/Button";
 
 export function PracticeLauncherModal({ open, onClose, commands }: {
   open: boolean;
@@ -17,11 +18,6 @@ export function PracticeLauncherModal({ open, onClose, commands }: {
       setPending(false);
       setError(null);
     }
-  }, [open]);
-  useEffect(() => {
-    if (!open) return;
-    modalTracker.setOpen(true);
-    return () => modalTracker.setOpen(false);
   }, [open]);
 
   if (!open) return null;
@@ -43,9 +39,8 @@ export function PracticeLauncherModal({ open, onClose, commands }: {
   };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 }}>
-      <div data-testid="practice-launcher" onClick={(e) => e.stopPropagation()} style={{ background: palette.surface, border: `1px solid ${palette.borderStrong}`, borderRadius: 6, width: 440, padding: 20 }}>
-        <h3 style={{ marginTop: 0, marginBottom: 4 }}>Practice</h3>
+    <Dialog title="Practice" onClose={onClose} dismissible={!pending} testId="practice-launcher"
+      footer={<><span className="dialog-hint">A simulated market for practice</span><Button disabled={pending} onClick={onClose}>Cancel</Button></>}>
         <p style={{ marginTop: 0, marginBottom: 18, color: palette.textMuted, fontSize: 12 }}>
           Nothing here touches real orders.
         </p>
@@ -58,15 +53,11 @@ export function PracticeLauncherModal({ open, onClose, commands }: {
           </p>
           {error && <p style={{ color: palette.danger, fontSize: 12, marginTop: 0 }}>{error}</p>}
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button data-testid="demo-start" disabled={pending} onClick={onStartDemo}>
+            <Button variant="primary" size="md" data-testid="demo-start" loading={pending} onClick={onStartDemo}>
               {pending ? "Starting…" : "Start demo market"}
-            </button>
+            </Button>
           </div>
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button onClick={onClose}>Cancel</button>
-        </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

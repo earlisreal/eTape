@@ -27,7 +27,7 @@ import { SettingsModal, type SettingsSection } from "./SettingsModal";
 import { PracticeLauncherModal } from "./PracticeLauncherModal";
 import { VenueSetupPrompt } from "./VenueSetupPrompt";
 import { OpenSettingsProvider } from "./OpenSettingsContext";
-import { modalTracker } from "./modalTracker";
+import { useDismissibleLayer } from "./controls/useDismissibleLayer";
 import { useTheme } from "./ThemeProvider";
 import { useToasts } from "./Toast";
 import { useOrderCommands } from "./exec/useOrderCommands";
@@ -121,6 +121,9 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const [sourceWorkspace, setSourceWorkspace] = useState<Workspace | null>(null);
   const [syncConfig, setSyncConfig] = useState<ScannerSyncConfig | undefined>();
   const [addOpen, setAddOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const [addAnchor, setAddAnchor] = useState<HTMLElement | null>(null);
+  useDismissibleLayer(addMenuRef, () => setAddOpen(false), { enabled: addOpen, anchor: addAnchor });
   // Unified Settings modal (Task 11): AppShell owns open/section state; TopBar's
   // gear opens it to Appearance, the order ticket's gear (via OpenSettingsContext)
   // opens it straight to Orders & hotkeys.
@@ -370,11 +373,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   useEffect(() => stores.exec.onRiskActivationUnknown((order) => {
     toast.push({ level: "warn", text: `${order.symbol} (${order.venue}) Chart Risk Entry status unknown. Verify Orders; do not resubmit. ${order.held?.pausedReason ?? ""}` });
   }), [stores.exec, toast]);
-  // Task 13: mirror Settings-modal open/close into the module-level modalTracker
-  // singleton so every already-mounted PanelFrame (frozen-closure-created, can't
-  // receive this as a live prop — see modalTracker.ts) can suppress type-to-load
-  // capture while the modal has focus.
-  useEffect(() => { modalTracker.setOpen(settings.open); }, [settings.open]);
   // Subscribe only to shell-relevant execution state. Account/P&L updates stay
   // in AccountPanel's own subscription and must not re-render Dockview's owner.
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => appShellExecSignature(stores));
@@ -1113,7 +1111,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         <div style={{ position: "relative" }}>
           <TopBar workspaceName={workspaceLabel} health={stores.health} armed={armed}
             onArmToggle={() => (armed ? oc.disarm() : oc.arm())}
-            onAddPanel={() => setAddOpen((v) => !v)}
+            onAddPanel={() => setAddOpen((v) => !v)} addPanelRef={setAddAnchor} addPanelOpen={addOpen}
             onNewWindow={onNewWindow}
             onOpenSettings={() => setSettings({ open: true, section: "general" })}
             onOpenConnection={onOpenConnection}
@@ -1123,7 +1121,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             targetVenue={execStatus?.venues.find((v) => v.venue === hotkeyTarget?.venue)}
           />
           {addOpen && (
-            <div className="popover" style={{ top: 40, right: 160, width: 580, maxHeight: "70vh", overflow: "auto" }}>
+            <div ref={addMenuRef} className="popover" role="dialog" aria-label="Add panel" style={{ top: 44, right: 12, width: 580, zIndex: 100, maxHeight: "70vh", overflow: "auto" }}>
               <Catalog onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} onOpenMonitoring={onOpenMonitoring} />
             </div>
           )}
