@@ -68,3 +68,12 @@ growth. This removes automatic checkpoint work from commits without weakening
 durability or the declared workload's one-second, no-loss checks. See the
 [archive guide](../engine/internal/tickstore/README.md) and
 [SQLite's checkpoint tradeoffs](https://sqlite.org/wal.html).
+
+After the fix, the same hosted profiled workload measured 247 ms maximum commit
+lag in recording-only mode and 248 ms with four profile charts, with no loss.
+All 40 profile requests completed: 20 populated results and 20 Busy responses,
+with no timeouts. The separate full Windows, Linux and UI CI jobs passed in
+[the verification run](https://github.com/earlisreal/eTape/actions/runs/40183405789).
+The native Windows comparison measured 233 ms with profiles; the optional 1 MiB
+rotation stress passed at 555 ms without loss. These measurements preserve the
+original workload and limits; they are not a latency guarantee for every disk.

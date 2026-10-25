@@ -1,7 +1,7 @@
 # Investigate Windows recorder capacity failures
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 
 Earl requested investigation on 2026-10-25 after the WebSocket security fix
 passed its affected tests but full Windows CI failed three times in
@@ -33,6 +33,29 @@ passed its affected tests but full Windows CI failed three times in
 3. Profile readers delay the writer. Lock profiles should show recorder gate
    waits, and recording-only mode should avoid them; its failure weakens this
    explanation.
+
+## Answer
+
+SQLite's automatic checkpoints were doing expensive disk flushes inside archive
+commits. Archive connections now disable them through the driver's connection
+settings, including replacement connections. Synchronous FULL and the existing
+rotation, seal, recovery, physical-cap and free-space checks remain in place.
+
+The new regression failed before the fix and passed afterward for both initial
+and replacement connections. It checks that a large live commit stays in WAL,
+FULL durability is configured, committed data is readable, and explicit
+maintenance truncates WAL.
+
+[Hosted verification](https://github.com/earlisreal/eTape/actions/runs/40183405789)
+at `7c962d2d` passed Windows, Linux and UI CI. The actual diagnostic benchmark
+also passed: recording/profile maximum lag was 247/248 ms, with no loss,
+40 profile requests, 20 populated results, 20 Busy responses and no timeouts.
+The workload and one-second limit are unchanged.
+
+Local validation passed recorder/UI-hub tests, race tests for tickstore, MD and
+UI-hub integration, vet, lint and application build. The optional 1 MiB rotation
+stress also passed with 555 ms maximum lag and no loss. Temporary profiling
+steps are removed; the CI workflow is restored exactly to its prior full gate.
 
 ## Comments
 
