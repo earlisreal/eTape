@@ -63,10 +63,32 @@ jobs:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
 
+      - name: Profile recorder capacity
+        continue-on-error: true
+        working-directory: engine
+        run: |
+          $profileDir = Join-Path $env:RUNNER_TEMP 'recorder-profile'
+          New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+          Write-Host "[DEBUG-recorder] TMP=$env:TMP TEMP=$env:TEMP RUNNER_TEMP=$env:RUNNER_TEMP CPUs=$env:NUMBER_OF_PROCESSORS"
+          go test ./internal/tickstore -run '^TestRecordingLoadComparison$/(recording|profiles)$' -count=1 -v "-cpuprofile=$profileDir/cpu.pprof" "-blockprofile=$profileDir/block.pprof" "-mutexprofile=$profileDir/mutex.pprof" "-trace=$profileDir/runtime.trace" "-o=$profileDir/tickstore.test.exe"
+          $benchmarkExit = $LASTEXITCODE
+          foreach ($profile in @('cpu', 'block', 'mutex')) {
+            go tool pprof -top -nodecount=20 "$profileDir/tickstore.test.exe" "$profileDir/$profile.pprof"
+          }
+          exit $benchmarkExit
+
       - name: go test (full)
         working-directory: engine
         # Capacity tests must not compete with other package load generators.
         run: go test -p 1 ./...
+
+      - name: Upload recorder diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recorder-profile
+          path: ${{ runner.temp }}/recorder-profile/
+          retention-days: 3
 
   ui:
     # Golden PNGs are generated on Windows. Cairo/Pango text rasterization is
