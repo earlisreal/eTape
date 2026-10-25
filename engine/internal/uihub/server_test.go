@@ -48,6 +48,84 @@ func (noopDemand) LoadOlder(_ string, _ bool, _, _ int64, done func(added int, e
 	done(0, true, nil)
 }
 
+func TestServerWSOriginPolicy(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h, _ := uihub.NewHubForTest(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	srv := uihub.NewServer(h,
+		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, nil, nil, nil),
+		uihub.NewQueriesForTest(fillsNoop{}, clk),
+		uihub.ServerConfig{OutBuf: 32})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+
+	for _, tc := range []struct {
+		name, host, origin string
+		allowed            bool
+	}{
+		{name: "same origin", origin: ts.URL, allowed: true},
+		{name: "native client without origin", allowed: true},
+		{name: "localhost", host: "localhost:8686", origin: "http://localhost:8686", allowed: true},
+		{name: "IPv6 loopback", host: "[::1]:8686", origin: "http://[::1]:8686", allowed: true},
+		{name: "default HTTP port", host: "localhost", origin: "http://localhost", allowed: true},
+		{name: "IPv6 default HTTP port", host: "[::1]", origin: "http://[::1]", allowed: true},
+		{name: "Vite forwarded host", host: "localhost:5173", origin: "http://localhost:5173", allowed: true},
+		{name: "Vite alternate port", host: "127.0.0.1:5174", origin: "http://127.0.0.1:5174", allowed: true},
+		{name: "external origin", origin: "http://untrusted.invalid"},
+		{name: "opaque origin", origin: "null"},
+		{name: "malformed origin", origin: "http://[::1"},
+		{name: "different local port", host: "127.0.0.1:8686", origin: "http://127.0.0.1:8687"},
+		{name: "external origin through Vite", host: "localhost:5173", origin: "http://untrusted.invalid"},
+		{name: "DNS rebinding", host: "untrusted.invalid:8686", origin: "http://untrusted.invalid:8686"},
+		{name: "external host without origin", host: "untrusted.invalid:8686"},
+		{name: "localhost suffix", host: "localhost.untrusted.invalid:8686", origin: "http://localhost.untrusted.invalid:8686"},
+		{name: "non-loopback IP", host: "192.0.2.1:8686", origin: "http://192.0.2.1:8686"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dialCtx, dialCancel := context.WithTimeout(ctx, 2*time.Second)
+			defer dialCancel()
+			headers := http.Header{}
+			if tc.origin != "" {
+				headers.Set("Origin", tc.origin)
+			}
+			c, response, err := websocket.Dial(dialCtx, wsURL, &websocket.DialOptions{Host: tc.host, HTTPHeader: headers})
+			if c != nil {
+				defer func() { _ = c.CloseNow() }()
+			}
+			if !tc.allowed {
+				if err == nil {
+					t.Fatal("untrusted WebSocket handshake succeeded")
+				}
+				if response == nil || response.StatusCode != http.StatusForbidden {
+					t.Fatalf("expected HTTP 403, got response %v, error %v", response, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("trusted WebSocket handshake failed: %v", err)
+			}
+			if err := c.Write(dialCtx, websocket.MessageText, []byte(`{"kind":"command","name":"Arm","args":{},"corrId":"origin-test"}`)); err != nil {
+				t.Fatal(err)
+			}
+			_, data, err := c.Read(dialCtx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ack wsmsg.AckMsg
+			if err := json.Unmarshal(data, &ack); err != nil {
+				t.Fatal(err)
+			}
+			if ack.CorrID != "origin-test" || ack.Status != "accepted" {
+				t.Fatalf("expected fake execution command acknowledgement, got %+v", ack)
+			}
+		})
+	}
+}
+
 func TestServerWSSubscribeSnapshot(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	// Build a hub with a mirror via the exported constructor path used by main.

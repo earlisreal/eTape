@@ -6,7 +6,9 @@ package uihub
 import (
 	"context"
 	"io/fs"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -64,9 +66,14 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
-	// Localhost app: accept same-origin plus the Vite dev origin. InsecureSkipVerify
-	// is acceptable because the server binds 127.0.0.1 only (see main).
-	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+	// Reject DNS-rebound hostnames before the same-origin check can trust them.
+	authority, err := url.Parse("http://" + r.Host)
+	if err != nil || authority.Host != r.Host ||
+		(!strings.EqualFold(authority.Hostname(), "localhost") && !net.ParseIP(authority.Hostname()).IsLoopback()) {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+	c, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
 	}

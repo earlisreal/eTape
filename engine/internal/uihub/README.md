@@ -1,5 +1,12 @@
 # UI Hub
 
+WebSocket handshakes require a loopback IP or exact `localhost` request host.
+Browser origins must match that host and port; external, opaque and malformed
+origins receive HTTP 403 before a connection is registered. This also rejects
+DNS-rebound external hostnames. Native clients may omit Origin. The Vite `/ws`
+proxy preserves Host and Origin, so development uses the same policy at any
+local port without an origin allowlist. Remote UI access is unsupported.
+
 `alerts.state` is a low-rate full snapshot of saved price alerts and the newest
 100 independent history records, with a revision, total history count, and
 storage error. `alerts.trigger` carries live-only burst notifications and has no
