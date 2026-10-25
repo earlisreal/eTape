@@ -11,9 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -565,12 +567,19 @@ func (s *Store) commit(rows []encoded) error {
 }
 
 func openDB(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path)
+	name := filepath.ToSlash(path)
+	if !strings.HasPrefix(name, "/") {
+		name = "/" + name
+	}
+	u := url.URL{Scheme: "file", Path: name}
+	// Rotation and sealing own checkpoints; apply policy to replacement connections too.
+	u.RawQuery = url.Values{"_pragma": {"busy_timeout(50)", "synchronous(FULL)", "temp_store(MEMORY)", "wal_autocheckpoint(0)"}}.Encode()
+	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err = db.Exec("PRAGMA busy_timeout=50; PRAGMA synchronous=FULL; PRAGMA temp_store=MEMORY;"); err != nil {
+	if err = db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

@@ -39,3 +39,17 @@ passed its affected tests but full Windows CI failed three times in
 - Temporary hosted CPU, blocking, mutex and runtime traces narrow the remote
   reproduction to the two enabled comparison modes. The original full suite
   still runs and gates CI. Remove temporary diagnostics after diagnosis.
+- Hosted diagnostic run `40181550677` captured the same failure: profile-mode
+  maximum commit lag was 3,036 ms with zero loss. Its independent full suite
+  passed; the diagnostic step permits failure, so its success conclusion alone
+  does not establish a passing benchmark.
+- The failing trace accumulated 9.45 seconds in `FlushFileBuffers`; the CPU
+  profile attributed 7.39 seconds to SQLite checkpoint stacks, including
+  6.34 seconds inside `Tx.Commit`. This supports the disk-checkpoint hypothesis.
+- A fast regression test reproduced the mechanism: a 1,100-page WAL write
+  grew the main database from 4,096 to 4,517,888 bytes during its commit.
+  The fix disables automatic checkpoints on archive connections and retains
+  synchronous FULL plus the existing bounded rotation/seal/recovery checkpoints.
+- The same regression caught a one-time PRAGMA setup being lost when the SQL
+  pool replaced a connection. Configure the existing driver through its DSN so
+  both initial and replacement connections preserve the archive policy.

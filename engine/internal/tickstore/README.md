@@ -57,6 +57,12 @@ reservations; one quarter of bytes is reserved for basis checkpoints. This is
 an accounted work budget, not a promise that process RSS is 32 MiB. Decoding and
 indexing occur on the archive writer, with 250 ms flushes and batch wakeups.
 Source and indexes commit atomically in WAL transactions with synchronous FULL.
+Automatic checkpoints are disabled on archive connections: rotation, sealing
+and recovery already checkpoint explicitly under the archive owner's gate.
+Each live commit still syncs its WAL for durability, while avoiding SQLite's
+automatic checkpoint disk-flush spikes. The segment goal and physical archive
+cap include DB, WAL and SHM growth, so deferred checkpoints cannot grow the
+archive outside its existing budgets.
 
 The healthy receipt-to-commit target is one second at the measured workload.
 Queue overflow, commit failure and disk pressure lose recording work while

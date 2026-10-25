@@ -50,3 +50,21 @@ Setting `ETAPE_PROFILE_ROTATION_STRESS=1` deliberately rotates the profiles vari
 The default capacity comparison uses the production 256 MiB segment goal in both recording-only and four-worker profile cases. Its 2026-10-10 run produced 40 queries, 20 populated results and 20 Busy admission responses, no timeouts/loss/pause, maximum query 43.387 ms, commit lag 247 ms, MD chart barrier 3.798 ms and journal flush 0.569 ms. `TestProfileReaderConcurrentRotationAndPruningDoNotLoseRecording` separately runs two readers through eight daily rotations with two-day retention, verifies no recording loss/pause and checks retained Partial evidence; it passes under the race detector.
 
 The artificial 1 MiB throughput stress passed locally but exceeded capacity on the hosted Windows runner twice (queue rejection; one initial recording-only run also exceeded its one-second delay threshold). That comparison had changed both segment size and queries. It remains an explicit local stress run, rather than conflating its hardware-dependent capacity threshold with production-size CI. Do not infer that every machine sustains the declared rate at 1 MiB rotation. Normal CI retains the full production-size throughput comparison plus deterministic concurrent rotation/pruning coverage.
+
+## Windows recorder checkpoints (2026-10-25)
+
+The hosted Windows recorder comparison failed repeatedly with commit lag, drain
+timeouts and queue rejections while native Windows runs passed. A captured
+failure reached 3,036 ms commit lag without recorded loss. Its runtime trace
+accumulated 9.45 seconds in `FlushFileBuffers`; its CPU profile attributed
+7.39 seconds to SQLite checkpoint stacks, including 6.34 seconds inside
+`Tx.Commit`. The full suite on that same hosted run passed independently,
+demonstrating that one successful run was insufficient evidence of a fix.
+
+Archive connections now disable SQLite's automatic checkpoints and retain
+synchronous FULL. Existing rotation, sealing and recovery checkpoint explicitly;
+the DB/WAL/SHM segment goal, physical cap and free-space reserves still bound
+growth. This removes automatic checkpoint work from commits without weakening
+durability or the declared workload's one-second, no-loss checks. See the
+[archive guide](../engine/internal/tickstore/README.md) and
+[SQLite's checkpoint tradeoffs](https://sqlite.org/wal.html).
