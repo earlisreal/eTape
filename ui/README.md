@@ -142,4 +142,8 @@ The 10-second chart renders missing weekday 04:00–20:00 ET buckets as client-o
 
 Children: [application source](src/README.md), [mock engine](mock-engine/README.md), [E2E](e2e/README.md), [test support](test/README.md). Fixtures/assets/generated output excluded from guide leaves. Commands: `npm test`, `npm run typecheck`, `npm run lint`, `npm run e2e`.
 
+`npm test` discovers every Vitest file outside `e2e` and requires exactly one
+project per file. Unassigned tests join the `unit` project automatically; native
+canvas tests retain separate processes. See [test support](test/README.md).
+
 Charts offer an opt-in visible-range Volume Profile on intraday timeframes. Add **Volume Profile** from Indicators; settings choose left/right placement (left by default), 1–200 rows (100 default), and 1–100% Value Area (70 default), with total-volume/Value Area colors and POC/VAH/VAL guides. The profile uses retained raw-price captured prints from all selected sessions, labels incomplete evidence Partial and never substitutes candles. A large/timed-out range asks you to zoom in; busy or failed same-range refreshes retain Stale data. Demo and daily/weekly/monthly charts show unavailable. See the [renderer guide](src/render/chart/README.md#volume-profile-indicator).

@@ -165,7 +165,7 @@ describe("HotkeyDeck — click dispatch (real fireTemplate/resolvePlaceTemplate)
     const t = manage({ id: "cancel-last", label: "Cancel Last", action: "CancelLast", deck: true });
     const { oc } = await setup([t], { rows: [["cancel-last"]], showHotkeyLabels: false });
     fireEvent.click(screen.getByTestId("deck-cancel-last"));
-    expect(oc.cancelLast).toHaveBeenCalledWith("US.AAPL", { feedback: "action" });
+    expect(oc.cancelLast).toHaveBeenCalledWith("US.AAPL", { feedback: "action", venue: "alpaca-paper" });
   });
 });
 

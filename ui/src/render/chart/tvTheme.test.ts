@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { LIGHT } from "../palette";
+import { DARK, FONTS, LIGHT } from "../palette";
 import { TV_LIGHT, TV_DARK, getTvPalette, getTvChrome, TV_FONT, TV_GEOM } from "./tvTheme";
 
 describe("tvTheme palettes", () => {
@@ -50,20 +50,19 @@ describe("tvTheme palettes", () => {
 });
 
 describe("tvTheme chrome tokens", () => {
-  it("exposes TV hover fills per theme", () => {
-    expect(getTvChrome("light").hover).toBe("#F0F3FA");
-    expect(getTvChrome("dark").hover).toBe("#2A2E39");
+  it("uses workspace hover fills per theme", () => {
+    expect(getTvChrome("light").hover).toBe(LIGHT.border);
+    expect(getTvChrome("dark").hover).toBe(DARK.border);
   });
-  it("exposes TV toolbar/dialog surfaces per theme", () => {
-    expect(getTvChrome("light").surface).toBe("#FFFFFF");
-    expect(getTvChrome("dark").surface).toBe("#1E222D");
+  it("uses workspace toolbar/dialog surfaces per theme", () => {
+    expect(getTvChrome("light").surface).toBe(LIGHT.surface);
+    expect(getTvChrome("dark").surface).toBe(DARK.surface);
   });
 });
 
 describe("tvTheme font + geometry", () => {
-  it("uses TV's font stack without IBM Plex", () => {
-    expect(TV_FONT).toContain("Trebuchet MS");
-    expect(TV_FONT).not.toContain("Plex");
+  it("uses the workspace font stack", () => {
+    expect(TV_FONT).toBe(FONTS.sans);
   });
   it("uses TV geometry", () => {
     expect(TV_GEOM.iconBtn).toBe(28);
