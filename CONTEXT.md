@@ -393,6 +393,10 @@ _Avoid_: Jump to live, reset zoom
 The single, default Chart Indicator that displays each bar's traded share volume. Its compact Chart Panel legend label is `Vol`; other surfaces use `Volume`.
 _Avoid_: Built-in Vol, Volume overlay
 
+**Volume Overlap**:
+A Chart Panel display mode in which the Volume Indicator shares the lower price-plot area with price rather than reserving that area for volume alone.
+_Avoid_: Volume overlay indicator, Volume Profile
+
 **Volume Profile**:
 A distribution of traded share volume across price rows over a defined time range, distinct from the Volume Indicator's volume per time bar.
 _Avoid_: Volume Indicator, order book, liquidity profile
