@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { GeneralSection } from "./GeneralSection";
 import { AboutSection } from "./AboutSection";
 import { OrderSettingsSection } from "./exec/OrderSettingsSection";
 import { VenuesSection } from "./exec/VenuesSection";
 import { DataSettingsSection } from "./DataSettingsSection";
+import { SettingsActionsContext } from "./SettingsActions";
 import { BackupPanel } from "./BackupPanel";
 import { useOrderConfig } from "./exec/useOrderConfig";
 import { Button } from "./controls/Button";
@@ -19,7 +21,7 @@ export type SettingsSection = "general" | "orders" | "venues" | "data" | "about"
 const NAV: { id: SettingsSection; label: string; detail: string; note: string }[] = [
   { id: "general", label: "General", detail: "Appearance, sound & workspace", note: "Make eTape feel right for you. Changes save as you go." },
   { id: "orders", label: "Orders & hotkeys", detail: "Templates, shortcuts & Deck", note: "Configure your trading controls. Save template edits before leaving this section." },
-  { id: "venues", label: "Venues & creds", detail: "Brokers & connections", note: "Manage your broker connections. Test and save changes on each broker card." },
+  { id: "venues", label: "Venues & creds", detail: "Brokers & connections", note: "Manage your broker connections. Test each broker, then save your changes below." },
   { id: "data", label: "Data & storage", detail: "History, recording & OpenD", note: "Configure market data and disk usage. Changes apply after restarting the engine." },
   { id: "about", label: "About", detail: "Version & diagnostics", note: "Application details and connection diagnostics." },
 ];
@@ -52,11 +54,13 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
     session?: SessionStore | undefined;
   }): JSX.Element | null {
   const oc = useOrderConfig();
+  const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(null);
   const current = NAV.find((n) => n.id === section)!;
   if (!open) return null;
   return (
     <Dialog title="Settings" onClose={onClose} width={1000} className="settings-dialog" closeLabel="Close settings"
-      footer={<><span className="dialog-hint">Esc or click outside to close</span><Button size="md" onClick={onClose}>Done</Button></>}>
+      footer={<><span className="dialog-hint">Esc or click outside to close</span><div className="dialog-actions"><div ref={setActionsTarget} /><Button size="md" onClick={onClose}>Done</Button></div></>}>
+      <SettingsActionsContext.Provider value={actionsTarget}>
         <nav className="settings-nav" aria-label="Settings sections">
           {NAV.map((n) => (
             <Button key={n.id} aria-label={n.label} aria-current={section === n.id ? "page" : undefined}
@@ -82,6 +86,7 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
           {section === "data" && <DataSettingsSection commands={commands} engineState={engineState} session={session} health={health} />}
           {section === "about" && <AboutSection commands={commands} />}
         </section>
+      </SettingsActionsContext.Provider>
     </Dialog>
   );
 }

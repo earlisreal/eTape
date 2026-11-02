@@ -61,6 +61,9 @@ describe("SettingsModal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /venues & creds/i }));
     await waitFor(() => expect(commands.sendCommand).toHaveBeenCalledWith("GetVenueSetup", {}));
+    expect(screen.getByTestId("save-venues").closest(".dialog-footer")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "General" }));
+    expect(screen.queryByTestId("save-venues")).toBeNull();
   });
 
   // Orders & hotkeys' Save button needs SettingsModal's own `toast` and
@@ -74,7 +77,9 @@ describe("SettingsModal", () => {
         <SettingsModal open section="orders" onSection={() => {}} onClose={onClose} commands={mkCommands()} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={toast} />
       </AppProviders>,
     );
-    fireEvent.click(screen.getByTestId("save"));
+    const save = screen.getByTestId("save");
+    expect(save.closest(".dialog-footer")).toBeTruthy();
+    fireEvent.click(save);
     expect(toast.push).toHaveBeenCalledWith({ level: "success", text: "Order templates & hotkeys saved." });
     expect(onClose).toHaveBeenCalledTimes(1);
   });

@@ -12,11 +12,46 @@ async function gotoAndApplyPreset(page: Page, workspace: string, presetName: "Tr
 }
 
 test.describe("settings redesign", () => {
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    test(`save stays in the footer across tabs at ${viewport.width}px`, async ({ page }) => {
+      await page.goto(`/?workspace=e2e-settings-footer-${viewport.width}`);
+      await expect(page.getByTestId("latency-readout")).toBeVisible({ timeout: 15_000 });
+      await page.setViewportSize(viewport);
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      await page.getByLabel(viewport.width === 390 ? "Dark" : "Light", { exact: true }).check();
+      const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
+      const footer = dialog.locator(".dialog-footer");
+      let position: { x: number; y: number } | undefined;
+      for (const [section, label] of [["Orders & hotkeys", "Save"], ["Venues & creds", "Save venues & limits"], ["Data & storage", "Save data settings"]]) {
+        await dialog.getByRole("button", { name: section, exact: true }).click();
+        const save = footer.getByRole("button", { name: label, exact: true });
+        await expect(save).toBeVisible();
+        const box = (await save.boundingBox())!;
+        if (position) {
+          expect(box.x).toBeCloseTo(position.x, 0);
+          expect(box.y).toBeCloseTo(position.y, 0);
+        }
+        position = box;
+        await dialog.locator(".settings-content").evaluate((content) => { content.scrollTop = content.scrollHeight; });
+        await expect(save).toBeInViewport();
+        expect((await save.boundingBox())!.y).toBeCloseTo(box.y, 0);
+        await page.screenshot({ path: test.info().outputPath(`${section.split(" ")[0].toLowerCase()}-footer.png`), animations: "disabled" });
+      }
+      for (const section of ["General", "About"]) {
+        await dialog.getByRole("button", { name: section, exact: true }).click();
+        await expect(footer.locator(".settings-save")).toHaveCount(0);
+      }
+    });
+  }
+
   test("data settings save and reopen in the isolated demo config", async ({ page }) => {
     await page.goto("/?workspace=e2e-settings-data");
     await expect(page.getByTestId("latency-readout")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Data & storage", exact: true }).click();
+    const footer = page.getByRole("dialog", { name: "Settings", exact: true }).locator(".dialog-footer");
+    await expect(footer.getByRole("button", { name: "Save data settings" })).toBeVisible();
+    await expect(footer.getByRole("button", { name: "Reset to defaults" })).toBeVisible();
     const rth = page.getByLabel("Regular-session refresh (seconds)");
     const yahoo = page.getByLabel("Use experimental Yahoo headline supplement");
     await expect(rth).toHaveValue("1");
@@ -31,8 +66,15 @@ test.describe("settings redesign", () => {
     await page.getByRole("button", { name: "Data & storage", exact: true }).click();
     await expect(rth).toHaveValue("2.5");
     await expect(yahoo).toBeChecked();
+    await footer.getByRole("button", { name: "Reset to defaults" }).click();
+    await footer.getByRole("button", { name: "Confirm reset" }).click();
+    await expect(rth).toHaveValue("1");
+    await expect(yahoo).not.toBeChecked();
+    await rth.fill("");
+    await footer.getByRole("button", { name: "Save data settings" }).click();
+    expect(await rth.evaluate((input: HTMLInputElement) => input.validity.valueMissing)).toBe(true);
+    await expect(page.getByText("Saved.", { exact: true })).toHaveCount(0);
     await rth.fill("1");
-    await yahoo.uncheck();
     await page.getByRole("button", { name: "Save data settings" }).click();
     await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
   });

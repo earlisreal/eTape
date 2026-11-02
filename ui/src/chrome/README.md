@@ -2,14 +2,18 @@
 
 Settings uses the shared dialog surface with a pinned header, section navigation,
 and footer. Content scrolls independently; narrow windows move navigation into
-a horizontal row. General changes save immediately, order templates/hotkeys/Deck
-require Save, and broker changes use each card's controls. Closing or leaving
+a horizontal row. Orders & hotkeys, Venues & creds, and Data & storage keep
+their Save button in the same fixed footer, beside Done. General changes save
+immediately. Broker cards test connections; Save persists venue and limit edits.
+Closing or leaving
 Orders & hotkeys discards unsaved template edits. Imports ask for confirmation
 in a nested dialog; dismissing it leaves Settings open. New Window renames
 workspaces inline and uses the shared two-click delete confirmation.
 
-Data & storage edits bootstrap settings with an explicit Save and restart;
-stale file snapshots are rejected and can be reloaded. Demo saves the live
+Data & storage edits bootstrap settings with an explicit Save and restart.
+Reset to defaults uses the engine's built-in defaults, requires confirmation,
+and updates only this section's draft until Save. Stale file snapshots are
+rejected and can be reloaded. Demo saves the live
 config but continues using demo defaults. The live moomoo card never claims a
 paper venue, which remains in Other venues with its existing gate state.
 

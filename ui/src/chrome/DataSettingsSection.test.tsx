@@ -14,15 +14,41 @@ const original: DataSettings = {
   recordingMaxBytes: 10 * 1024 ** 3, recordingMinFreeBytes: 2 * 1024 ** 3,
 };
 
+const defaults: DataSettings = {
+  ...original, scannerPremarketMs: 1000, scannerRTHMs: 1000, yahooNews: false,
+  intradayDays: 70, dailyYears: 0,
+};
+
 function commands(blockSave = false) {
   return { sendCommand: vi.fn(async (...[name]: [string, unknown]): Promise<AckMsg> => {
-    if (name === "GetDataSettings") return { kind: "ack", corrId: "c", status: "accepted", value: { file: original, running: original } };
+    if (name === "GetDataSettings") return { kind: "ack", corrId: "c", status: "accepted", value: { file: original, running: original, defaults } };
     if (name === "SetDataSettings" && blockSave) return { kind: "ack", corrId: "c", status: "blocked", reason: "settings changed elsewhere; reload before saving" };
     return { kind: "ack", corrId: "c", status: "accepted" };
   }) };
 }
 
 describe("DataSettingsSection", () => {
+  it("confirms reset, restores engine defaults in the draft, and only persists on Save", async () => {
+    const ctl = commands();
+    render(<DataSettingsSection commands={ctl} engineState="open" />);
+    await screen.findByLabelText("Regular-session refresh (seconds)");
+    fireEvent.change(screen.getByLabelText("Host"), { target: { value: "custom.example" } });
+    fireEvent.change(screen.getByLabelText("Port"), { target: { value: "22222" } });
+    fireEvent.change(screen.getByLabelText("Archive limit (GiB)"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    expect((screen.getByLabelText("Host") as HTMLInputElement).value).toBe("custom.example");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm reset" }));
+    expect((screen.getByLabelText("Host") as HTMLInputElement).value).toBe(defaults.openDHost);
+    expect((screen.getByLabelText("Port") as HTMLInputElement).value).toBe(String(defaults.openDPort));
+    expect((screen.getByLabelText("Regular-session refresh (seconds)") as HTMLInputElement).value).toBe("1");
+    expect((screen.getByLabelText("1-minute history (days)") as HTMLInputElement).value).toBe("70");
+    expect((screen.getByLabelText("Use experimental Yahoo headline supplement") as HTMLInputElement).checked).toBe(false);
+    expect(ctl.sendCommand).not.toHaveBeenCalledWith("SetDataSettings", expect.anything());
+    expect(ctl.sendCommand).not.toHaveBeenCalledWith("RestartEngine", {});
+    fireEvent.click(screen.getByRole("button", { name: "Save data settings" }));
+    await waitFor(() => expect(ctl.sendCommand).toHaveBeenCalledWith("SetDataSettings", { expected: original, settings: defaults }));
+  });
+
   it("saves converted values with the original snapshot and requires an explicit restart", async () => {
     const ctl = commands();
     render(<DataSettingsSection commands={ctl} engineState="open" />);

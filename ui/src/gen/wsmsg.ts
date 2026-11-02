@@ -1012,6 +1012,7 @@ export interface DataSettings {
 export interface DataSettingsSetup {
   file: DataSettings;
   running: DataSettings;
+  defaults: DataSettings;
 }
 export interface SetDataSettingsArgs {
   expected: DataSettings;

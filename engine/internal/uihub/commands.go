@@ -616,6 +616,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		}
 		return wsmsg.AckMsg{Status: "accepted", Value: wsmsg.DataSettingsSetup{
 			File: wsmsg.DataSettings(file), Running: wsmsg.DataSettings(running),
+			Defaults: wsmsg.DataSettings(config.Default().DataSettings()),
 		}}, false
 	case "SetDataSettings":
 		var a wsmsg.SetDataSettingsArgs

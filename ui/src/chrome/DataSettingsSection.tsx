@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { Button } from "./controls/Button";
+import { SettingsActions } from "./SettingsActions";
 import type { HealthStore } from "../data/HealthStore";
 import type { SessionStore } from "../data/SessionStore";
 import type { ConnState } from "../wire/WsClient";
@@ -51,6 +52,7 @@ export function DataSettingsSection({ commands, engineState, session, health }: 
   session?: SessionStore | undefined;
   health?: HealthStore | undefined;
 }): JSX.Element {
+  const formId = useId();
   const mode = useSyncExternalStore((cb) => session?.subscribe(cb) ?? (() => {}), () => session?.getSnapshot().mode);
   const healthState = useSyncExternalStore((cb) => health?.subscribe(cb) ?? (() => {}), () => health?.getSnapshot());
   const [setup, setSetup] = useState<DataSettingsSetup | null>(null);
@@ -131,7 +133,7 @@ export function DataSettingsSection({ commands, engineState, session, health }: 
 
   if (!setup || !draft) return <div>{error ? <><p role="alert">{error}</p><Button onClick={() => void reload()}>Retry</Button></> : "Loading settings…"}</div>;
   return (
-    <form onSubmit={(e) => void save(e)}>
+    <form id={formId} onSubmit={(e) => void save(e)}>
       {mode === "demo" && <p style={note}>Demo uses built-in defaults. Changes apply the next time live mode starts.</p>}
       {restartNeeded && <div role="status" style={{ ...note, display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
         <span>Restart the engine to apply saved data settings.</span>
@@ -188,10 +190,14 @@ export function DataSettingsSection({ commands, engineState, session, health }: 
           : "Account-wide quota is unavailable until OpenD reports it."}</p>
       </div>
 
-      <div className="settings-save" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <Button type="submit" variant="primary" size="md" disabled={!dirty} loading={saving}>Save data settings</Button>
+      <SettingsActions>
         {saved && <span role="status">Saved.</span>}
-      </div>
+        <Button type="button" variant="danger" confirm confirmLabel="Confirm reset" disabled={saving || restarting}
+          onClick={() => { setDraft(toDraft(setup.defaults)); setSaved(false); setError(""); }}>
+          Reset to defaults
+        </Button>
+        <Button type="submit" form={formId} variant="primary" size="md" aria-label="Save data settings" disabled={!dirty} loading={saving}>Save</Button>
+      </SettingsActions>
     </form>
   );
 }

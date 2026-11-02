@@ -29,6 +29,7 @@
 // key/secret are write-only, never seeded from `setup` — the engine never
 // sends secrets back — and cleared after every Save.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { SettingsActions } from "../SettingsActions";
 import { useTheme } from "../ThemeProvider";
 import type { Palette } from "../../render/palette";
 import { useToasts } from "../Toast";
@@ -671,11 +672,11 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
         </div>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <Button variant="primary" size="md" data-testid="save-venues" disabled={hasErrors} onClick={() => void saveVenues()}>
-          Save venues & limits
+      <SettingsActions>
+        <Button variant="primary" size="md" aria-label="Save venues & limits" data-testid="save-venues" disabled={hasErrors} onClick={() => void saveVenues()}>
+          Save
         </Button>
-      </div>
+      </SettingsActions>
     </div>
   );
 }

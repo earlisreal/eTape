@@ -960,8 +960,9 @@ type DataSettings struct {
 }
 
 type DataSettingsSetup struct {
-	File    DataSettings `json:"file"`
-	Running DataSettings `json:"running"`
+	File     DataSettings `json:"file"`
+	Running  DataSettings `json:"running"`
+	Defaults DataSettings `json:"defaults"`
 }
 
 type SetDataSettingsArgs struct {

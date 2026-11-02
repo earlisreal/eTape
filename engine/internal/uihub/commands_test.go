@@ -828,6 +828,9 @@ func TestDataSettingsCommandsRoundTrip(t *testing.T) {
 	if ack.Status != wsmsg.AckAccepted || !ok || setup.File.OpenDPort != 11111 {
 		t.Fatalf("get settings = %+v", ack)
 	}
+	if setup.Defaults != wsmsg.DataSettings(config.Default().DataSettings()) {
+		t.Fatalf("settings defaults = %+v", setup.Defaults)
+	}
 	next := setup.File
 	next.ScannerRTHMs = 3000
 	raw, err := json.Marshal(wsmsg.SetDataSettingsArgs{Expected: setup.File, Settings: next})

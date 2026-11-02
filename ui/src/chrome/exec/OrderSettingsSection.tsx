@@ -18,6 +18,7 @@ import { FONTS, type Palette } from "../../render/palette";
 import { HoverButton } from "../controls/HoverButton";
 import { Button } from "../controls/Button";
 import { Dialog } from "../controls/Dialog";
+import { SettingsActions } from "../SettingsActions";
 import type { AckMsg, Side, OrderType, TIF, OrderSession } from "../../wire/contract";
 import type { ToastApi } from "../Toast";
 import type { ExecStore } from "../../data/ExecStore";
@@ -854,8 +855,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
       </div>
 
       <label style={{display:"block",marginTop:12}}><input type="checkbox" checked={riskAutoSend} onChange={(e) => setRiskAutoSend(e.target.checked)} /> Auto-send Chart Risk Entry on release / second click without preview confirmation</label>
-      <div className="settings-save" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 12 }}>
-        <span className="dialog-hint">Template, hotkey and Deck edits require Save.</span>
+      <SettingsActions>
         <Button
           variant="primary" size="md" data-testid="save" disabled={hasConflict}
           onClick={() => {
@@ -863,11 +863,10 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
             toast?.push({ level: "success", text: "Order templates & hotkeys saved." });
             onClose?.();
           }}
-          style={actionBtn}
         >
           Save
         </Button>
-      </div>
+      </SettingsActions>
       {chartDisclosure && <Dialog title="Chart Order Gesture disclosure" onClose={() => closeChartDisclosure(false)} width={540}>
           <p style={{ fontSize: 12, lineHeight: 1.5, color: palette.textMuted }}>
             The selected modifier + click places this STOP_LIMIT or LIT Action Template at the clicked chart price using the chart&apos;s Link Group Execution Venue.
