@@ -41,6 +41,7 @@ function global:go {
         return
     }
     & $global:LauncherTestGoTool @args
+    $global:LASTEXITCODE = $LASTEXITCODE
 }
 & $launcher @launchArgs
 '@
@@ -58,7 +59,7 @@ function global:go {
         if ($LASTEXITCODE -ne 0) { throw "Launcher failed: $(Get-Content -LiteralPath $stderr -Raw)" }
         $result = $output | ConvertFrom-Json
         if ($result.Executable -ne $expectedExe -or -not (Test-Path -LiteralPath $expectedExe)) {
-            throw "Taskbar target must survive launch/rebuild at $expectedExe; got $($result.Executable)"
+            throw "Taskbar target must survive launch/rebuild at $expectedExe; got $($result.Executable). Output: $output. Errors: $(Get-Content -LiteralPath $stderr -Raw)"
         }
         $expectedArgs = @('-dist', (Join-Path $fixtureRoot 'ui/dist')) + $cases[$i].Engine
         if (($result.Args | ConvertTo-Json -Compress) -ne ($expectedArgs | ConvertTo-Json -Compress) -or $result.Build -ne [string]$i) {
