@@ -7,6 +7,12 @@ headers while clamping movement to the viewport and recentering on resize.
 Chart, DOM Ladder, Tape, and indicator settings therefore share dismissal,
 focus, and light/dark styling with app Settings.
 
+Chart settings offers Overlap volume as Follow app default (showing its current
+value), On or Off. Ok saves the override; cancel discards edits. Follow app
+default removes any saved override, so subsequent global changes update that
+chart. This controls the Volume Indicator's layout independently of its existing
+visibility/remove controls. The preference applies to all supported price styles.
+
 The bell tool and chart menu open the shared price-alert editor. Amber dashed
 levels and bell tags follow chart coordinates imperatively without changing
 autoscale; overlapping tags open a chooser. Dragging previews a price and opens

@@ -14,6 +14,7 @@
 // wraps itself in a local <ToastProvider> instead.
 import type { ReactNode } from "react";
 import { ThemeProvider } from "../chrome/ThemeProvider";
+import { ChartPreferencesProvider } from "../chrome/ChartPreferencesProvider";
 import { OrderConfigProvider } from "../chrome/exec/useOrderConfig";
 import { SoundConfigProvider } from "../sound/SoundConfigProvider";
 import type { AckMsg } from "../wire/contract";
@@ -28,7 +29,9 @@ export function AppProviders({ children }: { children: ReactNode }): JSX.Element
     <ThemeProvider commands={testCommands}>
       <OrderConfigProvider commands={testCommands}>
         <SoundConfigProvider commands={testCommands}>
-          {children}
+          <ChartPreferencesProvider commands={testCommands}>
+            {children}
+          </ChartPreferencesProvider>
         </SoundConfigProvider>
       </OrderConfigProvider>
     </ThemeProvider>

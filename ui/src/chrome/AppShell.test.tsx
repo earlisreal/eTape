@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ChartPreferencesProvider } from "./ChartPreferencesProvider";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Profiler } from "react";
 import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testing-library/react";
@@ -104,7 +105,7 @@ function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApp
   // Debounce as fast as possible so tests don't need real timers/sleeps.
   const workspaceStore = new WorkspaceStore(client, 1);
   const view = render(
-    <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
+    <ThemeProvider><ChartPreferencesProvider><ToastProvider><OrderConfigProvider commands={commands}>
       <SoundConfigProvider commands={commands}>
         <Profiler id="AppShell" onRender={() => opts?.onRender?.()}>
           <AppShell workspaceName={opts?.workspaceName ?? "default"} stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
@@ -113,7 +114,7 @@ function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApp
             {...(opts?.onTransitionApplied ? { onTransitionApplied: opts.onTransitionApplied } : {})} />
         </Profiler>
       </SoundConfigProvider>
-    </OrderConfigProvider></ToastProvider></ThemeProvider>,
+    </OrderConfigProvider></ToastProvider></ChartPreferencesProvider></ThemeProvider>,
   );
   return { ...view, saved, workspaceStore, linkGroups, stores, commands };
 }
@@ -494,12 +495,12 @@ describe("AppShell Monitoring Scanner Sync", () => {
       const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
       const demandRegistry = new DemandRegistry({ sendCommand: commands.sendCommand, onState: () => {} });
       const view = render(
-        <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
+        <ThemeProvider><ChartPreferencesProvider><ToastProvider><OrderConfigProvider commands={commands}>
           <SoundConfigProvider commands={commands}>
             <AppShell workspaceName={name} stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
               linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open" />
           </SoundConfigProvider>
-        </OrderConfigProvider></ToastProvider></ThemeProvider>,
+        </OrderConfigProvider></ToastProvider></ChartPreferencesProvider></ThemeProvider>,
       );
       return { ...view, stores, workspaceStore };
     };
@@ -1029,10 +1030,10 @@ describe("AppShell Alpaca-1m-history hint banner", () => {
     const client = { sendCommand: vi.fn(async () => ({ status: "accepted" as const, value: seed })) };
     const workspaceStore = new WorkspaceStore(client, 1);
     render(
-      <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
+      <ThemeProvider><ChartPreferencesProvider><ToastProvider><OrderConfigProvider commands={commands}>
         <AppShell workspaceName="default" stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
           linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="reconnecting" />
-      </OrderConfigProvider></ToastProvider></ThemeProvider>,
+      </OrderConfigProvider></ToastProvider></ChartPreferencesProvider></ThemeProvider>,
     );
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores, [venueStatus("tz-1", "tradezero")]);

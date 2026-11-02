@@ -28,6 +28,7 @@ import { isIntradayTimeframe, latestEligibleCountdownBar } from "../../render/ch
 import { formatPrice, quoteDecimals } from "../../render/format";
 import type { Palette } from "../../render/palette";
 import { useTheme } from "../ThemeProvider";
+import { useChartPreferences } from "../ChartPreferencesProvider";
 import { useOptionalOrderConfig } from "../exec/useOrderConfig";
 import { ChartOrderMarkers } from "./tv/ChartOrderMarkers";
 import { ChartConditionalOrderEntry } from "./tv/ChartConditionalOrderEntry";
@@ -195,6 +196,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // match its chrome. `palette` below stays the TV-faithful canvas palette the chart
   // itself (candles, primitives, ChartController) has always used.
   const { mode, palette: appPalette } = useTheme();
+  const { config: chartPreferences } = useChartPreferences();
   const palette = getTvPalette(mode);
   const chrome = getTvChrome(mode);
   const headerSlot = useContext(PanelHeaderSlotContext);
@@ -262,6 +264,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const [drawingToolsVisible, setDrawingToolsVisible] = useState(drawingToolsVisible0);
   const [drawingRailPos, setDrawingRailPos] = useState<RailPos | null>(railPos0);
   const [chartSettings, setChartSettings] = useState<ChartSettings>(chartSettings0);
+  const volumeOverlap = chartSettings.volumeOverlap ?? chartPreferences.volumeOverlap;
   const [settingsInstanceId, setSettingsInstanceId] = useState<string | null>(null);
   const [chartSettingsOpen, setChartSettingsOpen] = useState(false);
   const [paneOffsets, setPaneOffsets] = useState<number[]>([0]);
@@ -588,6 +591,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     controller.setShowSessions(chartSettings.sessionShading);
     controller.setGrid(chartSettings.grid);
     controller.setWatermark(chartSettings.watermark);
+    controller.setVolumeOverlap(volumeOverlap);
     drawings.setHideAll(hideAll);
 
     let currentSymbol = linkGroups.symbolFor(groupRef.current) ?? symbol;
@@ -1024,6 +1028,11 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     handle.refresh();
   }, [group, chartSymbol, timeframe, crosshairSyncEnabled, active]);
 
+  useEffect(() => {
+    controllerRef.current?.setVolumeOverlap(volumeOverlap);
+    forceRepaintRef.current = true;
+  }, [volumeOverlap]);
+
   // Theme switch: re-apply palette to chart, series and the custom primitives.
   useEffect(() => {
     controllerRef.current?.setPalette(palette);
@@ -1365,7 +1374,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             onClose={() => setSettingsInstanceId(null)} onApply={updateIndicator} />
         );
       })()}
-      {chartSettingsOpen && <ChartSettingsDialog chrome={chrome} settings={chartSettings} onClose={() => setChartSettingsOpen(false)} onApply={applyChartSettings} />}
+      {chartSettingsOpen && <ChartSettingsDialog chrome={chrome} settings={chartSettings} globalVolumeOverlap={chartPreferences.volumeOverlap} onClose={() => setChartSettingsOpen(false)} onApply={applyChartSettings} />}
       {alertEdit&&<PriceAlertEditor {...alertEdit} commands={commands} onClose={()=>setAlertEdit(null)}/>}
     </div>
   );

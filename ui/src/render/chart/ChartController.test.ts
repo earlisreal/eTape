@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
 import {
   ChartController, LEFT_PAD_BARS, bandsFromBars, fillEmptyTenSecondSlots,
@@ -2032,6 +2033,61 @@ describe("ChartController chart settings", () => {
     expect(volume.setDataCalls.at(-1)?.map((point) => (point as { color?: string }).color)).toEqual([LIGHT.volUp, LIGHT.volDown]);
     ctrl.setPalette(DARK);
     expect(volume.setDataCalls.at(-1)?.map((point) => (point as { color?: string }).color)).toEqual([DARK.volUp, DARK.volDown]);
+  });
+
+  it("overlaps volume without resetting the view and restores saved color/layout when disabled", () => {
+    const bars = [bar("2026-07-08T13:30:00Z", 11)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync();
+    ctrl.updateIndicator({ ...defaultVolumeIndicator("c1"), styles: { hist: { color: "#F23645" } } });
+    const volume = facade.created[1].series;
+    const resets = facade.priceResets;
+    const scrolls = facade.scrolls;
+    ctrl.setVolumeOverlap(true);
+    expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0 } } });
+    expect(facade.scaleMargins.at(-1)).toEqual({ id: "", margins: { top: 0.75, bottom: 0 } });
+    expect(volume.setDataCalls.at(-1)?.[0]).toMatchObject({ color: "rgba(242, 54, 69, 0.5)" });
+    expect(facade.priceResets).toBe(resets);
+    expect(facade.scrolls).toBe(scrolls);
+    bars.push(bar("2026-07-08T13:31:00Z", 12));
+    ctrl.sync();
+    expect(volume.updates.at(-1)).toMatchObject({ color: "rgba(242, 54, 69, 0.5)" });
+    ctrl.setVolumeOverlap(false);
+    expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0.25 } } });
+    expect(volume.setDataCalls.at(-1)?.[0]).toMatchObject({ color: "#F23645" });
+  });
+
+  it.each([
+    ["#123456", "rgba(18, 52, 86, 0.5)"],
+    ["rgb(12, 34, 56)", "rgba(12, 34, 56, 0.5)"],
+    ["rgba(12, 34, 56, 0.2)", "rgba(12, 34, 56, 0.2)"],
+    ["transparent", "rgba(0, 0, 0, 0)"],
+    ["red", "rgba(255, 0, 0, 0.5)"],
+  ])("caps supported CSS volume color %s without changing its saved style", (color, rendered) => {
+    const { facade, ctrl } = make(barReaderOf([bar("2026-07-08T13:30:00Z", 11)]));
+    ctrl.sync();
+    const inst = { ...defaultVolumeIndicator("c1"), styles: { hist: { color } } };
+    ctrl.setVolumeOverlap(true);
+    ctrl.updateIndicator(inst);
+    expect(facade.created[1].series.setDataCalls.at(-1)?.[0]).toMatchObject({ color: rendered });
+    expect(inst.styles.hist.color).toBe(color);
+  });
+
+  it.each(["candle", "bar", "line", "area"] as const)("keeps overlap through %s and Volume lifecycle changes", (type) => {
+    const { facade, ctrl } = make(barReaderOf([bar("2026-07-08T13:30:00Z", 11)]));
+    ctrl.setVolumeOverlap(true);
+    ctrl.setChartType(type);
+    ctrl.setPalette(DARK);
+    ctrl.updateIndicator({ ...defaultVolumeIndicator("c1"), hidden: true });
+    ctrl.updateIndicator(defaultVolumeIndicator("c1"));
+    expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0 } } });
+    ctrl.removeIndicator("c1:VOLUME");
+    ctrl.addIndicator(defaultVolumeIndicator("c1"));
+    ctrl.setTimeframe("D");
+    ctrl.setSymbol("US.MSFT");
+    expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0 } } });
+    ctrl.setVolumeOverlap(false);
+    expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0.25 } } });
   });
 
   it("reclaims the Volume band when hidden or removed and restores defaults on re-add", () => {

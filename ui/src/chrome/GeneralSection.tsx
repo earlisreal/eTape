@@ -6,6 +6,7 @@
 // the sections it composes — there is no Save button on this page.
 import { useState } from "react";
 import { useTheme } from "./ThemeProvider";
+import { useChartPreferences } from "./ChartPreferencesProvider";
 import { AppearanceSection } from "./AppearanceSection";
 import { SoundsSection } from "../sound/SoundsSection";
 import { BackupPanel } from "./BackupPanel";
@@ -23,6 +24,7 @@ export function GeneralSection(
   },
 ): JSX.Element {
   const { palette } = useTheme();
+  const chartPreferences = useChartPreferences();
   const oc = useOrderConfig();
   // Only local state on this page: a staging value for the buffer field's
   // in-progress typed text (see StepField's own comment) — the displayed
@@ -42,6 +44,16 @@ export function GeneralSection(
   return (
     <div style={{ color: palette.text }}>
       <div className="settings-group"><AppearanceSection /></div>
+
+      <div className="settings-group">
+        <div className="col-head serif" style={headStyle}>Charts</div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" aria-label="Overlap volume" checked={chartPreferences.config.volumeOverlap}
+            onChange={(e) => chartPreferences.save({ volumeOverlap: e.target.checked })} />
+          Overlap volume
+        </label>
+        <div style={noteStyle}>Display volume behind price. Individual charts can override this default.</div>
+      </div>
 
       <div className="settings-group">
         <SoundsSection />

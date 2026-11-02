@@ -12,6 +12,7 @@ import { PANELS } from "./chrome/panels/registry";
 import { AppShell } from "./chrome/AppShell";
 import { ReconnectOverlay } from "./chrome/ReconnectOverlay";
 import { ThemeProvider } from "./chrome/ThemeProvider";
+import { ChartPreferencesProvider } from "./chrome/ChartPreferencesProvider";
 import { ToastProvider } from "./chrome/Toast";
 import { OrderConfigProvider } from "./chrome/exec/useOrderConfig";
 import { SoundConfigProvider } from "./sound/SoundConfigProvider";
@@ -211,11 +212,13 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
         <DrawingToolStylesSyncBridge store={stores.drawingToolStyles} commands={commands} />
         <OrderConfigProvider commands={commands}>
           <SoundConfigProvider commands={commands}>
-            <ReconnectOverlay state={state}>
-              <AppShell workspaceName={workspaceName} stores={stores} scheduler={scheduler}
-                workspaceStore={workspaceStore} linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands}
-                engineState={state} onTransitionApplied={() => reannounceGate.onTransitionApplied()} />
-            </ReconnectOverlay>
+            <ChartPreferencesProvider commands={commands}>
+              <ReconnectOverlay state={state}>
+                <AppShell workspaceName={workspaceName} stores={stores} scheduler={scheduler}
+                  workspaceStore={workspaceStore} linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands}
+                  engineState={state} onTransitionApplied={() => reannounceGate.onTransitionApplied()} />
+              </ReconnectOverlay>
+            </ChartPreferencesProvider>
           </SoundConfigProvider>
         </OrderConfigProvider>
       </ToastProvider>

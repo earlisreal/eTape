@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ChartPreferencesProvider, useChartPreferences } from "../ChartPreferencesProvider";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, cleanup, fireEvent, within, screen, act } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
@@ -81,8 +82,13 @@ vi.stubGlobal("cancelAnimationFrame", () => {});
 
 beforeEach(() => { vi.clearAllMocks(); cleanup(); });
 
+function GlobalVolumeControl() {
+  const { config, save } = useChartPreferences();
+  return <button onClick={() => save({ volumeOverlap: !config.volumeOverlap })}>Toggle global volume overlap</button>;
+}
+
 function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sharedScheduler?: Scheduler,
-  settingsOverride?: Record<string, unknown>, chartQueryResult?: unknown, monitoring = false, sharedLinkGroups?: LinkGroups) {
+  settingsOverride?: Record<string, unknown>, chartQueryResult?: unknown, monitoring = false, sharedLinkGroups?: LinkGroups, withGlobalControl = false) {
   const stores = sharedStores ?? makeStores();
   const scheduler = sharedScheduler ?? new Scheduler(browserRaf, () => {});
   const linkGroups = sharedLinkGroups ?? new LinkGroups(new BroadcastChannelBus(), () => {});
@@ -97,12 +103,13 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
   const config = { id, panelId: "chart", group: "green" as const, settings: { symbol: "US.AAPL", timeframe: "1m", ...settingsOverride } };
   const onConfigChange = vi.fn();
   const panel = (group?: PanelConfig["group"], symbol?: string) => (
-    <ThemeProvider><ToastProvider>
+    <ThemeProvider><ChartPreferencesProvider><ToastProvider>
+      {withGlobalControl && <GlobalVolumeControl />}
       <ChartPanel config={config} stores={stores} scheduler={scheduler} width={400} height={300}
         linkGroups={linkGroups} commands={commands} onConfigChange={onConfigChange}
         monitoring={monitoring}
         {...(group === undefined ? {} : { group })} {...(symbol === undefined ? {} : { symbol })} />
-    </ToastProvider></ThemeProvider>
+    </ToastProvider></ChartPreferencesProvider></ThemeProvider>
   );
   const utils = render(panel());
   return { ...utils, stores, onConfigChange, scheduler, commands, linkGroups,
@@ -133,6 +140,30 @@ function renderChartCapturingSurface(settingsOverride?: Record<string, unknown>,
 }
 
 describe("ChartPanel", () => {
+  it("updates inherited overlap without recreating the chart or writing overrides", async () => {
+    const { createChart } = await import("lightweight-charts");
+    const { onConfigChange } = renderChart("c1", undefined, undefined, undefined, undefined, false, undefined, true);
+    const creations = vi.mocked(createChart).mock.calls.length;
+    onConfigChange.mockClear();
+    fireEvent.click(screen.getByText("Toggle global volume overlap"));
+    expect(chartApi.applyOptions).toHaveBeenCalledWith({ rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0 } } });
+    expect(createChart).toHaveBeenCalledTimes(creations);
+    expect(onConfigChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "chart settings" }));
+    fireEvent.change(screen.getByLabelText("Overlap volume"), { target: { value: "off" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    expect(chartApi.applyOptions).toHaveBeenCalledWith({ rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0.25 } } });
+    chartApi.applyOptions.mockClear();
+    fireEvent.click(screen.getByText("Toggle global volume overlap"));
+    fireEvent.click(screen.getByText("Toggle global volume overlap"));
+    expect(chartApi.applyOptions.mock.calls.filter(([o]) => o.rightPriceScale)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "chart settings" }));
+    fireEvent.change(screen.getByLabelText("Overlap volume"), { target: { value: "default" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    expect(chartApi.applyOptions).toHaveBeenCalledWith({ rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0 } } });
+    const saved = onConfigChange.mock.calls.at(-1)?.[0];
+    expect(saved.chartSettings).not.toHaveProperty("volumeOverlap");
+  });
   it("keeps an unassigned Monitoring chart idle and shows the sync wait state", async () => {
     const { createChart } = await import("lightweight-charts");
     const { commands } = renderChart("empty", undefined, undefined, { symbol: undefined }, undefined, true);

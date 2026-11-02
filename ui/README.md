@@ -1,5 +1,15 @@
 # UI
 
+Settings -> General -> Charts -> Overlap volume controls the application-wide
+default (off initially). Each Chart settings dialog offers Follow app default,
+On and Off; Ok saves a chart override and Follow app default removes it. Global
+changes update following charts across open workspaces through existing config
+sync, while explicit overrides stay fixed. Layout exports preserve inheritance
+and overrides, so imported following charts use the destination app's default.
+Volume Overlap keeps volume in the bottom quarter behind price, caps its opacity
+at 50% without changing saved colors, and lets price use that space in every
+supported chart style. Volume visibility remains in its indicator controls.
+
 Settings groups appearance, sound, workspace backup, trading controls, and broker
 connections behind persistent navigation. Dialogs share light/dark styling and
 close with Escape, their close button, or a click outside; nested confirmations

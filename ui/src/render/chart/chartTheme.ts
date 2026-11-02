@@ -97,7 +97,7 @@ function timeFormatter(time: number, timeframe: string): string {
 
 // The Volume Indicator rides an invisible overlay scale confined to the bottom VOLUME_BAND of
 // the main pane; the candle (right) scale reserves that same band at its bottom
-// so the two never overlap. Without these margins LWC's default scaleMargins let
+// unless Volume Overlap is enabled. Without these margins LWC's default scaleMargins let
 // the volume histogram autoscale across ~80% of the pane, swallowing the candles.
 export const VOLUME_BAND = 0.25;
 export const CANDLE_SCALE_MARGINS = { top: 0.08, bottom: VOLUME_BAND } as const;

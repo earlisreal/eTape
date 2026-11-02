@@ -1,7 +1,7 @@
 # Volume Overlap
 
 Status: approved; Earl confirmed shared understanding on 2026-11-03.
-Implementation pending.
+Implemented on 2026-11-03.
 
 ## Goal
 

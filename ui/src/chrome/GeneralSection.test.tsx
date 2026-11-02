@@ -20,6 +20,13 @@ function renderSection() {
 }
 
 describe("GeneralSection", () => {
+  it("offers an off-by-default global Volume Overlap setting", () => {
+    renderSection();
+    const toggle = screen.getByLabelText("Overlap volume") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+  });
   it("renders the theme toggle and switches to dark", () => {
     renderSection();
     fireEvent.click(screen.getByLabelText(/dark/i));

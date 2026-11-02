@@ -1,6 +1,7 @@
 import type { ChartApiFacade, LwcPriceLine, LwcSeries } from "./ChartApiFacade";
 import type { AutoscaleInfo } from "lightweight-charts";
 import type { Palette } from "../palette";
+import { overlapVolumeColor } from "./volumeColor";
 import type { Bar } from "../../wire/contract";
 import { quoteDecimals, QUOTE_DECIMALS } from "../format";
 import {
@@ -86,6 +87,9 @@ export class ChartController {
   private postMarketLine: LwcPriceLine | null = null;
   private postMarketPrice: number | null = null;
   private volume: LwcSeries | null = null;
+  private volumeOverlap = false;
+  private volumeUpColor = "";
+  private volumeDownColor = "";
   private lastAppliedCount = 0;             // bars applied via setData/update
   private lastAppliedKey = "";              // last bar's bucketStart|close, to detect in-progress change
   // bucketStart of the bar at index (lastAppliedCount-1) as of the last apply — an
@@ -886,12 +890,30 @@ export class ChartController {
   }
 
   private setVolumeGeometry(visible: boolean): void {
-    this.facade.applyOptions({ rightPriceScale: { scaleMargins: visible ? CANDLE_SCALE_MARGINS : CANDLE_SCALE_MARGINS_WITHOUT_VOLUME } });
+    this.facade.applyOptions({ rightPriceScale: { scaleMargins: visible && !this.volumeOverlap ? CANDLE_SCALE_MARGINS : CANDLE_SCALE_MARGINS_WITHOUT_VOLUME } });
     this.facade.setPriceScaleMargins("", visible ? VOLUME_SCALE_MARGINS : NO_VOLUME_SCALE_MARGINS);
   }
 
   private toVolume(b: DisplayBar): object {
-    return toVolume(b, this.palette, this.volumeIndicator());
+    if (b.synthetic || b.dataGap) return { time: toLwcTime(b.bucketStart) };
+    return { time: toLwcTime(b.bucketStart), value: b.v, color: b.c >= b.o ? this.volumeUpColor : this.volumeDownColor };
+  }
+
+  private refreshVolumeColors(): void {
+    const inst = this.volumeIndicator();
+    const up = inst ? volumeColorFor(inst, this.palette, true) : this.palette.volUp;
+    const down = inst ? volumeColorFor(inst, this.palette, false) : this.palette.volDown;
+    this.volumeUpColor = this.volumeOverlap ? overlapVolumeColor(up) : up;
+    this.volumeDownColor = this.volumeOverlap ? overlapVolumeColor(down) : down;
+  }
+
+  setVolumeOverlap(on: boolean): void {
+    if (this.volumeOverlap === on) return;
+    this.volumeOverlap = on;
+    this.refreshVolumeColors();
+    this.volume?.setData(this.displayedBars.map((b) => this.toVolume(b)));
+    const inst = this.volumeIndicator();
+    this.setVolumeGeometry(inst ? volumeIsVisible(inst) : false);
   }
 
   addIndicator(inst: IndicatorInstance): void {
@@ -917,6 +939,7 @@ export class ChartController {
       }
       this.indicators.set(resolved.instanceId, { inst: resolved, series });
       this.volume = series.get(resolved.instanceId) ?? null;
+      this.refreshVolumeColors();
       this.volume?.setData(this.displayedBars.map((b) => this.toVolume(b)));
       this.setVolumeGeometry(volumeIsVisible(resolved));
       this.liftCandleToTop();
@@ -1009,6 +1032,7 @@ export class ChartController {
         existing.series.get(d.key)?.applyOptions({ visible });
       }
       this.volume = existing.series.get(next.instanceId) ?? null;
+      this.refreshVolumeColors();
       this.volume?.setData(this.displayedBars.map((b) => this.toVolume(b)));
       this.setVolumeGeometry(visible);
       return;
@@ -1095,6 +1119,7 @@ export class ChartController {
 
   setPalette(p: Palette): void {
     this.palette = p;
+    this.refreshVolumeColors();
     this.postMarketLine?.applyOptions({ color: p.accent });
     this.facade.applyOptions(chartOptions(p, this.config.timeframe));
     this.candle.applyOptions(mainSeriesOptions(this.chartType, p));
@@ -1274,11 +1299,6 @@ function candleRangeOf(bars: readonly DisplayBar[]): PriceRange | null {
   }
   return minValue <= maxValue ? { minValue, maxValue } : null;
 }
-function toVolume(b: DisplayBar, p: Palette, inst: IndicatorInstance | null) {
-  if (b.synthetic || b.dataGap) return { time: toLwcTime(b.bucketStart) };
-  return { time: toLwcTime(b.bucketStart), value: b.v, color: inst ? volumeColorFor(inst, p, b.c >= b.o) : b.c >= b.o ? p.volUp : p.volDown };
-}
-
 export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number, openDDown = false): DisplayBar[] {
   if (bars.length === 0 || !Number.isFinite(nowMs)) return bars;
   const current = bucketStartMs(nowMs, "10s");

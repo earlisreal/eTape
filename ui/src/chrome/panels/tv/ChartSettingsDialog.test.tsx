@@ -9,6 +9,33 @@ afterEach(cleanup);
 const chrome = getTvChrome("light");
 
 describe("ChartSettingsDialog", () => {
+  it.each([undefined, null, "true", 1])("treats invalid/missing override %s as inheritance", (volumeOverlap) => {
+    expect(normalizeChartSettings({ volumeOverlap })).not.toHaveProperty("volumeOverlap");
+  });
+  it.each([true, false])("preserves the explicit override %s", (volumeOverlap) => {
+    expect(normalizeChartSettings({ volumeOverlap }).volumeOverlap).toBe(volumeOverlap);
+  });
+  it("discards an overlap draft on cancel", () => {
+    const onApply = vi.fn();
+    render(<ChartSettingsDialog chrome={chrome} settings={DEFAULT_CHART_SETTINGS} onClose={() => {}} onApply={onApply} />);
+    fireEvent.change(screen.getByLabelText("Overlap volume"), { target: { value: "on" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onApply).not.toHaveBeenCalled();
+  });
+  it("can return an explicit Volume Overlap override to the app default", () => {
+    const onApply = vi.fn();
+    render(<ChartSettingsDialog chrome={chrome} settings={normalizeChartSettings({ volumeOverlap: false })}
+      globalVolumeOverlap={true} onClose={() => {}} onApply={onApply} />);
+    const choice = screen.getByLabelText("Overlap volume");
+    expect((choice as HTMLSelectElement).value).toBe("off");
+    fireEvent.change(choice, { target: { value: "default" } });
+    expect(onApply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    const applied = onApply.mock.calls[0][0];
+    expect(applied).not.toHaveProperty("volumeOverlap");
+    expect(chartSettingsRollbackProjection({ volumeOverlap: false, other: 7 }, applied))
+      .toEqual({ ...DEFAULT_CHART_SETTINGS, other: 7, volume: false });
+  });
   it("defaults expose five toggles; Volume is an indicator", () => {
     expect(DEFAULT_CHART_SETTINGS).toEqual({ sessionShading: true, grid: true, watermark: false, barCloseTimer: true, visibleExtrema: true });
   });

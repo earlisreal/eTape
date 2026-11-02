@@ -92,6 +92,18 @@ describe("backup: buildExport selection matrix", () => {
 });
 
 describe("backup: structural layout export", () => {
+  it.each([undefined, true, false])("preserves Volume Overlap inheritance/override %s in portable layouts", (override) => {
+    const workspace = makeWorkspace("source");
+    const chartSettings = override === undefined ? {} : { volumeOverlap: override };
+    workspace.panels[0].settings.chartSettings = chartSettings;
+    const built = buildExport({ layout: true, hotkeys: false }, { workspace, orderConfig: makeOrderConfig([]) });
+    const parsed = parseImport(JSON.stringify(built));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || !parsed.data.layout) throw new Error("layout missing");
+    const imported = prepareImportedWorkspace(parsed.data.layout, "destination");
+    expect(imported.panels[0].settings.chartSettings).toEqual(chartSettings);
+    expect(built).not.toHaveProperty("chartPreferences");
+  });
   it("removes symbols and cross-window Scanner Source state without mutating the live workspace", () => {
     const workspace: Workspace = {
       ...makeWorkspace("monitoring"),

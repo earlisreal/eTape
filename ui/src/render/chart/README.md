@@ -35,10 +35,15 @@ per-panel ID. The controller owns its local histogram and reads the same
 `IndicatorStore` key, or chart-window hydration. Real and Volume-Only bars keep
 their directional colors; synthetic No-Trade Bars and Data Gaps remain empty.
 
-Visible Volume reserves the existing lower 25% of the price pane. Hiding its
-instance or histogram output, or removing it, restores the ordinary candle
-scale; showing or re-adding it reapplies both scales and the current display
-bars immediately.
+Volume stays within the lower 25% of the price pane. By default price reserves
+that band. With Volume Overlap enabled, price uses the full plot area and paints
+above volume. Overlap caps rendered volume opacity at 50%, preserving lower
+alpha and saved colors; colors resolve on style/palette/settings changes, never
+per tick. Hidden or removed Volume restores ordinary price margins in either
+mode. Showing or re-adding it uses the current overlap preference and data.
+
+The controller applies overlap imperatively across candle, bar, line and area
+styles, preserving the time viewport and the user's autoscale choice.
 
 ## Viewport behavior
 
