@@ -1,8 +1,8 @@
 # Exercise the real launcher with a tiny engine and no UI/tool downloads.
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$goTool = (Get-Command go -CommandType Application).Source
-$powerShell = (Get-Command powershell -CommandType Application).Source
+$goTool = (Get-Command go -CommandType Application | Select-Object -First 1).Source
+$powerShell = (Get-Command powershell -CommandType Application | Select-Object -First 1).Source
 $tempParent = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\')
 $fixtureRoot = Join-Path $tempParent ('etape-launcher-' + [guid]::NewGuid())
 
