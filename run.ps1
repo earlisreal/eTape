@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 
 $Root      = $PSScriptRoot
 $EngineDir = Join-Path $Root 'engine'
+$EngineExe = Join-Path $EngineDir 'etape.exe'
 $UIDir     = Join-Path $Root 'ui'
 $Dist      = Join-Path $UIDir 'dist'
 
@@ -53,13 +54,17 @@ function Build-UI {
     }
 }
 
-function Build-WindowsIcon {
+function Build-WindowsEngine {
     Log 'embedding Windows icon resource'
     Push-Location $EngineDir
     try {
         & go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0 `
             -64 -arm=false -icon cmd/etape/assets/etape.ico `
             -o cmd/etape/etape_windows_amd64.syso cmd/etape/versioninfo.json
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        # Explorer keeps taskbar shortcuts after go run's temporary executable disappears.
+        Log 'building engine at its persistent taskbar path'
+        & go build -o $EngineExe ./cmd/etape
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     } finally {
         Pop-Location
@@ -76,11 +81,11 @@ if ($args.Count -ge 2) { $Rest = @($args[1..($args.Count - 1)]) }
 switch ($Mode) {
     'live' {
         Build-UI
-        Build-WindowsIcon
+        Build-WindowsEngine
         Log 'booting engine (live) -- open http://127.0.0.1:8686'
         Set-Location $EngineDir
         $env:SLOG_LEVEL = 'info'
-        & go run ./cmd/etape -dist $Dist @Rest
+        & $EngineExe -dist $Dist @Rest
         exit $LASTEXITCODE
     }
 
@@ -90,19 +95,19 @@ switch ($Mode) {
         $seed = ''
         if ($Rest.Count -ge 1 -and [string]$Rest[0] -notlike '-*') {
             $seed = [string]$Rest[0]
-            $Rest = if ($Rest.Count -ge 2) { @($Rest[1..($Rest.Count - 1)]) } else { @() }
+            $Rest = @($Rest | Select-Object -Skip 1)
         }
 
         Build-UI
-        Build-WindowsIcon
+        Build-WindowsEngine
 
         Log 'booting engine (demo synthetic market) -- open http://127.0.0.1:8686'
         Set-Location $EngineDir
         $env:SLOG_LEVEL = 'debug'
         if ($seed) {
-            & go run ./cmd/etape -dist $Dist -demo -demo-seed $seed @Rest
+            & $EngineExe -dist $Dist -demo -demo-seed $seed @Rest
         } else {
-            & go run ./cmd/etape -dist $Dist -demo @Rest
+            & $EngineExe -dist $Dist -demo @Rest
         }
         exit $LASTEXITCODE
     }

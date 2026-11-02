@@ -68,6 +68,9 @@ jobs:
         # Capacity tests must not compete with other package load generators.
         run: go test -p 1 ./...
 
+      - name: Windows launcher regression
+        run: ./scripts/test-windows-launcher.ps1
+
   ui:
     # Golden PNGs are generated on Windows. Cairo/Pango text rasterization is
     # OS-specific even with the same bundled TTF, so strict pixel comparison

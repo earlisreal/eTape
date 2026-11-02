@@ -11,6 +11,14 @@ icon from `engine/cmd/etape/assets/etape-mark.svg`. Its mark fills 75% of the ti
 width. Native 16/20/24/32/40/48/64/96/128/256 px ICO entries are rendered separately
 for Windows DPI scaling. The Apple touch icon stays tiled.
 
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-windows-launcher.ps1`
+checks the real Windows launch flow with a tiny fixture engine. Live, seeded
+demo, and unseeded demo launches must rebuild and execute at the same persistent
+path, retain the executable after exit for Explorer, and forward engine flags
+including paths with spaces. UI building and icon-tool downloads are stubbed;
+the engine compilation and launch use the installed Go toolchain. This check
+also runs in the Windows CI job.
+
 ## Linux release smoke check
 
 Run it from the repository root with a staged archive:

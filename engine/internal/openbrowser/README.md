@@ -36,10 +36,15 @@ icons if Chrome rewrites them. Native ICO entries follow each window's DPI.
 Messages have a 200 ms timeout; unrelated processes are never targeted.
 Explorer uses the running executable's PE icon resource: a standalone ICO can
 display a generic file symbol through this taskbar property. `run.ps1` generates
-the PE resource before `go run`, just as the Windows release target does.
+the PE resource before building and running the persistent `engine/etape.exe`,
+just as the Windows release target does. Explorer retains implicit taskbar
+shortcuts across launches, so a `go run` path can leave a generic file icon after
+its temporary executable disappears. The Windows launcher keeps both the
+relaunch target and icon resource at the same durable path across rebuilds.
 Relaunch metadata preserves
 the config, UI directory, log path, and demo/live mode, and opens a fresh UI.
-Pin release builds rather than `go run`'s temporary executable.
+Pin release builds or the launcher's `engine/etape.exe` rather than a manual
+`go run`'s temporary executable.
 The release callback is deferred by boot for fresh and adopted browsers, so it
 stops and joins the monitor before engine exit or restart. It restores only shell
 properties that still match its own values and clears its own BIG handles before
