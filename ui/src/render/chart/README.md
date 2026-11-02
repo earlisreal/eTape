@@ -36,8 +36,9 @@ per-panel ID. The controller owns its local histogram and reads the same
 their directional colors; synthetic No-Trade Bars and Data Gaps remain empty.
 
 Volume stays within the lower 25% of the price pane. By default price reserves
-that band. With Volume Overlap enabled, price uses the full plot area and paints
-above volume. Overlap caps rendered volume opacity at 50%, preserving lower
+that band. With Volume Overlap enabled, price extends into the volume band with
+8% bottom padding to keep the lowest wick clear of the floor, and paints above
+volume. Overlap caps rendered volume opacity at 50%, preserving lower
 alpha and saved colors; colors resolve on style/palette/settings changes, never
 per tick. Hidden or removed Volume restores ordinary price margins in either
 mode. Showing or re-adding it uses the current overlap preference and data.

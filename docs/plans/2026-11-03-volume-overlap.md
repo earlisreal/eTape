@@ -15,7 +15,8 @@ Keep this the existing Volume Indicator, distinct from Volume Profile. See the
 - The application-wide Volume Overlap default starts off. Each Chart Panel can
   follow that default or explicitly override it on or off.
 - Keep the histogram within the bottom 25% of the main price pane. Price may
-  extend through that area when overlap is enabled; price paints above volume.
+  extend through that area when overlap is enabled, with 8% bottom padding below
+  price to keep the lowest wick clear of the floor; price paints above volume.
 - Use fixed translucency in overlap mode. Add no height or opacity controls.
 - Cap rendered histogram opacity at 50% in overlap mode, including custom
   colors. Preserve already lower opacity and saved colors; disabling overlap
@@ -74,8 +75,8 @@ Keep this the existing Volume Indicator, distinct from Volume Profile. See the
 - Chart settings -> Overlap volume: Follow app default (showing its current
   On/Off value), On or Off. New and existing charts start with Follow app
   default. Chart settings apply on Ok; cancel discards the draft.
-- Turning overlap on lets price use the lower plot area while volume retains
-  its bottom-quarter scale and paints behind price. Turning it off restores
+- Turning overlap on lets price use the lower plot area with 8% bottom padding
+  while volume retains its bottom-quarter scale and paints behind price. Turning it off restores
   the existing reserved-volume layout.
 - Volume visibility remains controlled by the existing indicator controls.
   Hiding or removing Volume reclaims the lower area in either mode and keeps
@@ -110,9 +111,9 @@ No new price-style selector, height control or opacity control is included.
    controllers when the global value loads or changes without
    recreating charts, fetching bars or saving panel overrides.
 4. Extend the controller's central volume-geometry logic: visible Volume with
-   overlap off retains the current reserved band; overlap on uses ordinary
-   price margins with the existing volume margins. Hidden or removed Volume
-   uses ordinary price margins regardless of the saved overlap preference.
+   overlap off retains the current reserved band; overlap on uses 8% top and
+   bottom price margins with the existing volume margins. Hidden or removed
+   Volume uses ordinary price margins regardless of the saved overlap preference.
 5. Keep the preference when Volume is hidden or removed; toggling the layout
    option does not add, show or remove an indicator. Showing or re-adding Volume
    uses the saved layout choice. Reuse the same series, bars and legend values.

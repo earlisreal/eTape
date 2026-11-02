@@ -2044,7 +2044,7 @@ describe("ChartController chart settings", () => {
     const resets = facade.priceResets;
     const scrolls = facade.scrolls;
     ctrl.setVolumeOverlap(true);
-    expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0 } } });
+    expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0.08 } } });
     expect(facade.scaleMargins.at(-1)).toEqual({ id: "", margins: { top: 0.75, bottom: 0 } });
     expect(volume.setDataCalls.at(-1)?.[0]).toMatchObject({ color: "rgba(242, 54, 69, 0.5)" });
     expect(facade.priceResets).toBe(resets);
@@ -2080,12 +2080,12 @@ describe("ChartController chart settings", () => {
     ctrl.setPalette(DARK);
     ctrl.updateIndicator({ ...defaultVolumeIndicator("c1"), hidden: true });
     ctrl.updateIndicator(defaultVolumeIndicator("c1"));
-    expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0 } } });
+    expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0.08 } } });
     ctrl.removeIndicator("c1:VOLUME");
     ctrl.addIndicator(defaultVolumeIndicator("c1"));
     ctrl.setTimeframe("D");
     ctrl.setSymbol("US.MSFT");
-    expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0 } } });
+    expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0.08 } } });
     ctrl.setVolumeOverlap(false);
     expect(facade.lastOptions).toMatchObject({ rightPriceScale: { scaleMargins: { bottom: 0.25 } } });
   });

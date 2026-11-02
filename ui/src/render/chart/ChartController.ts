@@ -6,7 +6,7 @@ import type { Bar } from "../../wire/contract";
 import { quoteDecimals, QUOTE_DECIMALS } from "../format";
 import {
   chartOptions, candleOptions, volumeOptions, mainSeriesOptions, CANDLE_SCALE_MARGINS,
-  CANDLE_SCALE_MARGINS_WITHOUT_VOLUME, NO_VOLUME_SCALE_MARGINS, VOLUME_SCALE_MARGINS,
+  CANDLE_SCALE_MARGINS_WITHOUT_VOLUME, CANDLE_SCALE_MARGINS_WITH_OVERLAP, NO_VOLUME_SCALE_MARGINS, VOLUME_SCALE_MARGINS,
   boundedOverlayAutoscale, OVERLAY_AUTOSCALE_FACTOR, RIGHT_OFFSET_BARS, usesBoundaryManagedFollow,
   type ChartType, type PriceRange,
 } from "./chartTheme";
@@ -890,7 +890,9 @@ export class ChartController {
   }
 
   private setVolumeGeometry(visible: boolean): void {
-    this.facade.applyOptions({ rightPriceScale: { scaleMargins: visible && !this.volumeOverlap ? CANDLE_SCALE_MARGINS : CANDLE_SCALE_MARGINS_WITHOUT_VOLUME } });
+    const scaleMargins = !visible ? CANDLE_SCALE_MARGINS_WITHOUT_VOLUME
+      : this.volumeOverlap ? CANDLE_SCALE_MARGINS_WITH_OVERLAP : CANDLE_SCALE_MARGINS;
+    this.facade.applyOptions({ rightPriceScale: { scaleMargins } });
     this.facade.setPriceScaleMargins("", visible ? VOLUME_SCALE_MARGINS : NO_VOLUME_SCALE_MARGINS);
   }
 

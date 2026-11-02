@@ -102,6 +102,7 @@ function timeFormatter(time: number, timeframe: string): string {
 export const VOLUME_BAND = 0.25;
 export const CANDLE_SCALE_MARGINS = { top: 0.08, bottom: VOLUME_BAND } as const;
 export const CANDLE_SCALE_MARGINS_WITHOUT_VOLUME = { top: 0.08, bottom: 0 } as const;
+export const CANDLE_SCALE_MARGINS_WITH_OVERLAP = { top: 0.08, bottom: 0.08 } as const;
 export const VOLUME_SCALE_MARGINS = { top: 1 - VOLUME_BAND, bottom: 0 } as const;
 export const NO_VOLUME_SCALE_MARGINS = { top: 1, bottom: 0 } as const;
 

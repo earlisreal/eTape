@@ -146,7 +146,7 @@ describe("ChartPanel", () => {
     const creations = vi.mocked(createChart).mock.calls.length;
     onConfigChange.mockClear();
     fireEvent.click(screen.getByText("Toggle global volume overlap"));
-    expect(chartApi.applyOptions).toHaveBeenCalledWith({ rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0 } } });
+    expect(chartApi.applyOptions).toHaveBeenCalledWith({ rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0.08 } } });
     expect(createChart).toHaveBeenCalledTimes(creations);
     expect(onConfigChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "chart settings" }));
@@ -160,7 +160,7 @@ describe("ChartPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "chart settings" }));
     fireEvent.change(screen.getByLabelText("Overlap volume"), { target: { value: "default" } });
     fireEvent.click(screen.getByRole("button", { name: "Ok" }));
-    expect(chartApi.applyOptions).toHaveBeenCalledWith({ rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0 } } });
+    expect(chartApi.applyOptions).toHaveBeenCalledWith({ rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0.08 } } });
     const saved = onConfigChange.mock.calls.at(-1)?.[0];
     expect(saved.chartSettings).not.toHaveProperty("volumeOverlap");
   });

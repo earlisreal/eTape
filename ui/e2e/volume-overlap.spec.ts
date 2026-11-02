@@ -2,14 +2,14 @@ import { test, expect, type Page, type Locator } from "@playwright/test";
 import type { ClientMessage, ServerMessage, QueryChartWindowArgs } from "../src/wire/contract";
 import { WORKSPACE_LAYOUT_VERSION } from "../src/chrome/workspace";
 
-// Count fully opaque price pixels in the lower fifth of the actual price pane.
+// Count fully opaque price pixels below a fractional height of the price pane.
 // Translucent volume uses different blended pixels, so it cannot satisfy this.
-async function lowerPricePixels(host: Locator): Promise<number> {
-  return host.locator("canvas").first().evaluate((canvas: HTMLCanvasElement) => {
+async function lowerPricePixels(host: Locator, from = 0.8): Promise<number> {
+  return host.locator("canvas").first().evaluate((canvas: HTMLCanvasElement, from: number) => {
     const { width, height } = canvas;
     const pixels = canvas.getContext("2d")!.getImageData(0, 0, width, height).data;
     let count = 0;
-    for (let y = Math.ceil(height * 0.8); y < height - 4; y++) {
+    for (let y = Math.ceil(height * from); y < height - 4; y++) {
       for (let x = Math.ceil(width * 0.1); x < width - 4; x++) {
         const i = (y * width + x) * 4;
         if ((pixels[i] === 8 && pixels[i + 1] === 153 && pixels[i + 2] === 129)
@@ -17,7 +17,7 @@ async function lowerPricePixels(host: Locator): Promise<number> {
       }
     }
     return count;
-  });
+  }, from);
 }
 
 test("global overlap, chart overrides and saved inheritance paint the real chart", async ({ context, page }) => {
@@ -103,6 +103,7 @@ test("global overlap, chart overrides and saved inheritance paint the real chart
   };
   await global(true);
   await expect.poll(() => lowerPricePixels(host)).toBeGreaterThan(10);
+  await expect.poll(() => lowerPricePixels(host, 0.95)).toBe(0);
   await expect.poll(() => lowerPricePixels(other)).toBeGreaterThan(10);
   await host.screenshot({ path: test.info().outputPath("overlap-on-light.png") });
   await override("off");
@@ -121,11 +122,17 @@ test("global overlap, chart overrides and saved inheritance paint the real chart
   await page.getByRole("button", { name: "Close settings", exact: true }).click();
   await expect(second.locator("html")).toHaveAttribute("data-theme", "dark");
   await other.screenshot({ path: test.info().outputPath("overlap-on-dark.png") });
+  await second.setViewportSize({ width: 460, height: 460 });
+  await expect.poll(() => lowerPricePixels(other)).toBeGreaterThan(0);
+  await expect.poll(() => lowerPricePixels(other, 0.95)).toBe(0);
+  await other.screenshot({ path: test.info().outputPath("overlap-padding-small.png") });
+  await second.setViewportSize({ width: 1280, height: 720 });
   for (const style of ["bar", "line", "area"]) {
     const current = config.get("workspace.overlap-two") as SavedWorkspace;
     current.panels[0].settings.chartType = style;
     await open(second, "overlap-two");
     await expect.poll(() => lowerPricePixels(other)).toBeGreaterThan(0);
+    await expect.poll(() => lowerPricePixels(other, 0.95)).toBe(0);
     await other.screenshot({ path: test.info().outputPath(`overlap-${style}-dark.png`) });
   }
   expect(errors).toEqual([]);
