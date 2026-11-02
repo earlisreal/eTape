@@ -44,6 +44,12 @@ interface Commands { sendCommand(name: string, args: unknown): Promise<AckMsg>; 
 const BROKER_LABEL: Record<string, string> = { tradezero: "TradeZero", alpaca: "Alpaca", moomoo: "moomoo", sim: "Simulated" };
 const GATE_CAPS = ["maxOrderValue", "maxPositionValue", "maxPositionShares", "maxOpenOrders"] as const;
 const GLOBAL_CAPS = ["maxDayLoss", "maxSymbolPositionValue", "maxSymbolPositionShares"] as const;
+const CAP_LABELS: Record<(typeof GATE_CAPS)[number] | (typeof GLOBAL_CAPS)[number], string> = {
+  maxOrderValue: "Max order value ($)", maxPositionValue: "Max position value ($)",
+  maxPositionShares: "Max position shares", maxOpenOrders: "Max open orders",
+  maxDayLoss: "Max daily loss ($)", maxSymbolPositionValue: "Max symbol value ($)",
+  maxSymbolPositionShares: "Max symbol shares",
+};
 
 // Fixed keys for a roster slot with no venue yet — stable across renders
 // (unlike rowKeys, which are per-mount crypto.randomUUID()s), since there is
@@ -74,7 +80,7 @@ function resolveSlots(venues: Venue[]): Slots {
   const s: Slots = { sim: -1, moomoo: -1, alpacaPaper: -1, alpacaLive: -1, tradezero: -1 };
   venues.forEach((v, i) => {
     if (v.broker === "sim" && s.sim === -1) s.sim = i;
-    if (v.broker === "moomoo" && s.moomoo === -1) s.moomoo = i;
+    if (v.broker === "moomoo" && v.env === "live" && s.moomoo === -1) s.moomoo = i;
     if (v.broker === "alpaca" && v.env === "live" && s.alpacaLive === -1) s.alpacaLive = i;
     if (v.broker === "alpaca" && v.env !== "live" && s.alpacaPaper === -1) s.alpacaPaper = i;
     if (v.broker === "tradezero" && s.tradezero === -1) s.tradezero = i;
@@ -139,16 +145,9 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
         const s = ack.value as VenueSetup;
         setSetup(s);
         const venues = s.file.venues.map((v) => ({ ...v }));
-        // Mirror the write path's env guarantees ("sim is always paper",
-        // "moomoo is always live") on load, scoped to ONLY the roster-claimed
-        // venue for each — an older build's manual dropdown (or a hand-edited
-        // config.toml) could still have these on disk. Overflow venues of the
-        // same broker (a second sim/moomoo row) are deliberately left
-        // untouched: the legacy-overflow round-trip invariant means this form
-        // must never rewrite a venue it has no card for.
+        // The live moomoo card must never claim or rewrite a paper account.
         const sl = resolveSlots(venues);
         if (sl.sim !== -1) venues[sl.sim] = { ...venues[sl.sim], env: "paper" };
-        if (sl.moomoo !== -1) venues[sl.moomoo] = { ...venues[sl.moomoo], env: "live" };
         setDraft({ venues, gate: { global: { ...s.file.gate.global }, venue: { ...s.file.gate.venue } } });
         const keys = venues.map(() => crypto.randomUUID());
         setRowKeys(keys);
@@ -404,10 +403,11 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
     const key = crypto.randomUUID();
     setRowKeys((k) => [...k, key]);
     setCapsByRow((c) => ({ ...c, [key]: zeroCaps() }));
-    setDraft((d) => ({
-      ...d,
-      venues: [...d.venues, { id: "moomoo", broker: "moomoo", env: "live", credentials: "", accountId: moomooSelectedAccount, startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }],
-    }));
+    setDraft((d) => {
+      let id = "moomoo";
+      for (let n = 1; d.venues.some((v) => v.id === id); n++) id = `moomoo-live-${n}`;
+      return { ...d, venues: [...d.venues, { id, broker: "moomoo", env: "live", credentials: "", accountId: moomooSelectedAccount, startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] };
+    });
     setDirty(true);
     setMoomooProbe(null);
   };
@@ -499,8 +499,16 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
       //    TradeZero slot just filled) — the engine's fail-closed gate guard
       //    (no entry => block) must never fire on a UI-created venue.
       const venueGate: Gate["venue"] = {};
-      draft.venues.forEach((v, i) => { if (v.id) venueGate[v.id] = capsByRow[rowKeys[i]] ?? zeroCaps(); });
-      for (const v of finalVenues) if (!(v.id in venueGate)) venueGate[v.id] = zeroCaps();
+      draft.venues.forEach((v, i) => {
+        if (!v.id) return;
+        // Preserve the absence of a gate on read-only overflow venues: the
+        // engine treats a missing gate as blocked, not as unlimited.
+        if (!claimed.has(i) && !(v.id in (setup?.file.gate.venue ?? {}))) return;
+        venueGate[v.id] = capsByRow[rowKeys[i]] ?? zeroCaps();
+      });
+      for (const v of finalVenues) {
+        if (!(v.id in venueGate) && !draft.venues.some((existing) => existing.id === v.id)) venueGate[v.id] = zeroCaps();
+      }
       const gate: Gate = { global: draft.gate.global, venue: venueGate };
 
       const setAck = await commands.sendCommand("SetVenueSetup", { venues: finalVenues, gate });
@@ -570,7 +578,7 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
       <MoomooCard
         palette={palette}
         venue={slots.moomoo !== -1 ? draft.venues[slots.moomoo] : null}
-        fileHasIt={(setup?.file.venues ?? []).some((v) => v.broker === "moomoo")}
+        fileHasIt={(setup?.file.venues ?? []).some((v) => v.broker === "moomoo" && v.env === "live")}
         runningStatus={slots.moomoo !== -1 ? (execStatus?.venues.find((v) => v.venue === draft.venues[slots.moomoo].id && v.broker === "moomoo")) : undefined}
         attempted={setup?.seed.moomooAttempted ?? false}
         linkUp={moomooLinkUp}
@@ -650,10 +658,11 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
 
       <div style={{ marginTop: 16, marginBottom: 16 }}>
         <div className="serif" style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Global limits</div>
+        <p style={{ color: palette.textMuted, fontSize: 12 }}>Set a limit to 0 to disable it.</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {GLOBAL_CAPS.map((k) => (
             <label key={k} style={fieldWrap}>
-              {k}
+              {CAP_LABELS[k]}
               <input className="field mono" data-testid={`global-${k}`} value={String(draft.gate.global[k])}
                 onChange={(e) => { setDraft((d) => ({ ...d, gate: { ...d.gate, global: { ...d.gate.global, [k]: Number(e.target.value) || 0 } } })); setDirty(true); }}
                 style={{ width: 90 }} />
@@ -706,10 +715,11 @@ function RiskLimits({ caps, expanded, onToggle, onUpdateCap, fieldWrap, groupLab
       {expanded && (
         <div style={{ marginTop: 8 }}>
           <div className="col-head" style={groupLabel}>Risk limits</div>
+          <div style={{ color: "var(--text-muted)", fontSize: 12, marginBottom: 6 }}>Set a limit to 0 to disable it.</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
             {GATE_CAPS.map((cap) => (
               <label key={cap} style={fieldWrap}>
-                {cap}
+                {CAP_LABELS[cap]}
                 <input className="field mono" value={String(caps[cap] ?? 0)}
                   onChange={(e) => onUpdateCap(cap, Number(e.target.value) || 0)}
                   style={{ width: 72 }} />

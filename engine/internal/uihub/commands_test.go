@@ -796,6 +796,8 @@ type spyVenueAdmin struct {
 	setErr          error
 	lastPutSec      string
 	moomooAttempted bool
+	dataExpected    config.DataSettings
+	dataNext        config.DataSettings
 }
 
 func (s *spyVenueAdmin) GetVenueSetup() (config.VenueConfig, config.VenueConfig, []string, bool, error) {
@@ -804,12 +806,43 @@ func (s *spyVenueAdmin) GetVenueSetup() (config.VenueConfig, config.VenueConfig,
 		[]string{"alpaca"}, s.moomooAttempted, nil
 }
 func (s *spyVenueAdmin) SetVenueSetup(config.VenueConfig) error { s.setCalled = true; return s.setErr }
+func (s *spyVenueAdmin) GetDataSettings() (config.DataSettings, config.DataSettings, error) {
+	return config.Default().DataSettings(), config.Default().DataSettings(), nil
+}
+func (s *spyVenueAdmin) SetDataSettings(expected, next config.DataSettings) error {
+	s.dataExpected, s.dataNext = expected, next
+	return s.setErr
+}
 func (s *spyVenueAdmin) PutCredential(_, _, sec string) error {
 	s.putCalled = true
 	s.lastPutSec = sec
 	return nil
 }
 func (s *spyVenueAdmin) DeleteCredential(string) error { return s.delErr }
+
+func TestDataSettingsCommandsRoundTrip(t *testing.T) {
+	va := &spyVenueAdmin{}
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
+	ack, _ := cd.handle(context.Background(), "GetDataSettings", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {})
+	setup, ok := ack.Value.(wsmsg.DataSettingsSetup)
+	if ack.Status != wsmsg.AckAccepted || !ok || setup.File.OpenDPort != 11111 {
+		t.Fatalf("get settings = %+v", ack)
+	}
+	next := setup.File
+	next.ScannerRTHMs = 3000
+	raw, err := json.Marshal(wsmsg.SetDataSettingsArgs{Expected: setup.File, Settings: next})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack, _ = cd.handle(context.Background(), "SetDataSettings", raw, 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckAccepted || va.dataExpected.ScannerRTHMs != 1000 || va.dataNext.ScannerRTHMs != 3000 {
+		t.Fatalf("set settings = %+v, expected %+v, next %+v", ack, va.dataExpected, va.dataNext)
+	}
+	ack, _ = cd.handle(context.Background(), "SetDataSettings", json.RawMessage(`{"expected":{},"settings":{}}`), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckBlocked {
+		t.Fatalf("partial settings accepted: %+v", ack)
+	}
+}
 
 func TestGetVenueSetupResultHasNoSecrets(t *testing.T) {
 	va := &spyVenueAdmin{}

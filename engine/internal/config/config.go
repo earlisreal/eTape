@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -140,12 +141,16 @@ func (u UIHub) Addr() string { return net.JoinHostPort(u.Host, strconv.Itoa(u.Po
 // Scan is the [scan] section: pre-market/RTH rank scanner + on-demand float cache.
 type Scan struct {
 	Enabled        bool    `toml:"enabled"`
-	PremarketMs    int     `toml:"premarket_ms"`     // rank poll interval before 09:30 ET
-	RTHMs          int     `toml:"rth_ms"`           // rank poll interval during RTH
-	RankPages      int     `toml:"rank_pages"`       // pages of <=35 to pull per rank refresh
-	MinChangePct   float64 `toml:"min_change_pct"`   // client-side gainer threshold (%)
-	MaxFloatShares float64 `toml:"max_float_shares"` // float cap in ACTUAL shares (not thousands)
-	MinVolume      int64   `toml:"min_volume"`       // session cumulative volume floor
+	PremarketMs    int     `toml:"premarket_ms"` // rank poll interval before 09:30 ET
+	RTHMs          int     `toml:"rth_ms"`       // rank poll interval during RTH
+	MinChangePct   float64 `toml:"-"`
+	MaxFloatShares float64 `toml:"-"`
+	MinVolume      int64   `toml:"-"`
+	// These legacy inputs remain readable until their defaults have been saved
+	// in the database. Pointers distinguish an omitted key from an explicit 0.
+	LegacyMinChangePct   *float64 `toml:"min_change_pct,omitempty"`
+	LegacyMaxFloatShares *float64 `toml:"max_float_shares,omitempty"`
+	LegacyMinVolume      *int64   `toml:"min_volume,omitempty"`
 }
 
 // News is the [news] section: Qot_GetSearchNews polling plus optional
@@ -158,7 +163,6 @@ type News struct {
 	ScannerRefreshMs int  `toml:"scanner_refresh_ms"`
 	MaxPerReq        int  `toml:"max_per_req"`
 	MaxAgeHours      int  `toml:"max_age_hours"`
-	CatalystMinScore int  `toml:"catalyst_min_score"`
 }
 
 // StockInfo is the [stockinfo] section: Qot_GetSecuritySnapshot (3203) fundamentals
@@ -248,10 +252,10 @@ func Default() Config {
 			OutboundQueue: 4096, MDRateHz: 30, AccountRateHz: 4, PositionMs: 100, TapeSnapshot: 200,
 		},
 		Scan: Scan{
-			Enabled: true, PremarketMs: 1000, RTHMs: 1000, RankPages: 2,
+			Enabled: true, PremarketMs: 1000, RTHMs: 1000,
 			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000,
 		},
-		News:      News{Enabled: true, YahooEnabled: false, WatchMs: 3100, ActiveRefreshMs: 10000, ScannerRefreshMs: 60000, MaxPerReq: 50, MaxAgeHours: 96, CatalystMinScore: 50},
+		News:      News{Enabled: true, YahooEnabled: false, WatchMs: 3100, ActiveRefreshMs: 10000, ScannerRefreshMs: 60000, MaxPerReq: 50, MaxAgeHours: 96},
 		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400, YahooMetadata: true},
 		Watchlist: Watchlist{Enabled: true, PollMs: 3000},
 		Health:    Health{Enabled: true, ProbeMs: 5000},
@@ -272,6 +276,15 @@ func Load(path string) (Config, error) {
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", path, err)
 	}
+	if cfg.Scan.LegacyMinChangePct != nil {
+		cfg.Scan.MinChangePct = *cfg.Scan.LegacyMinChangePct
+	}
+	if cfg.Scan.LegacyMaxFloatShares != nil {
+		cfg.Scan.MaxFloatShares = *cfg.Scan.LegacyMaxFloatShares
+	}
+	if cfg.Scan.LegacyMinVolume != nil {
+		cfg.Scan.MinVolume = *cfg.Scan.LegacyMinVolume
+	}
 	// Older complete configs encoded the former default directly. Migrate only
 	// that known-safe value; other invalid cadence values remain actionable.
 	if cfg.News.WatchMs == 3000 {
@@ -283,8 +296,8 @@ func Load(path string) (Config, error) {
 	if r := cfg.TickRecording; r.RetentionDays < 1 || r.MaxBytes < 2<<20 || r.MinFreeBytes < 1 {
 		return Config{}, fmt.Errorf("config %s: tick_recording requires retention_days >= 1, max_bytes >= 2097152, min_free_bytes >= 1", path)
 	}
-	if n := cfg.News; n.WatchMs < 3100 || n.ActiveRefreshMs < n.WatchMs || n.ScannerRefreshMs < n.WatchMs || n.MaxPerReq < 1 || n.MaxPerReq > 100 || n.MaxAgeHours <= 0 || n.CatalystMinScore < 0 || n.CatalystMinScore > 100 {
-		return Config{}, fmt.Errorf("config %s: news requires watch_ms >= 3100, refresh intervals >= watch_ms, max_per_req 1..100, max_age_hours > 0, and catalyst_min_score 0..100", path)
+	if n := cfg.News; n.WatchMs < 3100 || n.ActiveRefreshMs < n.WatchMs || n.ScannerRefreshMs < n.WatchMs || n.MaxPerReq < 1 || n.MaxPerReq > 100 || n.MaxAgeHours <= 0 {
+		return Config{}, fmt.Errorf("config %s: news requires watch_ms >= 3100, refresh intervals >= watch_ms, max_per_req 1..100, and max_age_hours > 0", path)
 	}
 	return cfg, nil
 }
@@ -382,6 +395,22 @@ func ValidateVenueConfig(vc VenueConfig, credKeys []string) error {
 // Decode→encode loses comments/ordering and any keys unknown to Config; that is
 // the accepted trade-off (Config is the engine's entire config surface).
 func WriteVenueConfig(path string, vc VenueConfig) error {
+	return WriteVenueConfigMigrated(path, vc, nil)
+}
+
+// WriteVenueConfigMigrated removes legacy scanner fields only if the exact
+// values read at boot have already been persisted in the database.
+func WriteVenueConfigMigrated(path string, vc VenueConfig, migrated *Scan) error {
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
+	c.Venues = vc.Venues
+	c.Gate = vc.Gate
+	return writeConfig(path, c, migrated)
+}
+
+func writeConfig(path string, c Config, migrated *Scan) error {
 	if orig, err := os.ReadFile(path); err == nil {
 		bak := path + ".bak"
 		if _, statErr := os.Stat(bak); errors.Is(statErr, os.ErrNotExist) {
@@ -390,12 +419,13 @@ func WriteVenueConfig(path string, vc VenueConfig) error {
 			}
 		}
 	}
-	c, err := Load(path)
-	if err != nil {
-		return err
+	if migrated != nil && reflect.DeepEqual(c.Scan.LegacyMinChangePct, migrated.LegacyMinChangePct) &&
+		reflect.DeepEqual(c.Scan.LegacyMaxFloatShares, migrated.LegacyMaxFloatShares) &&
+		reflect.DeepEqual(c.Scan.LegacyMinVolume, migrated.LegacyMinVolume) {
+		c.Scan.LegacyMinChangePct = nil
+		c.Scan.LegacyMaxFloatShares = nil
+		c.Scan.LegacyMinVolume = nil
 	}
-	c.Venues = vc.Venues
-	c.Gate = vc.Gate
 	var buf strings.Builder
 	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
 		return fmt.Errorf("config: encode: %w", err)
@@ -415,14 +445,10 @@ func WriteVenueConfig(path string, vc VenueConfig) error {
 // Load → mutate → encode → atomicfile.Write). Does NOT validate — the caller
 // (venueadmin) validates the resulting VenueConfig BEFORE calling.
 func WriteMoomooSeed(path string, v *Venue) error {
-	if orig, err := os.ReadFile(path); err == nil {
-		bak := path + ".bak"
-		if _, statErr := os.Stat(bak); errors.Is(statErr, os.ErrNotExist) {
-			if err := atomicfile.Write(bak, orig, 0o644); err != nil {
-				return fmt.Errorf("config: write .bak: %w", err)
-			}
-		}
-	}
+	return WriteMoomooSeedMigrated(path, v, nil)
+}
+
+func WriteMoomooSeedMigrated(path string, v *Venue, migrated *Scan) error {
 	c, err := Load(path)
 	if err != nil {
 		return err
@@ -431,14 +457,7 @@ func WriteMoomooSeed(path string, v *Venue) error {
 	if v != nil {
 		c.Venues = append(c.Venues, *v)
 	}
-	var buf strings.Builder
-	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
-		return fmt.Errorf("config: encode: %w", err)
-	}
-	if err := atomicfile.Write(path, []byte(buf.String()), 0o644); err != nil {
-		return fmt.Errorf("config: write: %w", err)
-	}
-	return nil
+	return writeConfig(path, c, migrated)
 }
 
 // DefaultVenueConfig is the first-run venue seed: one paper "sim" practice

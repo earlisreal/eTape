@@ -312,6 +312,10 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		log.Error("open store", "err", err)
 		return 1, false, nil
 	}
+	scannerDefaults, migratedScan, migrateErr := scannerDefaultsAtBoot(st, cfg.Scan, *demo)
+	if migrateErr != nil {
+		log.Warn("legacy scanner defaults were not migrated; keeping TOML fields", "err", migrateErr)
+	}
 	if cfg.Store.RetentionDays > 0 {
 		cutoff := bars10sRetentionCutoff(time.Now(), cfg.Store.RetentionDays)
 		rows, pruneErr := st.PruneBars10sBefore(cutoff)
@@ -555,7 +559,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	}
 
 	// --- uihub (listening BEFORE OpenD is dialed) ---
-	venueAdm := venueadmin.New(*cfgPath, creds.DefaultPath(), config.VenueConfig{Venues: cfg.Venues, Gate: cfg.Gate})
+	venueAdm := venueadmin.New(*cfgPath, creds.DefaultPath(), config.VenueConfig{Venues: cfg.Venues, Gate: cfg.Gate}, cfg.DataSettings(), migratedScan)
 	venueProbe := venueprobe.New(creds.DefaultPath(), cfg.OpenD.Addr(), uihubClk)
 	var volumeProfiles *tickstore.ProfileReader
 	if !*demo {
@@ -883,7 +887,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			}()
 		})
 	}
-	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, accountPoller, firstAlpacaAssetReader(vbs), backfillOne, scannerHistoryFetch, !*demo, &scanWG)
+	startPollers(ctx, cfg, scannerDefaults, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, accountPoller, firstAlpacaAssetReader(vbs), backfillOne, scannerHistoryFetch, !*demo, &scanWG)
 	mode := "live"
 	if *demo {
 		mode = "demo"
@@ -1390,10 +1394,10 @@ func scannerRELVolFetcher(client *histalpaca.Client, feedName string, demo bool)
 	return client.ScannerDailyBars
 }
 
-func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, accountHealth health.AccountHealthSource, assetReader stockInfoAssetReader, backfillOne func(context.Context, string), relativeVolumeFetch func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error), startQuota bool, scanWG *sync.WaitGroup) {
+func startPollers(ctx context.Context, cfg config.Config, defaults wsmsg.ScannerFilters, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, accountHealth health.AccountHealthSource, assetReader stockInfoAssetReader, backfillOne func(context.Context, string), relativeVolumeFetch func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error), startQuota bool, scanWG *sync.WaitGroup) {
 	ssrResolver := ssr.New(st)
 	scanPoller := scan.New(cfg.Scan, r, hub, clk, demand, backfillOne, relativeVolumeFetch, ssrResolver)
-	_ = scanPoller.SetFilters(restoreScannerFilters(st, scan.Defaults(cfg.Scan)))
+	_ = scanPoller.SetFilters(restoreScannerFilters(st, defaults))
 	hub.SetScanner(scanPoller)
 	newsPlan := func() news.SymbolPlan { return newsSymbolPlan(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols()) }
 	symbols := func() []string { return newsPlan().All() }

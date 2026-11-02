@@ -355,6 +355,22 @@ describe("VenuesSection — TradeZero card", () => {
 });
 
 describe("VenuesSection — legacy overflow (launch blocker)", () => {
+  it("preserves a moomoo paper venue when saving alongside a live venue", async () => {
+    const paper: Venue = { id: "moomoo-paper", broker: "moomoo", env: "paper", credentials: "", accountId: "3001", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 };
+    const live: Venue = { ...paper, id: "moomoo-live", env: "live", accountId: "3002" };
+    const cfg = { ...runningConfig, venues: [...runningConfig.venues, paper, live] };
+    const commands = makeCommands([baseSetup({ file: cfg, running: cfg })]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("moomoo-account").textContent).toBe("3002"));
+    expect(screen.getByTestId("other-venue-2").textContent).toContain("PAPER");
+    fireEvent.click(screen.getByTestId("save-venues"));
+    await waitFor(() => expect(commands.sent.some((s) => s.name === "SetVenueSetup")).toBe(true));
+    const args = commands.sent.find((s) => s.name === "SetVenueSetup")!.args as { venues: Venue[]; gate: Gate };
+    expect(args.venues.find((v) => v.id === paper.id)).toEqual(paper);
+    expect(args.venues.find((v) => v.id === live.id)).toEqual(live);
+    expect(args.gate.venue[paper.id]).toBeUndefined();
+  });
+
   it("claims the first venue per (broker, env) slot and renders extra venues read-only in Other venues, round-tripping them byte-for-byte on Save", async () => {
     const firstSim: Venue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 100000, slippageBps: 0, fillLatencyMs: 0 };
     const legacyTz2: Venue = { id: "tz-backup", broker: "tradezero", env: "paper", credentials: "tz-backup-cred", accountId: "9999", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 };
@@ -605,13 +621,13 @@ describe("VenuesSection — save mechanics", () => {
     wrap(commands);
     await waitFor(() => expect(screen.getByTestId("tz-limits-toggle")).toBeTruthy());
 
-    expect(screen.queryByLabelText("maxOrderValue")).toBeNull();
+    expect(screen.queryByLabelText("Max order value ($)")).toBeNull();
     expect(screen.getByTestId("tz-limits-toggle").textContent).toContain("Risk limits · 1 set");
 
     fireEvent.click(screen.getByTestId("tz-limits-toggle"));
-    expect((screen.getByLabelText("maxOrderValue") as HTMLInputElement).value).toBe("1000");
+    expect((screen.getByLabelText("Max order value ($)") as HTMLInputElement).value).toBe("1000");
     fireEvent.click(screen.getByTestId("tz-limits-toggle"));
-    expect(screen.queryByLabelText("maxOrderValue")).toBeNull();
+    expect(screen.queryByLabelText("Max order value ($)")).toBeNull();
   });
 });
 

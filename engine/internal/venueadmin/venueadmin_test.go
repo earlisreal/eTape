@@ -16,7 +16,7 @@ func setup(t *testing.T) (*Admin, string, string) {
 	_ = os.WriteFile(cfgPath, []byte("[md]\nsession_anchor = \"09:30\"\n"), 0o644)
 	_ = os.WriteFile(credsPath, []byte(`{"alpaca":{"keyId":"K","secretKey":"S"}}`), 0o600)
 	booted := config.VenueConfig{Venues: []config.Venue{{ID: "boot", Broker: "sim", Env: "paper"}}}
-	return New(cfgPath, credsPath, booted), cfgPath, credsPath
+	return New(cfgPath, credsPath, booted, config.Default().DataSettings(), nil), cfgPath, credsPath
 }
 
 func TestSetVenueSetupValidatesBeforeWriting(t *testing.T) {
@@ -41,6 +41,29 @@ func TestSetVenueSetupWritesValid(t *testing.T) {
 	got, _ := config.ReadVenueConfig(cfgPath)
 	if len(got.Venues) != 1 || got.Venues[0].ID != "alpaca-paper" {
 		t.Fatalf("not written: %+v", got.Venues)
+	}
+}
+
+func TestConcurrentVenueAndDataSavesPreserveBoth(t *testing.T) {
+	a, cfgPath, _ := setup(t)
+	expected, _, err := a.GetDataSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := expected
+	next.IntradayDays = 2
+	venue := config.VenueConfig{Venues: []config.Venue{{ID: "sim", Broker: "sim", Env: "paper"}}}
+	errs := make(chan error, 2)
+	go func() { errs <- a.SetDataSettings(expected, next) }()
+	go func() { errs <- a.SetVenueSetup(venue) }()
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil || got.Backfill.IntradayDays != 2 || len(got.Venues) != 1 || got.Venues[0].ID != "sim" {
+		t.Fatalf("concurrent saves lost data: %+v, err %v", got, err)
 	}
 }
 

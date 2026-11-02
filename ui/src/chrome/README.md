@@ -8,6 +8,11 @@ Orders & hotkeys discards unsaved template edits. Imports ask for confirmation
 in a nested dialog; dismissing it leaves Settings open. New Window renames
 workspaces inline and uses the shared two-click delete confirmation.
 
+Data & storage edits bootstrap settings with an explicit Save and restart;
+stale file snapshots are rejected and can be reloaded. Demo saves the live
+config but continues using demo defaults. The live moomoo card never claims a
+paper venue, which remains in Other venues with its existing gate state.
+
 App dialogs and chart settings share the workspace light/dark palette, typography,
 buttons, focus rings, and backdrop. Outside clicks and Escape dismiss the current
 surface; modal focus returns to its opener. Pending alert/trail saves and demo

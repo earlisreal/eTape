@@ -302,6 +302,13 @@ cap and a 2 GiB free-disk reserve; heavy traffic can retain much less history.
 See [archive operation and backup guidance](engine/internal/tickstore/README.md)
 and [bootstrap settings](engine/internal/config/README.md). `-demo` is excluded.
 
+**Settings → Data & storage** configures chart-history windows, scanner refresh,
+the experimental Yahoo headline supplement, tick recording limits, 10-second
+bar retention, the OpenD address, and eTape's subscription budget. Save changes
+and explicitly restart the engine to apply them. Demo uses its own built-in
+runtime defaults; edits there apply on the next live-mode launch. Reducing
+retention can remove older data; a longer chart window cannot restore pruned bars.
+
 Chart-history limits are calendar spans. The default 10-second limit keeps the
 current trading cycle only, beginning at the latest NYSE close/post-market start.
 `intraday_days` applies to focused charts and generic scanner/watch archive warming;

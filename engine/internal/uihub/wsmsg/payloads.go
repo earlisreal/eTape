@@ -941,6 +941,34 @@ type SetVenueSetupArgs struct {
 	Gate   Gate    `json:"gate"`
 }
 
+// DataSettings is the file-backed market data and storage settings subset.
+type DataSettings struct {
+	OpenDHost              string `json:"openDHost"`
+	OpenDPort              int    `json:"openDPort"`
+	QuotaSlots             int    `json:"quotaSlots"`
+	ScannerPremarketMs     int    `json:"scannerPremarketMs"`
+	ScannerRTHMs           int    `json:"scannerRTHMs"`
+	YahooNews              bool   `json:"yahooNews"`
+	TenSecondDays          int    `json:"tenSecondDays"`
+	IntradayDays           int    `json:"intradayDays"`
+	DailyYears             int    `json:"dailyYears"`
+	BarRetentionDays       int    `json:"barRetentionDays"`
+	RecordingEnabled       bool   `json:"recordingEnabled"`
+	RecordingRetentionDays int    `json:"recordingRetentionDays"`
+	RecordingMaxBytes      int64  `json:"recordingMaxBytes"`
+	RecordingMinFreeBytes  int64  `json:"recordingMinFreeBytes"`
+}
+
+type DataSettingsSetup struct {
+	File    DataSettings `json:"file"`
+	Running DataSettings `json:"running"`
+}
+
+type SetDataSettingsArgs struct {
+	Expected DataSettings `json:"expected"`
+	Settings DataSettings `json:"settings"`
+}
+
 type PutCredentialArgs struct {
 	Name      string `json:"name"`
 	KeyID     string `json:"keyId"`

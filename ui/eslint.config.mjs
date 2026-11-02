@@ -1,7 +1,7 @@
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules", "src/gen"] },
+  { ignores: ["dist", "node_modules", "src/gen", "e2e/.report"] },
   ...tseslint.configs.recommended,
   {
     languageOptions: {

@@ -12,36 +12,50 @@ async function gotoAndApplyPreset(page: Page, workspace: string, presetName: "Tr
 }
 
 test.describe("settings redesign", () => {
+  test("data settings save and reopen in the isolated demo config", async ({ page }) => {
+    await page.goto("/?workspace=e2e-settings-data");
+    await expect(page.getByTestId("latency-readout")).toBeVisible({ timeout: 15_000 });
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Data & storage", exact: true }).click();
+    const rth = page.getByLabel("Regular-session refresh (seconds)");
+    const yahoo = page.getByLabel("Use experimental Yahoo headline supplement");
+    await expect(rth).toHaveValue("1");
+    await page.screenshot({ path: test.info().outputPath("data-settings.png"), animations: "disabled" });
+    await rth.fill("2.5");
+    await yahoo.check();
+    await page.getByRole("button", { name: "Save data settings" }).click();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+    await expect(page.getByText(/Changes apply the next time live mode starts/)).toBeVisible();
+    await page.getByRole("button", { name: "Close settings" }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Data & storage", exact: true }).click();
+    await expect(rth).toHaveValue("2.5");
+    await expect(yahoo).toBeChecked();
+    await rth.fill("1");
+    await yahoo.uncheck();
+    await page.getByRole("button", { name: "Save data settings" }).click();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+  });
+
   test("orders: a template's size edit round-trips and changes the fired order qty", async ({ page }) => {
     await gotoAndApplyPreset(page, "e2e-settings-orders", "Trading");
     await expect(page.getByTestId("acct-equity")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("boot-status-banner")).toHaveCount(0, { timeout: 15_000 });
+    await page.getByTestId("venue").selectOption("sim-paper");
 
-    // Applying a preset never seeds the shared LinkGroups focus — each blue
-    // panel's displayed "AAPL" is a purely local creation-time fallback
-    // (PanelFrame's `rawSymbol = symbol ?? config.settings.symbol`), and the
-    // group's shared focus stays unset until a real type-to-load commit
-    // (verified by reading PanelFrame.tsx/linkGroups.ts: nothing calls
-    // linkGroups.focus/hydrate from applyPreset). useHotkeys.ts has no such
-    // local fallback — it reads only linkGroups.symbolFor(group) — so without
-    // an explicit commit here, Ctrl+1 below would resolve an empty symbol and
-    // silently no-op with a "no venue/quote for hotkey" toast, even though the
-    // ticket/DOM/tape already display a live AAPL quote. Mirrors smoke.spec.ts's
-    // "link groups" test. Round-trips through a decoy symbol (US.MSFT —
-    // accepted by the engine's FocusGroup probe, a no-op in demo mode since
-    // there's no live feed to validate against; never actually traded) so each
-    // commit produces an observable header-text change to wait on: typing
-    // "AAPL" while the header already reads "AAPL" would give Playwright
-    // nothing to poll, racing the async FocusGroup ack.
+    // A preset starts without a focused symbol. Set a demo-feed symbol so the
+    // linked ticket and hotkey both have a real quote.
     const domHeader = page.locator(".ledger-header", { hasText: "DOM Ladder" });
-    const domPanel = domHeader.locator("xpath=..");
+    const domPanel = page.getByRole("region", { name: "ladder", exact: true });
     await domPanel.getByTestId("panel-body").click();
-    await expect(domPanel).toHaveClass(/panel-focused/);
-    await page.keyboard.type("MSFT");
+    await expect(domPanel.locator(".panel-focused")).toHaveCount(1);
+    await page.keyboard.type("ECLP");
     await page.keyboard.press("Enter");
-    await expect(domHeader.getByTestId("panel-symbol")).toHaveText("MSFT", { timeout: 10_000 });
-    await page.keyboard.type("AAPL");
+    await expect(domHeader.getByTestId("panel-symbol")).toHaveText("ECLP", { timeout: 10_000 });
+    await page.keyboard.type("DRGO");
     await page.keyboard.press("Enter");
-    await expect(domHeader.getByTestId("panel-symbol")).toHaveText("AAPL", { timeout: 10_000 });
+    await expect(domHeader.getByTestId("panel-symbol")).toHaveText("DRGO", { timeout: 10_000 });
+    await expect(page.getByTestId("hotkey-target-cue")).toHaveAttribute("data-state", "ready");
 
     // Arm the master switch (same as smoke.spec's paper-fill test) — the hotkey
     // engine (useHotkeys.ts) refuses to fire while disarmed. Per-venue arm was
@@ -57,38 +71,38 @@ test.describe("settings redesign", () => {
     await page.getByTestId("add-template").click();
     await page.getByTestId("add-place").click();
     await page.getByLabel("size-mode-tmpl-1-1").selectOption("Dollar");
-    await page.getByLabel("size-value-tmpl-1-1").fill("5000");
+    await page.getByLabel("size-value-tmpl-1-1", { exact: true }).fill("5000");
     await page.getByTestId("tmpl-hotkey-tmpl-1-1").click();
     await page.keyboard.press("Control+1");
     await expect(page.getByTestId("tmpl-hotkey-tmpl-1-1")).toHaveValue("Ctrl+1");
     await page.getByTestId("save").click();
     await page.mouse.click(5, 5); // click the modal backdrop to close (SettingsModal has no Escape handler)
 
-    // addPlace's own defaults (side BUY, type LIMIT, tif DAY, priceSource Ask,
-    // priceOffset 0 — see OrderSettingsSection.tsx) already match the old
-    // "Buy $5k" template, so the fired qty is floor(dollarAmount / ask). Read
-    // the ticket's own ask readout (OrderTicketPanel's `ask` testid) to compute
-    // the expected qty independently of this test rather than guessing a price.
+    // Wait for a positive quote before firing the simulated order.
     const askLocator = page.getByTestId("ask");
-    await expect(askLocator).not.toHaveText("—", { timeout: 15_000 });
-    const ask = Number(await askLocator.innerText());
-    expect(ask).toBeGreaterThan(0);
-
-    const qtyAt5k = Math.floor(5000 / ask);
-    const qtyAt7k = Math.floor(7000 / ask);
-    expect(qtyAt7k).not.toBe(qtyAt5k); // sanity: the edit below must actually move the fired size
+    await expect.poll(async () => Number(await askLocator.innerText()), { timeout: 15_000 }).toBeGreaterThan(0);
+    const buyToast = page.getByRole("alert").filter({ hasText: /^BUY [\d,]+ DRGO @/ });
+    const sizeAndPrice = (text: string) => {
+      const match = /^BUY ([\d,]+) DRGO @ ([\d.]+)/.exec(text);
+      if (!match) throw new Error(`Unexpected order toast: ${text}`);
+      return { qty: Number(match[1].replaceAll(",", "")), price: Number(match[2]) };
+    };
 
     // Fire the newly-bound template and capture its flash toast (pushed by
     // OrderCommands.submit in commands.ts, rendered as a role="alert" Toast).
     await page.locator("body").click(); // ensure document focus; useHotkeys bails if !document.hasFocus()
     await page.keyboard.press("Control+1");
-    await expect(page.getByText(new RegExp(`^BUY ${qtyAt5k.toLocaleString("en-US")} AAPL @`))).toBeVisible({ timeout: 10_000 });
+    await expect(buyToast).toBeVisible({ timeout: 10_000 });
+    const first = sizeAndPrice(await buyToast.innerText());
+    expect(first.qty * first.price).toBeGreaterThan(4980);
+    expect(first.qty * first.price).toBeLessThanOrEqual(5020);
+    await buyToast.click(); // dismiss before the second order's toast
 
     // Edit the template's dollar amount via the order ticket's own gear, which
     // (OpenSettingsContext.openOrderSettings) jumps straight to the "Orders &
     // hotkeys" settings section — no need to navigate the modal's nav tabs.
     await page.getByTestId("open-settings").click();
-    await page.getByLabel("size-value-tmpl-1-1").fill("7000");
+    await page.getByLabel("size-value-tmpl-1-1", { exact: true }).fill("7000");
     await page.getByTestId("save").click();
     await page.mouse.click(5, 5); // click the modal backdrop to close (SettingsModal has no Escape handler)
 
@@ -97,7 +111,11 @@ test.describe("settings redesign", () => {
     // UI -> SetConfig("orderConfig") -> shared OrderConfigProvider context ->
     // useHotkeys reads the same config -> resolvePlaceTemplate recomputes size.
     await page.keyboard.press("Control+1");
-    await expect(page.getByText(new RegExp(`^BUY ${qtyAt7k.toLocaleString("en-US")} AAPL @`))).toBeVisible({ timeout: 10_000 });
+    await expect(buyToast).toBeVisible({ timeout: 10_000 });
+    const second = sizeAndPrice(await buyToast.innerText());
+    expect(second.qty).toBeGreaterThan(first.qty);
+    expect(second.qty * second.price).toBeGreaterThan(6980);
+    expect(second.qty * second.price).toBeLessThanOrEqual(7020);
 
     // Cleanup: the orderConfig key and arm state are engine-side (shared across
     // every spec file in one `npm run e2e` run, since webServer boots ONE engine
@@ -110,7 +128,7 @@ test.describe("settings redesign", () => {
     // holding a stray template or an already-armed gate.
     await page.getByTestId("open-settings").click();
     await page.getByTestId("reset-defaults").click();
-    await page.getByTestId("reset-confirm").click();
+    await page.getByTestId("reset-defaults").click();
     await page.getByTestId("save").click();
     await page.mouse.click(5, 5);
     await page.getByTestId("arm-chip").click();
@@ -152,11 +170,10 @@ test.describe("settings redesign", () => {
     await expect(page.getByTestId("sim-startingbalance")).toBeVisible();
     await expect(page.getByTestId("other-venues")).toHaveCount(0);
 
-    // No OpenD reachable in this demo-mode boot (venueseed itself isn't
-    // constructed on a demo boot) — the moomoo card sits in
-    // its deterministic pre-venue "waiting" state with no probe button.
+    // The demo health feed reports a synthetic connection, but no moomoo venue
+    // exists and the live auto-config seeder is not started.
     await expect(page.getByTestId("moomoo-body")).toContainText(/waiting for opend/i);
-    await expect(page.getByTestId("moomoo-probe")).toHaveCount(0);
+    await expect(page.getByTestId("moomoo-probe")).toBeVisible();
 
     // Client-side validation still blocks Save on a partially-typed key,
     // without any network round trip.

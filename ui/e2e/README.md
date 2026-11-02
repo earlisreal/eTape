@@ -1,5 +1,9 @@
 # End-to-End Tests
 
+`settings-redesign.spec.ts` covers the data-settings save/reopen path against
+the demo engine. `serve.mjs` creates a temporary config so Settings tests do
+not write the user's `~/.eTape/config.toml`.
+
 `alert-navigation.spec.ts` injects synthetic alerts into the isolated demo
 transport. It checks required panel colors, keyboard symbol activation, real
 cross-window Link Group delivery, live panel color changes, and source fallback

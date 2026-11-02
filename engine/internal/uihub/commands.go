@@ -61,6 +61,8 @@ type demandCtl interface {
 type venueAdmin interface {
 	GetVenueSetup() (file, running config.VenueConfig, credKeys []string, moomooAttempted bool, err error)
 	SetVenueSetup(vc config.VenueConfig) error
+	GetDataSettings() (file, running config.DataSettings, err error)
+	SetDataSettings(expected, next config.DataSettings) error
 	PutCredential(name, keyID, secretKey string) error
 	DeleteCredential(name string) error
 }
@@ -607,6 +609,23 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked(err.Error()), false
 		}
 		return wsmsg.AckMsg{Status: "accepted"}, false
+	case "GetDataSettings":
+		file, running, err := cd.va.GetDataSettings()
+		if err != nil {
+			return blocked("settings read error"), false
+		}
+		return wsmsg.AckMsg{Status: "accepted", Value: wsmsg.DataSettingsSetup{
+			File: wsmsg.DataSettings(file), Running: wsmsg.DataSettings(running),
+		}}, false
+	case "SetDataSettings":
+		var a wsmsg.SetDataSettingsArgs
+		if err := json.Unmarshal(args, &a); err != nil || !completeDataSettingsArgs(args) {
+			return blocked("bad args"), false
+		}
+		if err := cd.va.SetDataSettings(config.DataSettings(a.Expected), config.DataSettings(a.Settings)); err != nil {
+			return blocked(err.Error()), false
+		}
+		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "PutCredential":
 		var a wsmsg.PutCredentialArgs
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -659,6 +678,25 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 	default:
 		return blocked("unknown command: " + name), false
 	}
+}
+
+func completeDataSettingsArgs(raw json.RawMessage) bool {
+	var args struct {
+		Expected map[string]json.RawMessage `json:"expected"`
+		Settings map[string]json.RawMessage `json:"settings"`
+	}
+	if json.Unmarshal(raw, &args) != nil {
+		return false
+	}
+	for _, fields := range []map[string]json.RawMessage{args.Expected, args.Settings} {
+		for _, key := range []string{"openDHost", "openDPort", "quotaSlots", "scannerPremarketMs", "scannerRTHMs", "yahooNews", "tenSecondDays", "intradayDays", "dailyYears", "barRetentionDays", "recordingEnabled", "recordingRetentionDays", "recordingMaxBytes", "recordingMinFreeBytes"} {
+			value, ok := fields[key]
+			if !ok || string(value) == "null" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // probe validates a symbol exists; returns "" to accept, else a block reason.

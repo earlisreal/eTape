@@ -20,14 +20,16 @@ import (
 // and tear the file. An in-process mutex is sufficient: singleinstance.Acquire
 // already guarantees one live engine per store.
 type Admin struct {
-	mu        sync.Mutex
-	cfgPath   string
-	credsPath string
-	booted    config.VenueConfig
+	mu           sync.Mutex
+	cfgPath      string
+	credsPath    string
+	booted       config.VenueConfig
+	bootedData   config.DataSettings
+	migratedScan *config.Scan
 }
 
-func New(cfgPath, credsPath string, booted config.VenueConfig) *Admin {
-	return &Admin{cfgPath: cfgPath, credsPath: credsPath, booted: booted}
+func New(cfgPath, credsPath string, booted config.VenueConfig, bootedData config.DataSettings, migratedScan *config.Scan) *Admin {
+	return &Admin{cfgPath: cfgPath, credsPath: credsPath, booted: booted, bootedData: bootedData, migratedScan: migratedScan}
 }
 
 // GetVenueSetup returns the file state (parsed fresh), the running state (what
@@ -60,7 +62,23 @@ func (a *Admin) SetVenueSetup(vc config.VenueConfig) error {
 	if err := config.ValidateVenueConfig(vc, keys); err != nil {
 		return err
 	}
-	return config.WriteVenueConfig(a.cfgPath, vc)
+	return config.WriteVenueConfigMigrated(a.cfgPath, vc, a.migratedScan)
+}
+
+func (a *Admin) GetDataSettings() (file, running config.DataSettings, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	c, err := config.Load(a.cfgPath)
+	if err != nil {
+		return config.DataSettings{}, config.DataSettings{}, err
+	}
+	return c.DataSettings(), a.bootedData, nil
+}
+
+func (a *Admin) SetDataSettings(expected, next config.DataSettings) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return config.WriteDataSettings(a.cfgPath, expected, next, a.migratedScan)
 }
 
 func (a *Admin) PutCredential(name, keyID, secretKey string) error {
@@ -124,7 +142,7 @@ func (a *Admin) MarkMoomooSeedAttempted() error {
 	if attempted {
 		return nil
 	}
-	return config.WriteMoomooSeed(a.cfgPath, nil)
+	return config.WriteMoomooSeedMigrated(a.cfgPath, nil, a.migratedScan)
 }
 
 // SeedMoomooVenue appends {ID: "moomoo", Broker: "moomoo", Env: "live",
@@ -147,7 +165,7 @@ func (a *Admin) SeedMoomooVenue(accID uint64) (created bool, err error) {
 	}
 	if venueExists {
 		// Marker is unset (checked above) — always write it here.
-		return false, config.WriteMoomooSeed(a.cfgPath, nil)
+		return false, config.WriteMoomooSeedMigrated(a.cfgPath, nil, a.migratedScan)
 	}
 
 	file, err := config.ReadVenueConfig(a.cfgPath)
@@ -169,7 +187,7 @@ func (a *Admin) SeedMoomooVenue(accID uint64) (created bool, err error) {
 	if err := config.ValidateVenueConfig(newVC, keys); err != nil {
 		return false, err
 	}
-	if err := config.WriteMoomooSeed(a.cfgPath, &v); err != nil {
+	if err := config.WriteMoomooSeedMigrated(a.cfgPath, &v, a.migratedScan); err != nil {
 		return false, err
 	}
 	return true, nil

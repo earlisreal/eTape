@@ -334,32 +334,33 @@ func (p *Poller) Run(ctx context.Context) error {
 	} else {
 		slog.Debug("scan: REL VOL unavailable", "reason", "no SIP history fetcher")
 	}
-	// Poll on a short base interval; the effective cadence is session-derived.
-	base := p.clk.NewTicker(time.Duration(p.cfg.PremarketMs) * time.Millisecond)
-	defer base.Stop()
-	var last time.Time
+	premarketMs, rthMs := p.cfg.PremarketMs, p.cfg.RTHMs
+	if premarketMs <= 0 {
+		premarketMs = 1000
+	}
+	if rthMs <= 0 {
+		rthMs = premarketMs
+	}
+	premarket := p.clk.NewTicker(time.Duration(premarketMs) * time.Millisecond)
+	rth := p.clk.NewTicker(time.Duration(rthMs) * time.Millisecond)
+	defer premarket.Stop()
+	defer rth.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case now := <-base.C():
-			interval := p.pollInterval(now)
-			if now.Sub(last) < interval {
-				continue
+		case now := <-premarket.C():
+			if session.PhaseAt(now) != session.RTH {
+				p.pollOnce(ctx, now)
 			}
-			last = now
-			p.pollOnce(ctx, now)
+		case now := <-rth.C():
+			if session.PhaseAt(now) == session.RTH {
+				p.pollOnce(ctx, now)
+			}
 		case <-p.poke:
 			p.pollOnce(ctx, p.clk.Now())
 		}
 	}
-}
-
-func (p *Poller) pollInterval(now time.Time) time.Duration {
-	if session.PhaseAt(now) == session.RTH {
-		return time.Duration(p.cfg.RTHMs) * time.Millisecond
-	}
-	return time.Duration(p.cfg.PremarketMs) * time.Millisecond
 }
 
 // sessionKey maps a session phase to the scanner.rank message key. Closed

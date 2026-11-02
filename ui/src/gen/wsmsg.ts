@@ -990,6 +990,33 @@ export interface SetVenueSetupArgs {
   venues: Venue[];
   gate: Gate;
 }
+/**
+ * DataSettings is the file-backed market data and storage settings subset.
+ */
+export interface DataSettings {
+  openDHost: string;
+  openDPort: number /* int */;
+  quotaSlots: number /* int */;
+  scannerPremarketMs: number /* int */;
+  scannerRTHMs: number /* int */;
+  yahooNews: boolean;
+  tenSecondDays: number /* int */;
+  intradayDays: number /* int */;
+  dailyYears: number /* int */;
+  barRetentionDays: number /* int */;
+  recordingEnabled: boolean;
+  recordingRetentionDays: number /* int */;
+  recordingMaxBytes: number /* int64 */;
+  recordingMinFreeBytes: number /* int64 */;
+}
+export interface DataSettingsSetup {
+  file: DataSettings;
+  running: DataSettings;
+}
+export interface SetDataSettingsArgs {
+  expected: DataSettings;
+  settings: DataSettings;
+}
 export interface PutCredentialArgs {
   name: string;
   keyId: string;
