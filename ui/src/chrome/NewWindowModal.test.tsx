@@ -43,7 +43,7 @@ describe("NewWindowModal", () => {
     expect(open).toHaveBeenCalledWith(expect.stringContaining("workspace=monitoring"), "etape-workspace-monitoring", expect.stringContaining("popup=yes,width="));
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Desk" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Desk" }));
     expect(open).toHaveBeenCalledWith(expect.stringContaining("workspace=desk"), "etape-workspace-desk", expect.stringContaining("popup=yes,width="));
     expect(onClose).toHaveBeenCalledTimes(2);
   });
