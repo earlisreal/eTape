@@ -7,6 +7,7 @@ import { ChartConditionalOrderEntry } from "../../src/chrome/panels/tv/ChartCond
 import { BarCloseTimer } from "../../src/chrome/panels/tv/BarCloseTimer";
 import { OrderConfigProvider, useOrderConfig } from "../../src/chrome/exec/useOrderConfig";
 import { ThemeProvider, useTheme } from "../../src/chrome/ThemeProvider";
+import { ChartPreferencesProvider } from "../../src/chrome/ChartPreferencesProvider";
 import { initiateChartRiskEntry } from "../../src/chrome/exec/actionTemplate";
 import { getTvChrome } from "../../src/render/chart/tvTheme";
 import { ToastProvider } from "../../src/chrome/Toast";
@@ -204,6 +205,16 @@ function ConfigReadyProbe() {
       }, startRisk() {
         stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { ...stores.exec.accounts()[0], tsMs: Date.now() } });
         return initiateChartRiskEntry(riskTemplate);
+      }, protectPosition(stopPrice) {
+        const common = { venue: "sim", symbol: "US.AAPL", type: "STOP_LIMIT", tif: "DAY", session: "EXTENDED", rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, avgFillPrice: 0 };
+        stores.exec.apply({ kind: "snapshot", topic: "exec.positions", payload: [{ venue: "sim", symbol: "US.AAPL", qty: 100, avgPrice: stopPrice + .1 }] });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [
+          { ...common, id: "risk-original", side: "BUY", qty: 100, executedQty: 100, leavesQty: 0, limitPrice: stopPrice + .1, stopPrice: stopPrice + .1, status: "FILLED",
+            held: { phase: "WORKING", childClientId: "risk-original", deadlineMs: Date.now() + 3600000 },
+            riskEntry: { stopId: "risk-shared", budget: 100, mode: "Dollar", buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } } },
+          { ...common, id: "risk-shared", side: "SELL", qty: 100, executedQty: 0, leavesQty: 100, limitPrice: stopPrice, stopPrice, status: "SUBMITTED", riskEntryId: "risk-original",
+            held: { phase: "ARMED", deadlineMs: Date.now() + 3600000 } },
+        ] });
       } };
     if (loaded) setTimeout(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
       seq: 1, ts: new Date().toISOString(), kind: "chart-ready", detail: "US.AAPL",
@@ -222,11 +233,11 @@ function ProductionChartPanel() {
   const demandRegistry = { ensure: async () => ({ kind: "ack", corrId: "demand", status: "accepted" }), release() {} };
   const panelApi = { isActive: true, onDidActiveChange: () => ({ dispose() {} }) };
   return <div data-testid="panel-shell" style={{ position: "absolute", left: 80, top: 100, width: axisFlicker ? 554 : 760, height: axisFlicker ? 436 : 560 }}>
-    <ThemeProvider><ToastProvider><OrderConfigProvider commands={{ sendCommand }}>
+    <ThemeProvider><ToastProvider><ChartPreferencesProvider><OrderConfigProvider commands={{ sendCommand }}>
       <ConfigReadyProbe />
       <PanelFrame config={chartConfig} stores={stores} scheduler={scheduler} linkGroups={linkGroups} demandRegistry={demandRegistry}
         commands={{ sendCommand, sendQuery }} onConfigChange={() => {}} onGroupChange={() => {}} onClose={() => {}} api={panelApi} />
-    </OrderConfigProvider></ToastProvider></ThemeProvider>
+    </OrderConfigProvider></ChartPreferencesProvider></ToastProvider></ThemeProvider>
   </div>;
 }
 

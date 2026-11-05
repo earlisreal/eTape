@@ -32,12 +32,12 @@ func (protectionCheckResult) isBrokerEvent() {}
 func (c *Core) confirmFlatRiskEntries(v VenueID, symbol string) error {
 	vs := c.state.Venue(v)
 	for _, entry := range vs.Orders {
-		if entry.RiskEntry == nil || entry.ExecutedQty <= entry.RiskEntry.FlatConfirmedQty ||
+		if entry.RiskEntry == nil || entry.RiskEntry.SharedEntryID != "" || c.riskFilledQty(entry) <= entry.RiskEntry.FlatConfirmedQty ||
 			(symbol != "" && entry.Symbol != symbol) || vs.Positions[entry.Symbol].Qty > 0 {
 			continue
 		}
 		risk := *entry.RiskEntry
-		risk.FlatConfirmedQty = entry.ExecutedQty
+		risk.FlatConfirmedQty = c.riskFilledQty(entry)
 		if err := c.persistRisk(entry, risk); err != nil {
 			return err
 		}
@@ -61,7 +61,7 @@ func (c *Core) protectionProblems(v VenueID) map[string]string {
 	latest := make(map[string]Order)
 	for _, entry := range vs.Orders {
 		risk := entry.RiskEntry
-		if risk == nil || entry.ExecutedQty <= risk.FlatConfirmedQty || entry.ExecutedQty-exited[entry.ID] <= 1e-9 {
+		if risk == nil || risk.SharedEntryID != "" || c.riskFilledQty(entry) <= risk.FlatConfirmedQty || c.riskFilledQty(entry)-exited[entry.ID] <= 1e-9 {
 			continue
 		}
 		stop := vs.Orders[risk.StopID]

@@ -8,6 +8,7 @@ Approved, implementation pending:
 
 Implemented:
 
+- [Chart Risk Entry position adds](2026-11-05-chart-risk-position-adds.md)
 - [Volume Overlap](2026-11-03-volume-overlap.md)
 - [Alert and Watchlist symbol navigation](2026-10-21-alert-panel-symbol-navigation.md)
 - [Protective-stop spike filtering](2026-10-20-protective-stop-spike-filter.md)

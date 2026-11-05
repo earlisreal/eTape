@@ -9,7 +9,7 @@ import { initiateChartRiskEntry, type RiskEntryTemplate } from "../../exec/actio
 import { ChartRiskEntry } from "./ChartRiskEntry";
 import { ThemeProvider } from "../../ThemeProvider";
 import { ToastProvider } from "../../Toast";
-import type { AckMsg, StopLimitRoutePreview } from "../../../wire/contract";
+import type { AckMsg, Order, StopLimitRoutePreview } from "../../../wire/contract";
 const template: RiskEntryTemplate = { kind: "risk", id: "r", label: "Risk", mode: "Dollar", value: 100, buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
 function mount(auto = false, preset = template) {
     const stores = makeStores();
@@ -46,6 +46,70 @@ function placeRiskPair(host: HTMLElement, gesture: "drag" | "click" = "drag") {
         fireEvent.pointerUp(window, { pointerId: 1 });
     }
 }
+
+function protectedPosition(stores: ReturnType<typeof makeStores>, price = 9.5) {
+    const entry: Order = { venue: "sim", id: "original", symbol: "AAPL", side: "BUY", type: "STOP_LIMIT", tif: "DAY", session: "EXTENDED",
+        qty: 100, executedQty: 100, leavesQty: 0, avgFillPrice: 10, limitPrice: 10, stopPrice: 10, status: "FILLED", rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1,
+        held: { phase: "WORKING", childClientId: "original", deadlineMs: Date.now() + 100000 },
+        riskEntry: { stopId: "shared", budget: 50, mode: "Dollar", buyCushion: { value: 0, unit: "$" }, sellCushion: { value: .05, unit: "$" } } };
+    const stop: Order = { venue: "sim", id: "shared", symbol: "AAPL", side: "SELL", type: "STOP_LIMIT", tif: "DAY", session: "EXTENDED",
+        qty: 100, executedQty: 0, leavesQty: 100, avgFillPrice: 0, limitPrice: price - .05, stopPrice: price, status: "SUBMITTED", rejectReason: "", replacesId: "", createdMs: 2, updatedMs: 2,
+        held: { phase: "ARMED", deadlineMs: Date.now() + 100000 }, riskEntryId: entry.id };
+    stores.exec.apply({ kind: "snapshot", topic: "exec.positions", payload: [{ venue: "sim", symbol: "AAPL", qty: 100, avgPrice: 10 }] });
+    stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [entry, stop] });
+    return { entry, stop };
+}
+
+it.each(["drag", "click"] as const)("adds with the %s gesture, inherited protection and a combined-position preview", async gesture => {
+    const preset: RiskEntryTemplate = { ...template, sellCushion: { value: 1, unit: "$" }, protection: { mode: "PRICE", value: .3,
+        sessions: { pre: true, rth: true, post: true }, pricing: "CUSHION", cushion: { value: 1, unit: "$" }, offset: { value: 0, unit: "$" }, buffer: { value: 0, unit: "$" } } };
+    const { host, stores, sendCommand } = mount(false, preset);
+    protectedPosition(stores);
+    initiateChartRiskEntry(preset);
+    placeRiskPair(host, gesture);
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe(""));
+    expect(host.querySelector("[data-risk-readout]")?.textContent).toContain("100 existing + 400 added = 500 total");
+    expect(host.querySelector("[data-risk-readout]")?.textContent).toContain("Shared stop 9.50 → 9.80 on first fill · Fixed");
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.objectContaining({ sharedEntryId: "original", buyStop: 10, sellStop: 9.8, maxQty: 400, sellCushion: { value: .05, unit: "$" } })));
+    const submitted = sendCommand.mock.calls.find(([name]) => name === "SubmitRiskEntry")?.[1];
+    expect(submitted).not.toHaveProperty("protection");
+});
+
+it("rejects lowering the shared stop, including a stop raised while drafting", async () => {
+    const { host, stores, sendCommand } = mount();
+    const { stop } = protectedPosition(stores);
+    initiateChartRiskEntry(template);
+    placeRiskPair(host);
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe(""));
+    stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...stop, stopPrice: 9.9, limitPrice: 9.85 } });
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("keep or raise"));
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
+});
+
+it("blocks a second pending add even while its cancellation is unresolved", async () => {
+    const { host, stores, sendCommand } = mount();
+    const { entry } = protectedPosition(stores);
+    stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...entry, id: "pending", status: "PARTIALLY_FILLED", qty: 50, executedQty: 10, leavesQty: 40,
+        held: { phase: "CANCEL_REQUESTED", cancelRequested: true, deadlineMs: Date.now() + 100000 }, riskEntry: { ...entry.riskEntry!, sharedEntryId: entry.id } } });
+    initiateChartRiskEntry(template);
+    placeRiskPair(host);
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("one pending"));
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
+});
+
+it("does not retarget a draft to a replacement protection owner", async () => {
+    const { host, stores, sendCommand } = mount();
+    const { entry, stop } = protectedPosition(stores);
+    initiateChartRiskEntry(template);
+    placeRiskPair(host);
+    stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [{ ...entry, id: "replacement" }, { ...stop, riskEntryId: "replacement" }] });
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Shared protection changed"));
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
+});
 
 it("submits trailing protection while retaining both chart prices and reviewed sizing",async()=>{
   const preset:RiskEntryTemplate={...template,protection:{mode:"PRICE",value:.3,sessions:{pre:true,rth:true,post:true},pricing:"CUSHION",cushion:template.sellCushion,offset:{value:0,unit:"$"},buffer:{value:0,unit:"$"}}};

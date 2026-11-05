@@ -215,6 +215,9 @@ export interface LimitCushion {
   unit: string;
 }
 export interface RiskEntry {
+  sharedEntryId?: string;
+  addStopPrice?: number /* float64 */;
+  stopApplied?: boolean;
   protection?: TrailConfig;
   stopId: string;
   budget: number /* float64 */;
@@ -226,6 +229,7 @@ export interface RiskEntry {
   failure?: string;
 }
 export interface SubmitRiskEntryArgs {
+  sharedEntryId?: string;
   protection?: TrailConfig;
   venue: string;
   symbol: string;

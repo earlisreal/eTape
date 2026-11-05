@@ -6,7 +6,7 @@ import { nearestPriceLines, orderMarkerChipYs, snapOrderMarkerPrice } from "../.
 import { TV_FONT, type TvChrome } from "../../../render/chart/tvTheme";
 import type { Tool } from "../../../render/chart/drawings/interaction";
 import { CHART_RISK_ENTRY_EVENT, type OrderConfig, type RiskEntryTemplate } from "../../exec/actionTemplate";
-import { riskEntrySize } from "../../exec/riskEntry";
+import { riskEntrySize, riskEntryProtection, riskEntryAddTemplate } from "../../exec/riskEntry";
 import {trailError} from "../../exec/trailing";
 import type { LinkGroup, LinkGroups } from "../../linkGroups";
 import { modalTracker } from "../../modalTracker";
@@ -32,6 +32,7 @@ interface Props {
     sendQuery(name: string, args: unknown): Promise<unknown>;
 }
 type Draft = {
+	sharedEntryId: string;
     template: RiskEntryTemplate;
     buy?: number;
     sell?: number;
@@ -101,9 +102,15 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (rootRef.current)
             rootRef.current.style.display = "none"; pillLayer.current?.clear(); pillLayer.current?.sync(); };
         const editable = () => !!document.activeElement?.closest("input,textarea,select,[contenteditable='true']");
+        const protection = () => {
+            const p = latest.current;
+            const qty = p.stores.exec.positions().find(pos => pos.venue === venue && pos.symbol === p.symbol)?.qty ?? 0;
+            return { ...riskEntryProtection(p.stores.exec.orders().map(v => v.order), qty, venue, p.symbol), qty };
+        };
         const size = () => {
             const a = latest.current.stores.exec.accounts().find(a => a.venue === venue);
-            return draft && riskEntrySize(draft.template, draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0);
+            const context = protection();
+            return draft && riskEntrySize(riskEntryAddTemplate(draft.template, context.owner, context.stop), draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0);
         };
         const sizingError = () => {
             const a = latest.current.stores.exec.accounts().find(a => a.venue === venue);
@@ -119,7 +126,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             return "";
         };
         const invalid = () => {
-            if(draft?.template.protection){const error=trailError(draft.template.protection);if(error)return error;}
+            const context = protection();
+            if(!context.stop && draft?.template.protection){const error=trailError(draft.template.protection);if(error)return error;}
             const p = latest.current, status = p.stores.exec.status(), v = status?.venues.find(v => v.venue === venue);
             if (!p.active || !document.hasFocus() || modalTracker.isOpen() || editable())
                 return "Focus the chart to continue.";
@@ -131,10 +139,10 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return "Review / enable live accounts in Settings → Orders & hotkeys.";
             const sizing = sizingError();
             if (sizing) return sizing;
-            if (p.stores.exec.positions().some(pos => pos.venue === venue && pos.symbol === p.symbol && pos.qty !== 0))
-                return "Risk entry requires a flat symbol.";
-            if (p.stores.exec.workingOrdersFor(p.symbol, venue).length)
-                return "Risk entry requires no other working orders.";
+            if (context.error) return context.error;
+            if (draft && draft.sharedEntryId !== (context.owner?.id ?? "")) return "Shared protection changed; review a new chart risk entry.";
+            if (context.stop && draft?.sell !== undefined && draft.sell + 1e-9 < context.stop.stopPrice)
+                return "Add stop must keep or raise the shared stop.";
             if (!draft?.route)
                 return draft?.error ?? "Checking engine trigger source…";
             if (draft.route.reason)
@@ -185,6 +193,9 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 arrow.querySelector("path")?.setAttribute("d", `M ${x} ${buyY} V ${sellY} M ${x - 4} ${headY} L ${x} ${sellY} L ${x + 4} ${headY}`);
                 readout.textContent = sizingError() || !s ? "— shares · Est. risk —" :
                     `${qty.toLocaleString("en-US")} shares · Est. risk ${(s.qty ? s.risk * qty / s.qty : 0).toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
+                const context = protection();
+                if (context.stop) readout.textContent += `\n${context.qty.toLocaleString("en-US")} existing + ${qty.toLocaleString("en-US")} added = ${(context.qty + qty).toLocaleString("en-US")} total\nShared stop ${context.stop.stopPrice.toFixed(context.stop.stopPrice < 1 ? 4 : 2)} → ${draft.sell!.toFixed(draft.sell! < 1 ? 4 : 2)} on first fill · ${context.stop.held?.trail ? "trailing mode retained" : "Fixed"}`;
+                readout.style.whiteSpace = "pre-line";
                 readout.style.maxWidth = `${Math.max(0, plotWidth - 16)}px`;
                 readout.style.left = `${Math.max(4, Math.min(x + 10, plotWidth - readout.offsetWidth - 12))}px`;
                 readout.style.top = `${Math.max(4, Math.min((buyY + sellY) / 2 - readout.offsetHeight / 2, paneHeight - readout.offsetHeight - 4))}px`;
@@ -286,9 +297,11 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 paint();
                 return;
             }
+            const context = protection(), effective = riskEntryAddTemplate(current.template, context.owner, context.stop);
             const args: SubmitRiskEntryArgs = { venue, symbol, buyStop: current.buy!, sellStop: current.sell!, mode: current.template.mode, value: current.template.value,
-                maxQty: Math.min(current.maxQty, s.qty), buyCushion: current.template.buyCushion, sellCushion: current.template.sellCushion,
-                ...(current.template.protection?{protection:current.template.protection}:{}) };
+                ...(current.sharedEntryId ? { sharedEntryId: current.sharedEntryId } : {}),
+                maxQty: Math.min(current.maxQty, s.qty), buyCushion: current.template.buyCushion, sellCushion: effective.sellCushion,
+                ...(effective.protection?{protection:effective.protection}:{}) };
             try {
                 const ack = await latest.current.sendCommand("SubmitRiskEntry", args);
                 if (ack.ambiguous) notify(ack.reason || "", true);
@@ -329,7 +342,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return;
             clear();
             hover = lastPoint;
-            draft = { template: detail.template, complete: false, busy: false, unknown: false, maxQty: 0 };
+            draft = { template: detail.template, sharedEntryId: protection().owner?.id ?? "", complete: false, busy: false, unknown: false, maxQty: 0 };
             host.dataset.riskEntryActive = "true";
             p.facadeRef.current?.setPanZoomEnabled?.(false);
             paint();
@@ -493,6 +506,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
         resize.observe(host);
         props.layoutRef.current = paint;
         const unsubscribe = latest.current.stores.exec.subscribe(schedule);
+        const unsubscribeTrails = latest.current.stores.exec.subscribeTrails(schedule);
         const timer = setInterval(() => { if (draft)
             paint(); }, 1000);
         return () => {
@@ -503,6 +517,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             clearInterval(timer);
             resize.disconnect();
             unsubscribe();
+            unsubscribeTrails();
             window.removeEventListener(CHART_RISK_ENTRY_EVENT, initiate);
             host.removeEventListener("pointerdown", down, true);
             host.removeEventListener("pointerleave", leave);

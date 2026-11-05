@@ -44,7 +44,7 @@ func (c *Core) checkAbsoluteTrailAttribution(ctx context.Context, event BrokerEv
 	}
 	for _, o := range c.state.Venue(venue).Orders {
 		qty, present := positions[o.Symbol]
-		if !present || qty <= 0 || qty >= c.state.VenuePositionShares(venue, o.Symbol) || o.RiskEntryID == "" || !o.Working() || o.Held == nil || o.Held.Trail == nil || o.Held.ChildClientID == "" {
+		if !present || qty <= 0 || qty >= c.state.VenuePositionShares(venue, o.Symbol) || o.RiskEntryID == "" || !o.Working() || o.Held == nil || o.Held.ChildClientID == "" {
 			continue
 		}
 		anchor := make(map[string]ownedExposure)
@@ -55,7 +55,7 @@ func (c *Core) checkAbsoluteTrailAttribution(ctx context.Context, event BrokerEv
 		}
 		exits := make(map[string]bool)
 		for _, exit := range c.state.Venue(venue).Orders {
-			if exit.RiskEntryID != "" && exit.Working() && exit.Held != nil && exit.Held.Trail != nil && exit.Held.ChildClientID != "" {
+			if exit.RiskEntryID != "" && exit.Working() && exit.Held != nil && exit.Held.ChildClientID != "" {
 				exits[exit.ID] = true
 			}
 		}
@@ -68,13 +68,15 @@ func (c *Core) checkAbsoluteTrailAttribution(ctx context.Context, event BrokerEv
 
 func (c *Core) trailAttributionReason(venue VenueID, reason string) {
 	for _, o := range c.state.Venue(venue).Orders {
-		if o.RiskEntryID == "" || o.Held == nil || o.Held.Trail == nil || !o.Working() || o.Held.Trail.Retired {
+		if o.RiskEntryID == "" || o.Held == nil || !o.Working() || o.Held.Trail != nil && o.Held.Trail.Retired {
 			continue
 		}
 		if reason == "" && o.Held.PausedReason != trailAttributionPending {
 			continue
 		}
-		if err := c.saveTrail(o, *o.Held.Trail, o.Held.Phase, reason); err != nil {
+		held := *o.Held
+		held.PausedReason = reason
+		if err := c.appendAndFold(HeldOrderChanged{V: o.Venue, OID: o.ID, Held: held, Ts: c.now()}, SrcLocal); err != nil {
 			c.syslog("exec.trail", err.Error())
 		}
 	}
@@ -136,10 +138,11 @@ func (c *Core) trailSnapshotCurrent(venue VenueID, snapshot BrokerSnapshot) bool
 		}
 	}
 	for id, anchor := range c.trailPositionChecks[venue].before {
-		owner := c.order(id)
-		remote, ok := observed[id]
-		if ok && remote.ExecutedQty < owner.ExecutedQty || !ok && owner.Working() && owner.ExecutedQty > anchor.entries {
-			return false
+		for _, owner := range c.riskMembers(c.order(id)) {
+			remote, ok := observed[owner.ID]
+			if ok && remote.ExecutedQty < owner.ExecutedQty || !ok && owner.Working() && owner.ExecutedQty > anchor.entryFills[owner.ID] {
+				return false
+			}
 		}
 	}
 	return true

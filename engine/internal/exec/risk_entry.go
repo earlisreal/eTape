@@ -13,8 +13,11 @@ type LimitCushion struct {
 	Unit  string  `json:"unit"`
 }
 
-// RiskEntry belongs to the entry; exits point back through RiskEntryID.
+// RiskEntry retains per-BUY sizing; adds link to the original protection owner.
 type RiskEntry struct {
+	SharedEntryID      string       `json:"sharedEntryId,omitempty"`
+	AddStopPrice       float64      `json:"addStopPrice,omitempty"`
+	StopApplied        bool         `json:"stopApplied,omitempty"`
 	StopID             string       `json:"stopId"`
 	Budget             float64      `json:"budget"`
 	Mode               string       `json:"mode"`
@@ -29,6 +32,7 @@ type RiskEntry struct {
 }
 
 type SubmitRiskEntry struct {
+	SharedEntryID           string
 	Venue                   VenueID
 	Symbol                  string
 	BuyStop, SellStop       float64
@@ -99,14 +103,31 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 		return blocked("position data unavailable or flatten pending")
 	}
 	vs := c.state.Venue(cm.Venue)
-	if vs.Positions[cm.Symbol].Qty != 0 {
-		return blocked("risk entry requires a flat symbol")
+	owner, sharedStop, reason := c.riskAddProtection(cm.Venue, cm.Symbol)
+	if reason != "" {
+		return blocked(reason)
+	}
+	if cm.SharedEntryID != owner.ID {
+		return blocked("shared protection changed; review a new chart risk entry")
 	}
 	for _, orders := range []map[string]Order{vs.Orders, vs.ExternalOrders} {
 		for _, o := range orders {
-			if o.Symbol == cm.Symbol && o.Working() {
+			if o.Symbol == cm.Symbol && o.Working() && o.ID != sharedStop.ID {
+				if owner.ID != "" && o.RiskEntry != nil {
+					return blocked("only one pending Chart Risk Entry is allowed")
+				}
 				return blocked("risk entry requires no other working orders")
 			}
+		}
+	}
+	if owner.ID != "" {
+		if cm.SellStop+1e-9 < sharedStop.StopPrice {
+			return blocked("add stop must keep or raise the shared stop")
+		}
+		cm.SellCushion, cm.Protection = owner.RiskEntry.SellCushion, owner.RiskEntry.Protection
+		if sharedStop.Held.Trail != nil {
+			config := sharedStop.Held.Trail.Config
+			cm.Protection, cm.SellCushion = &config, config.Cushion
 		}
 	}
 	account := vs.Account
@@ -149,7 +170,11 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	if good, why := Evaluate(c.state, c.gate, req, c.marks); !good {
 		return blocked(why)
 	}
-	if cap := c.gate.Venue[cm.Venue].MaxOpenOrders; cap > 0 && workingCount(vs, cm.Symbol)+2 > cap {
+	legs := 2
+	if owner.ID != "" {
+		legs = 1
+	}
+	if cap := c.gate.Venue[cm.Venue].MaxOpenOrders; cap > 0 && workingCount(vs, cm.Symbol)+legs > cap {
 		return blocked("insufficient open-order capacity for pair")
 	}
 	if c.heldDemand == nil {
@@ -166,7 +191,7 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	deadline := session.Schedule(c.clk.Now()).DataClose.UnixMilli()
 	entry.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: deadline}
 	stop.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: deadline, PausedReason: "awaiting entry fills"}
-	if cm.Protection != nil {
+	if cm.Protection != nil && owner.ID == "" {
 		config := *cm.Protection
 		if config.Pricing != "CUSHION" && config.Pricing != "" {
 			return blocked("risk presets require stop-relative Limit Cushion execution")
@@ -182,21 +207,37 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	entry.RiskEntry = &RiskEntry{StopID: stop.ID, Budget: budget, Mode: cm.Mode, BuyCushion: cm.BuyCushion, SellCushion: cm.SellCushion}
 	entry.RiskEntry.Protection = cm.Protection
 	stop.RiskEntryID = entry.ID
-	for _, o := range []Order{entry, stop} {
+	acquire := []Order{entry, stop}
+	if owner.ID != "" {
+		stop = sharedStop
+		entry.Held.DeadlineMs = stop.Held.DeadlineMs
+		deadline = stop.Held.DeadlineMs
+		entry.RiskEntry.StopID = stop.ID
+		entry.RiskEntry.SharedEntryID = owner.ID
+		entry.RiskEntry.AddStopPrice = cm.SellStop
+		acquire = []Order{entry}
+	}
+	for _, o := range acquire {
 		if err := c.acquireHeldDemand(ctx, o); err != nil {
 			c.releaseHeld(entry.ID)
-			c.releaseHeld(stop.ID)
+			if owner.ID == "" {
+				c.releaseHeld(stop.ID)
+			}
 			return blocked("execution ticker unavailable: " + err.Error())
 		}
 	}
 	if deadline <= c.now() {
 		c.releaseHeld(entry.ID)
-		c.releaseHeld(stop.ID)
+		if owner.ID == "" {
+			c.releaseHeld(stop.ID)
+		}
 		return blocked("risk entry session expired while acquiring ticker")
 	}
 	if c.now()-account.TsMs > 30_000 {
 		c.releaseHeld(entry.ID)
-		c.releaseHeld(stop.ID)
+		if owner.ID == "" {
+			c.releaseHeld(stop.ID)
+		}
 		return blocked("fresh account data required")
 	}
 	// Subscription acquisition can outlast a cached trade's freshness window.
@@ -207,7 +248,9 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	}
 	if err := c.appendAndFold(RiskEntryChanged{Entry: entry, Stop: stop}, SrcLocal); err != nil {
 		c.releaseHeld(entry.ID)
-		c.releaseHeld(stop.ID)
+		if owner.ID == "" {
+			c.releaseHeld(stop.ID)
+		}
 		return blocked("event append failed: " + err.Error())
 	}
 	if fresh && c.freshEligiblePrint(last) && deadline > c.now() && StopLimitTriggered(SideBuy, last.Price, entry.StopPrice) {
@@ -221,6 +264,9 @@ func finitePositive(v float64) bool { return v > 0 && !math.IsNaN(v) && !math.Is
 
 func (c *Core) riskOwner(o Order) Order {
 	if o.RiskEntry != nil {
+		if o.RiskEntry.SharedEntryID != "" {
+			return c.order(o.RiskEntry.SharedEntryID)
+		}
 		return o
 	}
 	if o.RiskEntryID != "" {
@@ -232,7 +278,7 @@ func (c *Core) riskOwner(o Order) Order {
 func (c *Core) syncRiskVenue(ctx context.Context, venue VenueID) {
 	for _, vs := range c.state.Venues {
 		for _, entry := range vs.Orders {
-			if entry.RiskEntry != nil && (venue == "" || entry.Venue == venue) {
+			if entry.RiskEntry != nil && entry.RiskEntry.SharedEntryID == "" && (venue == "" || entry.Venue == venue) {
 				c.syncRiskProtection(ctx, entry, true)
 			}
 		}
@@ -255,18 +301,13 @@ func (c *Core) beginRiskExit(ctx context.Context, entry Order) bool {
 		c.syslog("exec.risk", err.Error())
 		return false
 	}
-	if entry.Working() {
-		if entry.Held.ChildClientID == "" {
-			_ = c.handleCancel(ctx, CancelOrder{Venue: entry.Venue, OrderID: entry.ID})
-		} else {
-			c.requestHeldVenueCancel(ctx, c.order(entry.ID), "linked stop triggered; cancel remaining buy")
-		}
-	}
+	c.cancelRiskBuys(ctx, entry, "linked stop triggered; cancel remaining buy")
 	return true
 }
 
-// Protection is scoped to confirmed fills from this entry, never the whole position.
+// Shared protection covers confirmed fills from the original entry and its adds.
 func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling bool) {
+	entry = c.riskOwner(entry)
 	if c.trailPositionChecks[entry.Venue] != nil {
 		return
 	}
@@ -282,9 +323,14 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 		if stop.Held.ChildClientID != "" {
 			return
 		}
-		stop.Qty = math.Max(0, entry.ExecutedQty-risk.RetiredQty)
+		stop.Qty = math.Max(0, c.riskFilledQty(entry)-risk.RetiredQty)
 		stop.LeavesQty = stop.Qty
 		stop.UpdatedMs = c.now()
+		var ok bool
+		stop, ok = c.applyRiskAddStops(entry, stop)
+		if !ok {
+			return
+		}
 		if stop.Qty == 0 {
 			h := *stop.Held
 			h.PausedReason = "awaiting entry fills"
@@ -294,7 +340,7 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 			h.PausedReason = "fixed fallback; waiting for trailing data"
 			stop.Held = &h
 		}
-		if !entry.Working() && entry.ExecutedQty == 0 {
+		if !entry.Working() && c.riskFilledQty(entry) == 0 {
 			stop.Status = StatusCanceled
 			c.releaseHeld(stop.ID)
 		}
@@ -323,7 +369,7 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 			covered += exit.LeavesQty
 		}
 	}
-	qty := entry.ExecutedQty - risk.RetiredQty - covered
+	qty := c.riskFilledQty(entry) - risk.RetiredQty - covered
 	if qty <= 1e-9 || risk.Failure != "" {
 		return
 	}
@@ -371,6 +417,7 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 }
 
 func (c *Core) failRisk(ctx context.Context, entry Order, reason string) {
+	entry = c.riskOwner(entry)
 	if entry.RiskEntry == nil {
 		return
 	}
@@ -380,9 +427,7 @@ func (c *Core) failRisk(ctx context.Context, entry Order, reason string) {
 		c.syslog("exec.risk", err.Error())
 		return
 	}
-	if entry.Working() {
-		_ = c.handleCancel(ctx, CancelOrder{Venue: entry.Venue, OrderID: entry.ID})
-	}
+	c.cancelRiskBuys(ctx, entry, "protection failed")
 }
 
 func (c *Core) riskBrokerEvent(ctx context.Context, id string) {
@@ -398,6 +443,7 @@ func (c *Core) riskBrokerEvent(ctx context.Context, id string) {
 }
 
 func (c *Core) cancelRiskProtection(ctx context.Context, entry Order) error {
+	entry = c.riskOwner(entry)
 	if entry.RiskEntry == nil {
 		return nil
 	}
@@ -406,13 +452,7 @@ func (c *Core) cancelRiskProtection(ctx context.Context, entry Order) error {
 	if err := c.persistRisk(entry, risk); err != nil {
 		return err
 	}
-	if entry.Working() {
-		if entry.Held.ChildClientID == "" {
-			_ = c.handleCancel(ctx, CancelOrder{Venue: entry.Venue, OrderID: entry.ID})
-		} else {
-			c.requestHeldVenueCancel(ctx, entry, "protection canceled")
-		}
-	}
+	c.cancelRiskBuys(ctx, entry, "protection canceled")
 	for _, exit := range c.state.Venue(entry.Venue).Orders {
 		if exit.RiskEntryID == entry.ID && exit.Working() {
 			_ = c.handleCancel(ctx, CancelOrder{Venue: exit.Venue, OrderID: exit.ID})
@@ -424,6 +464,9 @@ func (c *Core) cancelRiskProtection(ctx context.Context, entry Order) error {
 func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck {
 	blocked := func(reason string) CmdAck { return CmdAck{Reason: reason, OrderID: o.ID} }
 	entry := c.riskOwner(o)
+	if o.RiskEntry != nil {
+		entry = o
+	}
 	if entry.RiskEntry == nil || o.Held == nil || !o.Working() {
 		return blocked("linked order unavailable")
 	}
@@ -461,6 +504,9 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 		return c.handleReplaceSingle(ctx, cm)
 	}
 	stop := c.order(entry.RiskEntry.StopID)
+	if entry.RiskEntry.SharedEntryID != "" {
+		return c.replaceRiskAdd(ctx, cm, entry, stop)
+	}
 	if o.RiskEntryID != "" && o.ID != stop.ID {
 		return blocked("late-fill protection trigger is locked; adjust its working limit")
 	}

@@ -278,6 +278,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("bad args"), false
 		}
 		return ackFromCmd(cd.ex.Do(exec.SubmitRiskEntry{
+			SharedEntryID: a.SharedEntryID,
 			Protection: func() *exec.TrailConfig {
 				if a.Protection == nil {
 					return nil

@@ -112,9 +112,13 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     const cushion=marker.order.side === "BUY"?risk.buyCushion:risk.sellCushion;
     const limit=trigger?resolveLimitCushionPrice(marker.order.side,price,cushion.value,cushion.unit === "%"?"%":"$"):price;
     if(marker.order.side === "BUY")buy=limit;else sell=limit;
+    if(marker.order.side === "SELL" && all.some(o=>o.riskEntry?.sharedEntryId===entry.id))
+      return {qty:stop.leavesQty,plannedQty:stop.qty,limit,detail:`${stop.leavesQty.toLocaleString("en-US")} shares · Shared protection`};
+    const sellTrigger=risk.sharedEntryId?Math.max(stop.stopPrice,risk.addStopPrice??0):marker.order.id!==entry.id && trigger?price:stop.stopPrice;
+    if(risk.sharedEntryId)sell=resolveLimitCushionPrice("SELL",sellTrigger,risk.sellCushion.value,risk.sellCushion.unit === "%"?"%":"$");
     const locked=!!entry.held?.childClientId;
     const sized=riskEntrySize({kind:"risk",id:entry.id,label:"Risk",mode:risk.mode === "CashPct" ? "CashPct" : risk.mode === "BuyingPowerPct" ? "BuyingPowerPct" : "Dollar",value:risk.budget,buyCushion:risk.buyCushion,sellCushion:risk.sellCushion},
-      marker.order.id===entry.id && trigger?price:entry.stopPrice,marker.order.id!==entry.id && trigger?price:stop.stopPrice,latest.current.availableCash ?? 0,latest.current.buyingPower ?? 0,risk.budget);
+      marker.order.id===entry.id && trigger?price:entry.stopPrice,sellTrigger,latest.current.availableCash ?? 0,latest.current.buyingPower ?? 0,risk.budget);
     const qty=locked?entry.qty:sized.qty;
     const aboveBudget=qty*Math.max(0,buy-sell)>risk.budget+0.005;
     return {qty,plannedQty:entry.qty,limit,aboveBudget,detail:`${qty} shares${aboveBudget?" · ABOVE ORIGINAL BUDGET":""}`};
@@ -130,7 +134,8 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         : `${marker.order.leavesQty.toLocaleString("en-US")} shares`;
     const limit = risk.limit ?? (marker.kind === "limit" ? price : marker.order.limitPrice);
     const type = marker.kind === "limit" ? "LIMIT" : marker.kind === "limit-if-touched" ? "LIT" : "STOP-LIMIT";
-    return `${quantity}\n${marker.order.side} ${type} · limit ${priceText(limit)}\n${marker.order.held && marker.kind !== "limit" ? "Held by eTape · " : ""}${marker.order.riskEntry ? "Risk Entry · " : marker.order.riskEntryId ? "Linked Protection · " : ""}${marker.phase || marker.order.status}${marker.order.held?.pausedReason ? ` · ${marker.order.held.pausedReason}` : ""}`;
+    const add=marker.order.riskEntry?.sharedEntryId && !marker.order.riskEntry.stopApplied?`\nShared stop ${priceText(marker.order.riskEntry.addStopPrice??0)} or higher on first fill`:"";
+    return `${quantity}\n${marker.order.side} ${type} · limit ${priceText(limit)}\n${marker.order.held && marker.kind !== "limit" ? "Held by eTape · " : ""}${marker.order.riskEntry ? "Risk Entry · " : marker.order.riskEntryId ? "Linked Protection · " : ""}${marker.phase || marker.order.status}${marker.order.held?.pausedReason ? ` · ${marker.order.held.pausedReason}` : ""}${add}`;
   };
 
   const layout = () => {

@@ -24,7 +24,7 @@ Chart Risk Entry defaults to Fixed protection. A trailing preset retains the
 chart-selected initial stop as a floor, sizes from the original cushion-adjusted
 limits and reviewed quantity, and begins trailing after confirmed fills. Missing
 trail references leave that fixed floor active. Partial fills grow only the
-entry's coverage; confirmed unrelated reductions retire owned shares before
+strategy's coverage; confirmed unrelated reductions retire owned shares before
 independent additions. Triggering cancels remaining buying. Healthy uncovered
 late fills receive separate linked LIMIT cleanup, with frozen main-child
 quantities and quote reservations counted once.
@@ -112,7 +112,8 @@ event. Both triggers stay engine-held through PRE/RTH/POST until scheduled
 DataClose. `SubmitRiskEntry` uses fixed dollars, Cash %, or BP % as a loss budget;
 whole-share sizing uses cushion-adjusted execution limits and the funding cap,
 and `MaxQty` prevents increasing the approved preview. Admission requires fresh
-account data, confirmed flat positions, no other working orders, opening gates,
+account data, a confirmed flat position or fully protected managed long position,
+no unrelated working orders, opening gates,
 the live held-stop acknowledgement, and successful ticker subscriptions. Missing
 or stale eligible trades do not block acceptance: the durable entry stays
 WAITING with `Waiting for market data` until a fresh trade arms or activates it.
@@ -121,8 +122,29 @@ subscription acquisition; account age and DataClose are rechecked after that
 acquisition too. Existing DataClose expiry and feed/restart pauses
 still apply; no UI retry is needed for a quiet symbol.
 
-The exit covers only this entry's confirmed fills. Stop activation cancels the
-remaining buy; late fills receive separate durable exit children, including
+An existing Chart Risk Entry's healthy, untriggered stop can protect one pending
+add at the same venue/symbol. `SharedEntryID` binds the add to the reviewed
+original owner; that owner's single stop and exit children cover all linked
+BUY fills. Each add has its own budget and reviewed quantity ceiling, inherits
+the current stop's Protection Mode and Sell Limit Cushion, and chooses a SELL
+at or above the current shared stop and below its BUY. The original stop stays
+unchanged until the first confirmed add fill. Persist `StopApplied` with the
+tightened price and combined coverage; preserve a higher current stop and all
+trailing progress. Subsequent fills grow quantity without replaying that price
+change. Only the new BUY acquires a new ticker lease; existing protection keeps
+its lease and deadline. Broker-native/unrelated stops and incomplete coverage
+cannot be adopted. Adds require stop-relative Limit Cushion execution; cancel
+a pending add before editing the shared trail's execution pricing/cushion so its
+reviewed sizing remains valid. Shared strategies must be closed/reconciled before downgrading
+to an engine that predates these ownership fields.
+
+Shared ownership aggregates confirmed entries and exits once when retiring
+coverage after manual sales, including fixed-stop attribution checks when an
+absolute position push precedes an exit fill. A manual flat cancels pending adds
+and retires the old pretrigger stop, preventing an add from reopening that cycle.
+
+The exit covers only this strategy's confirmed fills. Stop activation cancels the
+remaining buys; late fills receive separate durable exit children, including
 reservations for paused protection. Disarm/day-loss cancel further buying while
 healthy reducing linked exits remain enabled. Cancel Protection cancels every
 linked leg and leaves shares open. Restart/feed/broker gaps pause local custody

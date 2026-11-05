@@ -34,6 +34,14 @@ func TestMapOrderEnumsAndTimestamps(t *testing.T) {
 	}
 }
 
+func TestMapRiskAddOwnershipAndFirstFillStop(t *testing.T) {
+	o := exec.Order{RiskEntry: &exec.RiskEntry{SharedEntryID: "original", StopID: "shared", AddStopPrice: 10, StopApplied: true, Budget: 25}}
+	risk := mapOrder(o).RiskEntry
+	if risk == nil || risk.SharedEntryID != "original" || risk.StopID != "shared" || risk.AddStopPrice != 10 || !risk.StopApplied || risk.Budget != 25 {
+		t.Fatalf("shared protection projection: %+v", risk)
+	}
+}
+
 func TestMapLimitIfTouchedOrderType(t *testing.T) {
 	o := exec.Order{Venue: "sim", ID: "ET-LIT", Symbol: "US.AAPL", Side: exec.SideBuy,
 		Type: exec.TypeLimitIfTouched, TIF: exec.TIFDay, Qty: 2, LimitPrice: 99,

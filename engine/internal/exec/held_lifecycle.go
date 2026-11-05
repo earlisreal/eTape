@@ -256,6 +256,17 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 				c.syncRiskProtection(ctx, c.order(o.ID), false)
 			}
 		}()
+		if o.RiskEntry.SharedEntryID != "" {
+			owner := c.riskOwner(o)
+			stop := c.order(o.RiskEntry.StopID)
+			if owner.RiskEntry == nil || owner.RiskEntry.Closing || owner.RiskEntry.ProtectionCanceled || owner.RiskEntry.Failure != "" ||
+				!stop.Working() || stop.Held == nil || (stop.Held.Phase != HeldWaiting && stop.Held.Phase != HeldArmed) ||
+				stop.Held.ChildClientID != "" || stop.Held.CancelRequested || stop.StopPrice >= o.LimitPrice ||
+				stop.Held.Trail != nil && (stop.Held.Trail.Retired || stop.Held.Trail.Triggered) {
+				_ = c.handleCancel(ctx, CancelOrder{Venue: o.Venue, OrderID: o.ID})
+				return
+			}
+		}
 	}
 	if o.RiskEntryID != "" {
 		entry := c.riskOwner(o)

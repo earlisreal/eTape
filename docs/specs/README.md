@@ -2,6 +2,8 @@
 
 Current durable domain decisions:
 
+- [Chart Risk Entry position adds](../../.scratch/chart-risk-position-adds/spec.md)
+  share one keep-or-raise stop, retain per-add risk budgets and admit one pending BUY.
 - Go engine owns feed normalization, market state, persistence, scanning, execution, and WebSocket snapshots.
 - UI keeps high-frequency data in imperative stores and canvas/chart controllers, outside React state.
 - Go WebSocket structs are source of truth; generated TypeScript is read-only.

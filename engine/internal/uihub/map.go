@@ -159,6 +159,7 @@ func mapOrder(o exec.Order) wsmsg.Order {
 	var risk *wsmsg.RiskEntry
 	if r := o.RiskEntry; r != nil {
 		risk = &wsmsg.RiskEntry{StopID: r.StopID, Budget: r.Budget, Mode: r.Mode,
+			SharedEntryID: r.SharedEntryID, AddStopPrice: r.AddStopPrice, StopApplied: r.StopApplied,
 			BuyCushion:  wsmsg.LimitCushion{Value: r.BuyCushion.Value, Unit: r.BuyCushion.Unit},
 			SellCushion: wsmsg.LimitCushion{Value: r.SellCushion.Value, Unit: r.SellCushion.Unit},
 			Closing:     r.Closing, ProtectionCanceled: r.ProtectionCanceled, Failure: r.Failure, Protection: mapTrailConfig(r.Protection)}

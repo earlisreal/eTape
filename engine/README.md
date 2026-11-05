@@ -48,7 +48,10 @@ above. A fresh Last-Eligible print creates one linked venue LIMIT child, and
 the live-account acknowledgement is separate from stop-limit enablement.
 
 Chart Risk Entry links two engine-held STOP_LIMITs through scheduled DataClose,
-sizes shares from a saved risk budget, and protects only confirmed entry fills.
+sizes shares from a saved risk budget, and protects confirmed entry/add fills.
+A fully protected long position can accept one pending add with its own budget;
+the original shared stop keeps its mode/progress and only keeps or raises its
+price on the first add fill. Coverage follows actual fills and partial sells.
 Acceptance requires fresh account data and successful ticker subscriptions;
 missing or stale trades leave the accepted entry waiting for a fresh eligible
 trigger print. Immediate activation rechecks print freshness after subscription.

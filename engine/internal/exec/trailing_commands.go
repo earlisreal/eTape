@@ -32,6 +32,14 @@ func (c *Core) configureTrail(ctx context.Context, venue VenueID, id string, obs
 	if o.Held.Trail == nil || o.Held.Trail.Triggered || o.Held.Trail.Retired || config.Mode != o.Held.Trail.Config.Mode {
 		return blocked("only pretrigger edits within the current trail mode are supported")
 	}
+	if owner := c.riskOwner(o); owner.RiskEntry != nil {
+		for _, entry := range c.riskMembers(owner) {
+			if entry.RiskEntry.SharedEntryID != "" && entry.Working() &&
+				(config.Pricing != o.Held.Trail.Config.Pricing || config.Cushion != o.Held.Trail.Config.Cushion) {
+				return blocked("cancel pending add before changing protection execution pricing")
+			}
+		}
+	}
 	config.Sessions = o.Held.Trail.Config.Sessions
 	if err := validateTrailConfig(&config); err != nil {
 		return blocked(err.Error())

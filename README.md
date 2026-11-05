@@ -58,6 +58,10 @@ and the broker of your choice for execution, and everything else is free and ope
   engine-held stop-limit orders; both prices can be adjusted from the chart.
   Optional auto-send accepts the pair on placement or a completed draft drag;
   missing recent trades leave it waiting in the engine for a fresh trigger.
+  Add to an already protected long position with the same gesture and a new
+  risk budget. One shared stop covers confirmed fills, keeps or raises its
+  price on the first add fill, and retains its existing Protection Mode.
+  Only one BUY may remain pending for that symbol and venue.
 - **Engine-held trailing protection.** Price, percentage and completed-candle
   trails support long SELL and short COVER exits from the ticket or saved
   hotkey/Deck templates. Chart Risk Entry presets can start with trailing

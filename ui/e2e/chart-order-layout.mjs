@@ -465,7 +465,7 @@ try {
     await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "visible" });
     const setup = await checkRisk();
     assert(setup.height <= 28, "Wide-chart setup should use two compact rows");
-    assert.equal(setup.color, theme === "light" ? "rgb(19, 23, 34)" : "rgb(209, 212, 220)", "Risk text must follow the chart theme");
+    assert.equal(setup.color, theme === "light" ? "rgb(23, 26, 30)" : "rgb(236, 231, 219)", "Risk text must follow the chart chrome theme");
     assert(setup.label.visible && setup.label.buttons === 0 && setup.chips.length === 0,"Initial BUY must have a plain price label and no placed pill");
     assert.equal(setup.label.background,"rgb(8, 153, 129)");
     for (const y of [setup.paneTop + 1, setup.paneBottom - 1]) {
@@ -566,8 +566,21 @@ try {
   await productionPage.mouse.up();
   assert.notEqual(await productionPage.locator("[data-risk-price='buy']").textContent(),originalBuy,"Risk axis handles must remain draggable when spaced apart");
   await productionPage.screenshot({ path: path.resolve(root, "../.report/chart-risk-entry-narrow.png") });
+  const addStop = Number(await productionPage.locator("[data-risk-price='sell']").textContent());
   await productionPage.getByRole("button",{name:"Discard risk setup"}).first().click();
   await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
+  await productionPage.evaluate(price => window.chartPanelProbe.protectPosition(price - .05), addStop);
+  await productionPage.evaluate(() => window.chartPanelProbe.startRisk());
+  await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "visible" });
+  await productionPage.mouse.click(narrowHost.x + 100,narrow.paneTop + 100);
+  await productionPage.mouse.click(narrowHost.x + 100,narrow.paneTop + 115);
+  await productionPage.waitForFunction(() => document.querySelector("[data-risk-readout]").innerText.includes("100 existing +"));
+  const addPreview = await checkRisk();
+  assert(addPreview.readout.text.includes("total") && addPreview.readout.text.includes("on first fill"), "An add must show combined shares and deferred shared-stop tightening");
+  await productionPage.screenshot({ path: path.resolve(root, "../.report/chart-risk-position-add-narrow.png") });
+  await productionPage.keyboard.press("Enter");
+  await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
+  assert.equal((await productionPage.evaluate(() => window.chartPanelProbe.lastRiskSubmitted)).sharedEntryId, "risk-original", "An add must bind to the reviewed shared protection");
   assert.equal(productionErrors.length, 0, productionErrors.join("\n"));
   assert.equal(await productionPage.evaluate(() => window.chartPanelProbe.errors.length), 0, "Risk setup must not report chart paint errors");
 

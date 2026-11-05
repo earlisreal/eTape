@@ -496,8 +496,8 @@ func (c *Core) retireTrail(ctx context.Context, o Order, reason string) {
 		return
 	}
 	o = c.order(o.ID)
-	if entry := c.riskOwner(o); entry.RiskEntry != nil && entry.Working() {
-		_ = c.handleCancel(ctx, CancelOrder{Venue: entry.Venue, OrderID: entry.ID})
+	if entry := c.riskOwner(o); entry.RiskEntry != nil {
+		c.cancelRiskBuys(ctx, entry, reason)
 	}
 	if o.Held.ChildClientID != "" {
 		c.requestHeldVenueCancel(ctx, o, reason)

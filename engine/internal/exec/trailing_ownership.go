@@ -5,17 +5,24 @@ import (
 	"math"
 )
 
-type ownedExposure struct{ position, entries, exits float64 }
+type ownedExposure struct {
+	position, entries, exits float64
+	entryFills               map[string]float64
+}
 
 func (c *Core) trailExposure() map[string]ownedExposure {
 	result := make(map[string]ownedExposure)
 	for _, vs := range c.state.Venues {
 		for _, entry := range vs.Orders {
-			if entry.RiskEntry == nil {
+			if entry.RiskEntry == nil || entry.RiskEntry.SharedEntryID != "" {
 				continue
 			}
 			// Fixed and trailing protection both retain confirmed entry ownership.
-			e := ownedExposure{position: vs.Positions[entry.Symbol].Qty, entries: entry.ExecutedQty}
+			e := ownedExposure{position: vs.Positions[entry.Symbol].Qty, entries: c.riskFilledQty(entry)}
+			e.entryFills = make(map[string]float64)
+			for _, member := range c.riskMembers(entry) {
+				e.entryFills[member.ID] = member.ExecutedQty
+			}
 			for _, exit := range vs.Orders {
 				if exit.RiskEntryID == entry.ID {
 					e.exits += exit.ExecutedQty
@@ -44,9 +51,24 @@ func (c *Core) retireReducedOwnership(ctx context.Context, before map[string]own
 		}
 		entry := c.order(id)
 		risk := *entry.RiskEntry
-		risk.RetiredQty = math.Max(0, math.Min(entry.ExecutedQty-after.exits, risk.RetiredQty+reduction))
+		risk.RetiredQty = math.Max(0, math.Min(after.entries-after.exits, risk.RetiredQty+reduction))
 		if err := c.persistRisk(entry, risk); err != nil {
 			c.syslog("exec.trail", err.Error())
+			continue
+		}
+		if after.position <= 0 && len(c.riskMembers(entry)) > 1 {
+			if !c.beginRiskExit(ctx, c.order(id)) {
+				continue
+			}
+			stop := c.order(risk.StopID)
+			if stop.Working() && stop.Held != nil && stop.Held.ChildClientID == "" {
+				if err := c.appendAndFold(OrderCanceled{V: stop.Venue, OID: stop.ID, Ts: c.now()}, SrcLocal); err != nil {
+					c.syslog("exec.risk", err.Error())
+					continue
+				}
+				c.releaseHeld(stop.ID)
+			}
+			c.syncRiskProtection(ctx, c.order(id), true)
 			continue
 		}
 		c.syncRiskProtection(ctx, c.order(id), false)

@@ -40,7 +40,10 @@ and sell Limit Cushions, and a hotkey. The hotkey starts only the active grouped
 Chart Panel in the foreground window. The chart publishes account demand for
 paper sizing without an Account panel. Settings saves the default-off initial
 auto-send toggle together with presets; normal chart marker amendments always
-send on release. Both custody triggers are linked to the entry's fills, and
+send on release. Protected long positions can accept one pending Chart Risk Entry
+add, with a separate budget and the existing stop's mode/cushion. The two-point
+SELL keeps or raises the shared stop on first fill; preview shows combined shares.
+Both custody triggers are linked to the strategy's confirmed entry/add fills, and
 before/after estimated-risk previews do not guarantee execution or a loss cap.
 
 Dollar, Cash %, Buying Power %, Shares, and Position sizing use the selected

@@ -118,6 +118,9 @@ type LimitCushion struct {
 }
 
 type RiskEntry struct {
+	SharedEntryID      string       `json:"sharedEntryId,omitempty"`
+	AddStopPrice       float64      `json:"addStopPrice,omitempty"`
+	StopApplied        bool         `json:"stopApplied,omitempty"`
 	Protection         *TrailConfig `json:"protection,omitempty"`
 	StopID             string       `json:"stopId"`
 	Budget             float64      `json:"budget"`
@@ -130,16 +133,17 @@ type RiskEntry struct {
 }
 
 type SubmitRiskEntryArgs struct {
-	Protection  *TrailConfig `json:"protection,omitempty"`
-	Venue       string       `json:"venue"`
-	Symbol      string       `json:"symbol"`
-	BuyStop     float64      `json:"buyStop"`
-	SellStop    float64      `json:"sellStop"`
-	Mode        string       `json:"mode"`
-	Value       float64      `json:"value"`
-	MaxQty      float64      `json:"maxQty"`
-	BuyCushion  LimitCushion `json:"buyCushion"`
-	SellCushion LimitCushion `json:"sellCushion"`
+	SharedEntryID string       `json:"sharedEntryId,omitempty"`
+	Protection    *TrailConfig `json:"protection,omitempty"`
+	Venue         string       `json:"venue"`
+	Symbol        string       `json:"symbol"`
+	BuyStop       float64      `json:"buyStop"`
+	SellStop      float64      `json:"sellStop"`
+	Mode          string       `json:"mode"`
+	Value         float64      `json:"value"`
+	MaxQty        float64      `json:"maxQty"`
+	BuyCushion    LimitCushion `json:"buyCushion"`
+	SellCushion   LimitCushion `json:"sellCushion"`
 }
 
 type HeldOrder struct {

@@ -112,6 +112,14 @@ hotkey. Focus a grouped chart, press the hotkey, then click the buy trigger and
 sell stop or drag between them. Only brief setup instructions and actionable
 warnings float over the bottom Volume area. The two axis chips expose planned
 shares, execution limits, custody, expiry and Enter/Escape shortcuts on hover.
+On a fully protected Chart Risk Entry long position, the same two points create
+an add with its own risk budget and one shared stop. The SELL must keep or raise
+the current stop and remain below BUY. Preview shows existing + added = total
+shares and the shared stop change, which takes effect only on first fill.
+Existing Protection Mode, Sell Limit Cushion and trailing progress are retained;
+one pending BUY (including a partial/cancel-pending remainder) blocks another add.
+Canceling an add leaves filled shares protected. Pending BUY hover details show
+the proposed shared stop; a stale protection owner requires a new chart draft.
 A green BUY or red SELL Order Preview Line follows the proposed risk trigger,
 with a read-only Preview Price Label and no × action. Selected draft endpoints
 retain their Order Price Pills, including while another price is being selected
