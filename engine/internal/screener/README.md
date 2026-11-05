@@ -48,7 +48,8 @@ coverage. The unofficial Yahoo endpoints can fail or change. A broad first run
 can take a while, especially when many symbols need individual Yahoo histories.
 Results appear as stocks are checked and Cancel remains available. Verified
 Yahoo histories are cached for 15 minutes. Missing histories retry on the next
-run. Demo uses synthetic archive data only.
+run. Demo uses synthetic archive data and selects the previous trading date
+because its daily bars are archived at Eastern midnight.
 
 High lookbacks: All-time, six calendar months, one calendar year, or custom
 1–2520 trading sessions. Calendar subtraction clamps month ends. Previous High

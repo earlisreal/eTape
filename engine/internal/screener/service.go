@@ -97,7 +97,8 @@ func (s *Service) Start(args wsmsg.RunScreenerArgs) error {
 		v := *filters.MaxChangePct
 		filters.MaxChangePct = &v
 	}
-	j := &job{cancel: cancel, active: true, state: wsmsg.ScreenerState{PanelID: args.PanelID, RunID: s.seq, Status: "queued", AsOf: CompletedDate(s.clk.Now()).Format("2006-01-02"), StartedAt: s.clk.Now().UTC().Format(time.RFC3339), Filters: filters, Rows: []wsmsg.ScreenerRow{}}}
+	now := s.clk.Now()
+	j := &job{cancel: cancel, active: true, state: wsmsg.ScreenerState{PanelID: args.PanelID, RunID: s.seq, Status: "queued", AsOf: s.source.AsOf(now).Format("2006-01-02"), StartedAt: now.UTC().Format(time.RFC3339), Filters: filters, Rows: []wsmsg.ScreenerRow{}}}
 	s.jobs[args.PanelID] = j
 	s.publish(j)
 	s.wg.Add(1)

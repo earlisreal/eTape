@@ -25,6 +25,8 @@ type fakeSource struct {
 	daily    func(context.Context, Instrument) ([]feed.Bar, error)
 }
 
+func (s fakeSource) AsOf(now time.Time) time.Time { return CompletedDate(now) }
+
 func (s fakeSource) Discover(ctx context.Context, _ wsmsg.ScreenerFilters, _, _ time.Time) (Discovery, error) {
 	stocks, total, warning, err := s.discover(ctx)
 	return Discovery{Stocks: stocks, Universe: total, Warning: warning}, err
@@ -67,6 +69,23 @@ func TestScreenCompletesWithoutOpenD(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			testOfflineScreen(t, test.useAlpaca, test.missing, test.wantClose)
 		})
+	}
+}
+
+func TestDemoScreensLastArchivedTradingDayAfterClose(t *testing.T) {
+	archived := testDate("2026-11-03")
+	stock, bars := history(archived, 30)
+	source := DemoSource{Symbols: []string{stock.Symbol}, Read: func(string) ([]feed.Bar, error) { return bars, nil }}
+	pub := make(statePublisher, 10)
+	clk := clock.NewFake(archived.AddDate(0, 0, 1).Add(17 * time.Hour))
+	s := New(t.Context(), clk, source, pub)
+	if err := s.Start(wsmsg.RunScreenerArgs{PanelID: "main/one", Filters: testFilters()}); err != nil {
+		t.Fatal(err)
+	}
+	result := nextStatus(t, pub, "complete")
+	s.Stop()
+	if result.AsOf != "2026-11-03" || len(result.Rows) != 1 || result.Unavailable != 0 {
+		t.Fatalf("after-close demo screen: %+v", result)
 	}
 }
 

@@ -35,6 +35,7 @@ type Discovery struct {
 }
 
 type Source interface {
+	AsOf(time.Time) time.Time
 	Discover(context.Context, wsmsg.ScreenerFilters, time.Time, time.Time) (Discovery, error)
 	Daily(context.Context, Instrument, time.Time) ([]feed.Bar, error)
 }
@@ -48,6 +49,8 @@ type MarketSource struct {
 func NewMarketSource(r Requester, yahoo *yahoo.Client, alpaca *alpaca.Client) *MarketSource {
 	return &MarketSource{r: r, yahoo: yahoo, alpaca: alpaca}
 }
+
+func (s *MarketSource) AsOf(now time.Time) time.Time { return CompletedDate(now) }
 
 func (s *MarketSource) Discover(ctx context.Context, f wsmsg.ScreenerFilters, date, now time.Time) (Discovery, error) {
 	discovery, err := s.discoverOpenD(ctx, f, date, now)
@@ -354,6 +357,11 @@ func (s *MarketSource) Daily(ctx context.Context, stock Instrument, date time.Ti
 type DemoSource struct {
 	Symbols []string
 	Read    func(string) ([]feed.Bar, error)
+}
+
+func (s DemoSource) AsOf(now time.Time) time.Time {
+	// Synthetic bars archive on ET-midnight rollover.
+	return session.PreviousTradingDay(now)
 }
 
 func (s DemoSource) Discover(ctx context.Context, _ wsmsg.ScreenerFilters, _ time.Time, _ time.Time) (Discovery, error) {
