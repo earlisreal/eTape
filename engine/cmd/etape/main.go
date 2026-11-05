@@ -44,6 +44,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/pricealert"
 	"github.com/earlisreal/eTape/engine/internal/quota"
 	"github.com/earlisreal/eTape/engine/internal/scan"
+	"github.com/earlisreal/eTape/engine/internal/screener"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/singleinstance"
 	"github.com/earlisreal/eTape/engine/internal/ssr"
@@ -701,6 +702,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	var tail backfill.TailFetcher
 	var dailyChain, intradayChain []backfill.Source
 	var scannerHistoryFetch func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error)
+	var screenerSource screener.Source
 
 	wl, err := watchlist.NewList(st)
 	if err != nil {
@@ -719,6 +721,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		gen := synth.New(seed, clock.System{})
 		gen.Seed(st, clock.System{}.Now().UnixMilli()) // flushes internally
 		wl.Seed(gen.Symbols())                         // synth universe; trusted, no probe; into throwaway demo.db
+		screenerSource = screener.DemoSource{Symbols: gen.Symbols(), Read: st.ReadDailyBars}
 		sf := synth.NewFeed(gen, st, clock.System{})
 		req := synth.NewRequester(gen)
 		execCore.Do(exec.ConfigureHeldDemand{Demand: engineHeldDemand{feed: sf}})
@@ -895,6 +898,13 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		})
 	}
 	startPollers(ctx, cfg, scannerDefaults, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, accountPoller, firstAlpacaAssetReader(vbs), backfillOne, scannerHistoryFetch, !*demo, &scanWG)
+	if screenerSource == nil && cfg.Backfill.Yahoo.Enabled {
+		screenerSource = screener.NewOpenDSource(pollReq, histyahoo.New("", clock.System{}).ScreenerDailyBars)
+	}
+	screenService := screener.New(ctx, uihubClk, screenerSource, hub)
+	hub.SetScreener(screenService)
+	scanWG.Add(1)
+	go func() { defer scanWG.Done(); <-ctx.Done(); screenService.Stop() }()
 	mode := "live"
 	if *demo {
 		mode = "demo"

@@ -65,6 +65,18 @@ React/Vite shell around imperative market-data stores and renderers. Wire messag
 Each Scanner Panel persists its own filters with its workspace document and
 keeps a separate sticky board, sorting, seen state and sound eligibility in
 `ScannerStore`. The engine shares discovery and request budgets across panels.
+
+The separate Screener Panel runs end-of-day swing screens explicitly, with
+All-time, six-month, one-year or custom trading-day highs and Near/New/Either
+conditions. Optional filters cover price, average dollar volume, estimated cap,
+SMA trend/extension, 1M change and ATR %. Built-in and saved presets persist
+per panel in its Workspace document. `ScreenerStore` routes low-frequency
+`screener.state` snapshots by workspace/panel identity. Results stay stable
+until another run and survive reconnects during the engine run. Double-click
+or Enter loads a symbol into the selected Link Group; + Watch adds it to the
+global Watchlist. Missing history is counted; cancellation/errors label partial
+results. See [Screener data rules](../engine/internal/screener/README.md).
+
 Closing a workspace pauses its Scanner demand; an enabled Monitoring workspace
 keeps following its selected Scanner Source, including when that source window
 is closed. Session Volume sorts by current session shares and reports the age

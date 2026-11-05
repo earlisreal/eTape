@@ -21,6 +21,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/pricealert"
 	"github.com/earlisreal/eTape/engine/internal/scan"
+	"github.com/earlisreal/eTape/engine/internal/screener"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
@@ -144,6 +145,7 @@ type historyFallbackBox struct {
 // method (symbol-existence validation for EnsureSymbol/FocusGroup) — a
 // field and a method can't share a name on the same type.
 type commands struct {
+	screener              atomic.Pointer[screener.Service]
 	priceAlerts           atomic.Pointer[pricealert.Manager]
 	ex                    execDoer
 	cfg                   configStore
@@ -229,6 +231,28 @@ func ackFromCmd(a exec.CmdAck) wsmsg.AckMsg {
 }
 
 func (cd *commands) handle(ctx context.Context, name string, args json.RawMessage, connID uint64, reply func(wsmsg.AckMsg)) (wsmsg.AckMsg, bool) {
+	if name == "RunScreener" || name == "CancelScreener" {
+		service := cd.screener.Load()
+		if service == nil {
+			return blocked("Screener is not ready"), false
+		}
+		if name == "RunScreener" {
+			var a wsmsg.RunScreenerArgs
+			if json.Unmarshal(args, &a) != nil {
+				return blocked("bad args"), false
+			}
+			if err := service.Start(a); err != nil {
+				return blocked(err.Error()), false
+			}
+		} else {
+			var a wsmsg.CancelScreenerArgs
+			if json.Unmarshal(args, &a) != nil {
+				return blocked("bad args"), false
+			}
+			service.Cancel(a.PanelID)
+		}
+		return wsmsg.AckMsg{Status: wsmsg.AckAccepted}, false
+	}
 	if ack, handled := cd.handlePriceAlert(name, args, connID); handled {
 		return ack, false
 	}

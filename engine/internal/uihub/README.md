@@ -1,5 +1,10 @@
 # UI Hub
 
+`RunScreener` and `CancelScreener` control explicit end-of-day screens through
+the background [Screener service](../screener/README.md). `screener.state` is a
+low-frequency full progress/results snapshot keyed by workspace/panel identity,
+mirrored for reconnects. DTOs are Go-owned in `wsmsg/screener.go`.
+
 WebSocket handshakes require a loopback IP or exact `localhost` request host.
 Browser origins must match that host and port; external, opaque and malformed
 origins receive HTTP 403 before a connection is registered. This also rejects

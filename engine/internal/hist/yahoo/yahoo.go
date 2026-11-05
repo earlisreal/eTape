@@ -103,6 +103,16 @@ type chartResp struct {
 // period1/period2 epoch seconds + interval=1d and never range= (range=
 // silently coarsens to weekly and truncates — see the spec).
 func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
+	return c.dailyBars(ctx, symbol, from, to, true)
+}
+
+// ScreenerDailyBars uses Yahoo quote OHLC (split-adjusted, without applying
+// dividend-adjusted close). Turnover is close times reported daily volume.
+func (c *Client) ScreenerDailyBars(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
+	return c.dailyBars(ctx, symbol, from, to, false)
+}
+
+func (c *Client) dailyBars(ctx context.Context, symbol string, from, to time.Time, adjustDividends bool) ([]feed.Bar, error) {
 	q := url.Values{}
 	q.Set("period1", strconv.FormatInt(from.Unix(), 10))
 	q.Set("period2", strconv.FormatInt(to.Unix(), 10))
@@ -128,27 +138,37 @@ func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Tim
 		return nil, nil
 	}
 	res := cr.Chart.Result[0]
-	if len(res.Indicators.Quote) == 0 || len(res.Indicators.AdjClose) == 0 {
+	if len(res.Indicators.Quote) == 0 || (adjustDividends && len(res.Indicators.AdjClose) == 0) {
 		return nil, nil
 	}
 	qv := res.Indicators.Quote[0]
-	adj := res.Indicators.AdjClose[0].AdjClose
+	var adj []*float64
+	if adjustDividends {
+		adj = res.Indicators.AdjClose[0].AdjClose
+	}
 	out := make([]feed.Bar, 0, len(res.Timestamp))
 	for i, ts := range res.Timestamp {
-		if i >= len(qv.Open) || i >= len(qv.High) || i >= len(qv.Low) || i >= len(qv.Close) || i >= len(adj) {
+		if i >= len(qv.Open) || i >= len(qv.High) || i >= len(qv.Low) || i >= len(qv.Close) || (adjustDividends && i >= len(adj)) {
 			continue
 		}
-		if qv.Open[i] == nil || qv.High[i] == nil || qv.Low[i] == nil || qv.Close[i] == nil || adj[i] == nil {
+		if qv.Open[i] == nil || qv.High[i] == nil || qv.Low[i] == nil || qv.Close[i] == nil || (adjustDividends && adj[i] == nil) {
 			continue // Yahoo emits occasional all-null rows
 		}
 		closeP := *qv.Close[i]
 		if closeP == 0 {
 			continue
 		}
-		scale := *adj[i] / closeP
+		scale := 1.0
+		if adjustDividends {
+			scale = *adj[i] / closeP
+		}
 		var vol int64
 		if i < len(qv.Volume) && qv.Volume[i] != nil {
 			vol = *qv.Volume[i]
+		}
+		var turnover float64
+		if !adjustDividends {
+			turnover = closeP * float64(vol)
 		}
 		out = append(out, feed.Bar{
 			Symbol:   symbol,
@@ -158,6 +178,7 @@ func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Tim
 			L:        *qv.Low[i] * scale,
 			C:        closeP * scale,
 			Volume:   vol,
+			Turnover: turnover,
 		})
 	}
 	return out, nil

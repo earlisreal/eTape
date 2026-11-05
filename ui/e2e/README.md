@@ -1,5 +1,9 @@
 # End-to-End Tests
 
+`screener.spec.ts` runs the real end-of-day Screener against the isolated demo
+archive, checks completed results and saved-preset persistence after reload,
+and captures wide/narrow layouts. It makes no live market-data or order calls.
+
 `settings-redesign.spec.ts` covers the data-settings save/reopen path against
 the demo engine. `serve.mjs` creates a temporary config so Settings tests do
 not write the user's `~/.eTape/config.toml`.

@@ -12,6 +12,7 @@ import { SessionStore } from "./SessionStore";
 import { BootStore } from "./BootStore";
 import { ExecStore } from "./ExecStore";
 import { ScannerStore } from "./ScannerStore";
+import { ScreenerStore } from "./ScreenerStore";
 import { WatchlistStore } from "./WatchlistStore";
 import { NewsStore } from "./NewsStore";
 import { StockDetailStore } from "./StockDetailStore";
@@ -34,6 +35,7 @@ export interface Stores {
   boot: BootStore;
   exec: ExecStore;
   scanner: ScannerStore;
+  screener: ScreenerStore;
   watchlist: WatchlistStore;
   news: NewsStore;
   stockDetail: StockDetailStore;
@@ -58,6 +60,7 @@ export function makeStores(): Stores {
     boot: new BootStore(),
     exec: new ExecStore(),
     scanner: new ScannerStore(),
+    screener: new ScreenerStore(),
     watchlist: new WatchlistStore(),
     news: new NewsStore(),
     stockDetail: new StockDetailStore(),
@@ -87,6 +90,7 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
     case "md.indicator": stores.indicators.apply(m); return;
     case "scanner.rank":
     case "scanner.hit": stores.scanner.apply(m); return;
+    case "screener.state": stores.screener.apply(m); return;
     case "watchlist.rows": stores.watchlist.apply(m); return;
     case "news.item": stores.news.apply(m); return;
     case "stock.detail": stores.stockDetail.apply(m); return;

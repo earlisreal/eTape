@@ -12,6 +12,7 @@ import { ChartPanel } from "./ChartPanel";
 import { LadderPanel } from "./LadderPanel";
 import { TapePanel } from "./TapePanel";
 import { ScannerPanel } from "./ScannerPanel";
+import { ScreenerPanel } from "./ScreenerPanel";
 import { WatchlistPanel } from "./WatchlistPanel";
 import { StockInfoPanel } from "./StockInfoPanel";
 import { AccountPanel } from "./AccountPanel";
@@ -23,6 +24,7 @@ import { TAPE_MIN_WIDTH } from "../../render/tape/tapeLayout";
 export interface PanelProps {
   config: PanelConfig;
   scannerId?: string;
+  screenerId?: string;
   stores: Stores;
   scheduler: Scheduler;
   width: number;
@@ -171,6 +173,14 @@ export const PANELS: Record<string, PanelDef> = {
     description: "Your pinned symbols, quote snapshots",
     symbolBearing: false,
   },
+  "screener": {
+    component: ScreenerPanel,
+    topics: ["screener.state"],
+    title: "Screener",
+    glyph: "⌕",
+    description: "End-of-day swing screens, all-time and rolling highs",
+    symbolBearing: false,
+  },
   "stock-info": stockInfoPanel,
   // Saved workspaces may still carry the former panel id.
   "news": stockInfoPanel,
@@ -239,7 +249,7 @@ export const PANELS: Record<string, PanelDef> = {
 export const DEV_PANELS = new Set(["smoke-painter"]);
 export const isDevPanel = (panelId: string): boolean => DEV_PANELS.has(panelId);
 
-const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "watchlist", "stock-info", "locates",
+const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "screener", "watchlist", "stock-info", "locates",
   "account", "order-ticket", "alerts", "connection-status"];
 // "account-bar", "positions", and (as of Task 8) "open-orders" all stay
 // registered in PANELS (above) as back-compat aliases for saved workspace docs,

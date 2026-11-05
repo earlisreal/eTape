@@ -19,6 +19,16 @@ const oneDayResp = `{"chart":{"result":[{"timestamp":[1451919600],` +
 	`"indicators":{"quote":[{"open":[10],"high":[11],"low":[9],"close":[10],"volume":[1000]}],` +
 	`"adjclose":[{"adjclose":[5]}]}}],"error":null}}`
 
+func TestScreenerBarsKeepQuotePriceAndDollarVolume(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(oneDayResp)) }))
+	defer srv.Close()
+	c := New(srv.URL, clock.NewFake(time.UnixMilli(0)))
+	bars, err := c.ScreenerDailyBars(context.Background(), "US.AAPL", time.UnixMilli(0), time.UnixMilli(2_000_000_000_000))
+	if err != nil || len(bars) != 1 || bars[0].H != 11 || bars[0].C != 10 || bars[0].Volume != 1000 || bars[0].Turnover != 10_000 {
+		t.Fatalf("bars=%+v err=%v", bars, err)
+	}
+}
+
 func TestDailyBarsScalesAndBucketsToETMidnight(t *testing.T) {
 	var gotPath, gotInterval, gotRange, gotUA, gotP1, gotP2 string
 	mux := http.NewServeMux()
