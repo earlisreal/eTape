@@ -366,6 +366,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       toast.push({ level: "danger", text: `${order.symbol} (${order.venue}) Chart Risk Entry rejected: ${order.rejectReason || "Pair rejected."}` });
       return;
     }
+    if (order.riskEntryId) {
+      toast.push({ level: "danger", text: `${order.symbol} (${order.venue}) Chart Risk Entry protection rejected: ${order.rejectReason || "Verify Orders."}` });
+      return;
+    }
     if (order.deferredPositionPct === undefined) return;
     const detail = order.rejectReason || "position data unavailable";
     toast.push({ level: "danger", text: `${order.symbol} (${order.venue}) ${order.deferredPositionPct}% stop-sell rejected: ${detail}` });

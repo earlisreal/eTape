@@ -395,6 +395,61 @@ func TestRiskEntryDragRevalidatesEntryActivation(t *testing.T) {
 	}
 }
 
+func TestRiskStopDragKeepsOldTriggerWhenSharesAreCommitted(t *testing.T) {
+	c, clk, broker, ctx := newRiskCore(t)
+	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8,
+		Mode: "Dollar", Value: 100, MaxQty: 5})
+	if !ack.Accepted {
+		t.Fatalf("risk entry: %+v", ack)
+	}
+	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
+	stopID := entry.RiskEntry.StopID
+	clk.Advance(time.Millisecond)
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
+	select {
+	case req := <-broker.submits:
+		if req.ClientOrderID != entry.ID || req.Qty != 5 {
+			t.Fatalf("entry child: %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("entry did not trigger")
+	}
+	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
+	broker.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 5, Price: 10}, CumQty: 5, AvgPrice: 10}
+	stop := waitOrder(t, c, stopID, func(o Order) bool { return o.Qty == 5 })
+	sell := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeLimit, TIF: TIFDay, Qty: 2, LimitPrice: 10.1})
+	if !sell.Accepted {
+		t.Fatalf("independent sell: %+v", sell)
+	}
+	select {
+	case <-broker.submits:
+	case <-time.After(time.Second):
+		t.Fatal("independent sell did not reach broker")
+	}
+	broker.ev <- OrderAccepted{V: "v", OID: sell.OrderID, Ts: clk.Now().UnixMilli()}
+	waitOrder(t, c, sell.OrderID, func(o Order) bool { return o.Status == StatusAccepted })
+	move := ReplaceOrder{Venue: "v", OrderID: stopID, StopPrice: 9.9,
+		ExpectedHeldPhase: stop.Held.Phase, ExpectedRiskEntryPhase: "ACTIVATED"}
+	if edited := c.Do(move); !edited.Accepted {
+		t.Fatalf("non-crossing edit: %+v", edited)
+	}
+	move.StopPrice = 10
+	if edited := c.Do(move); edited.Accepted || edited.Reason != "stop stays at $9.9: 5 shares needed, 3 available" {
+		t.Fatalf("immediately triggering edit: %+v", edited)
+	}
+	clk.Advance(time.Millisecond)
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.9))
+	rejected := waitOrder(t, c, stopID, func(o Order) bool { return o.Status == StatusRejected })
+	if rejected.StopPrice != 9.9 || rejected.RejectReason != "trigger gate: sell quantity exceeds uncommitted long position" {
+		t.Fatalf("original trigger did not recheck share availability: %+v", rejected)
+	}
+	select {
+	case req := <-broker.submits:
+		t.Fatalf("overlapping protective order reached broker: %+v", req)
+	default:
+	}
+}
+
 func TestRiskEntryRecoveryKeepsPairPausedWithoutBrokerReplay(t *testing.T) {
 	c, clk, _, ctx := newRiskCore(t)
 	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "CashPct", Value: 1, MaxQty: 40})

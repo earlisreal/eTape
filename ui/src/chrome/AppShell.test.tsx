@@ -153,13 +153,27 @@ describe("Chart Risk Entry lifecycle toasts", () => {
     expect(screen.getAllByText("AAPL (sim) Chart Risk Entry rejected: Pair rejected.")).toHaveLength(1);
     second.unmount();
   });
-  it("ignores unrelated/protective rejections while preserving deferred stop-sell feedback", () => {
+  it("reports a linked protection rejection once without replaying snapshots", async () => {
+    const { stores } = mount(seed);
+    const protection = entry({ id: "stop", side: "SELL", riskEntryId: "entry",
+      rejectReason: "trigger gate: sell quantity exceeds uncommitted long position" });
+    delete protection.riskEntry;
+    const message = `AAPL (sim) Chart Risk Entry protection rejected: ${protection.rejectReason}`;
+    await act(async () => stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [{ ...protection, id: "historical" }] }));
+    expect(screen.queryByText(message)).toBeNull();
+    act(() => {
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: protection });
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: protection });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [protection] });
+    });
+    expect(screen.getAllByText(message)).toHaveLength(1);
+  });
+  it("ignores unrelated rejections while preserving deferred stop-sell feedback", () => {
     const { stores } = mount(seed);
     const ordinary = entry({ id: "ordinary" });
     delete ordinary.riskEntry;
     act(() => {
       stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: ordinary });
-      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...ordinary, id: "protection", riskEntryId: "entry" } });
     });
     expect(screen.queryByRole("alert")).toBeNull();
     act(() => stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...ordinary, id: "deferred", deferredPositionPct: 50, rejectReason: "no position" } }));

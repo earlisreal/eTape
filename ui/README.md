@@ -130,13 +130,16 @@ Each failed attempt also shows one standard four-second error toast with its
 symbol, Execution Venue, and reason, including closed-session blockers. Auto-send
 reports after completing SELL or a price correction; manual mode reports on Enter.
 Late failure replies still identify the original submission after changing chart
-context. Later entry activation/broker rejection or unknown activation shows once
-in every open workspace window. Unknown outcomes warn to verify Orders and avoid
+context. Entry rejection, linked protection rejection, and unknown entry
+activation show once per new outcome in every open workspace window.
+Unknown outcomes warn to verify Orders and avoid
 resubmitting; a later confirmed rejection is a distinct alert. Repeated deltas,
 repaints, and initial/reconnect snapshots do not replay failure toasts. Persistent
 draft/order status remains available after dismissal.
-Submitted linked markers always request edits on release, showing updated shares
-on hover and an above-budget warning after activation. Waiting linked protection
+Submitted linked markers request edits on release, showing updated shares
+on hover and an above-budget warning after activation. If a moved stop would
+trigger immediately but working sells leave too few shares available, the chart
+shows the rejection and the existing stop stays armed. Waiting linked protection
 shows planned shares; deferred position sizing shows its percentage until the
 trigger determines actual shares. Cancel Protection leaves
 filled shares open. Current protection problems appear once per symbol in the

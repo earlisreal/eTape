@@ -510,19 +510,30 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 	} else if o.ID != entry.ID && !c.state.PositionsReady(entry.Venue) {
 		return blocked("position data unavailable")
 	}
+	current := entry
+	if o.ID != entry.ID {
+		current = stop
+	}
+	last, hasLast := c.lastEligible[o.Symbol]
+	crossed := hasLast && StopLimitTriggered(current.Side, last.Price, current.StopPrice)
+	// A crossing drag must not discard the original protection on a known share conflict.
+	if o.RiskEntryID != "" && crossed && c.freshEligiblePrint(last) && c.protectionCanWait(stop) &&
+		stop.Held.DeadlineMs > c.now() && c.protectionPriceAccepted(last) {
+		req := OrderRequest{Venue: stop.Venue, Symbol: stop.Symbol, Side: stop.Side}
+		if available, reason := c.sellLeavesCheck(req, stop.LeavesQty, stop.ID); reason != "" {
+			if reason == sellLeavesShortfall {
+				reason = fmt.Sprintf("%g shares needed, %g available", stop.LeavesQty, available)
+			}
+			return blocked(fmt.Sprintf("stop stays at $%g: %s", o.StopPrice, reason))
+		}
+	}
 	entry.UpdatedMs = c.now()
 	stop.UpdatedMs = c.now()
 	if err := c.appendAndFold(RiskEntryChanged{Entry: entry, Stop: stop}, SrcLocal); err != nil {
 		return blocked("event append failed: " + err.Error())
 	}
-	if last, ok := c.lastEligible[o.Symbol]; ok && c.freshEligiblePrint(last) {
-		current := entry
-		if o.ID != entry.ID {
-			current = stop
-		}
-		if StopLimitTriggered(current.Side, last.Price, current.StopPrice) {
-			c.activateProtectedStop(ctx, current, last)
-		}
+	if crossed && c.freshEligiblePrint(last) {
+		c.activateProtectedStop(ctx, current, last)
 	}
 	return CmdAck{Accepted: true, OrderID: o.ID}
 }

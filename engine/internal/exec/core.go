@@ -1138,33 +1138,37 @@ func newOrderFromRequest(req OrderRequest, now int64) Order {
 		StopPrice: req.StopPrice, Status: StatusSubmitted, LeavesQty: req.Qty, CreatedMs: now, UpdatedMs: now}
 }
 
+const sellLeavesShortfall = "sell quantity exceeds uncommitted long position"
+
 func (c *Core) checkSellLeaves(req OrderRequest, leaves float64, excludeID string) (bool, string) {
+	_, reason := c.sellLeavesCheck(req, leaves, excludeID)
+	return reason == "", reason
+}
+
+func (c *Core) sellLeavesCheck(req OrderRequest, leaves float64, excludeID string) (available float64, reason string) {
 	if c.trailPositionChecks[req.Venue] != nil {
-		return false, "position attribution pending; reconcile orders and positions"
+		return 0, "position attribution pending; reconcile orders and positions"
 	}
 	if c.state.Venue(req.Venue).FlattenPending {
-		return false, "venue flatten is awaiting authoritative reconciliation"
+		return 0, "venue flatten is awaiting authoritative reconciliation"
 	}
 	if !c.state.PositionsReady(req.Venue) {
-		return false, "position data unavailable; reconcile the venue before selling"
+		return 0, "position data unavailable; reconcile the venue before selling"
 	}
 	long := c.state.VenuePositionShares(req.Venue, req.Symbol)
 	if longward(req.Side) {
 		if long >= 0 {
-			return false, "no open short position to cover"
+			return 0, "no open short position to cover"
 		}
 		long = -long
 	} else if long <= 0 {
-		return false, "no open long position to sell"
+		return 0, "no open long position to sell"
 	}
-	available := long - c.state.VenueReducingCommittedShares(req.Venue, req.Symbol, req.Side, excludeID)
-	if available < 0 {
-		available = 0
-	}
+	available = max(0, long-c.state.VenueReducingCommittedShares(req.Venue, req.Symbol, req.Side, excludeID))
 	if leaves > available+1e-9 {
-		return false, "sell quantity exceeds uncommitted long position"
+		return available, sellLeavesShortfall
 	}
-	return true, ""
+	return available, ""
 }
 
 func (c *Core) requiresReductionGuard(req OrderRequest) bool {

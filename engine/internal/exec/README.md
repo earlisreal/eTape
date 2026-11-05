@@ -132,6 +132,9 @@ late fills discovered by reconciliation require manual Resume even with healthy 
 Marker edits retain cushions, resize only before buy activation against the
 original dollar budget with the reviewed quantity as a ceiling, and lock quantities thereafter. Commands carry observed
 held and entry phases so activation during a drag rejects a stale amendment.
+A stop edit that would activate immediately on a confirmed print checks current
+sell availability before saving. A blocked edit leaves the existing stop armed.
+Activation still checks availability against current shares and working sells.
 Protection failures and DAY expiry can leave shares open; the UI reports them.
 
 Protection warnings live in the selected Account panel, once per symbol.
