@@ -44,3 +44,15 @@ the asynchronous catalog loaded; it now awaits the workspace button.
 Browser screenshot reviewed: `ui/e2e/.report/chart-risk-position-add-narrow.png`
 (generated, ignored). No live-order or connected-broker verification was run;
 this task authorizes implementation and simulator/fixture checks only.
+
+## Hosted integration follow-up
+
+The first full run passed Windows engine and UI checks. Ubuntu failed the
+unrelated `TestExtendedSessionPolicyUsesExchangeTimeAndKeepsOddLotsPriceIneligible`
+because its drain helper returned after a 100 ms idle period before receiving
+the tape. That test now waits for its actual TapeUpdate with a bounded deadline;
+production market-data behavior is unchanged. The exact test passed 100 local
+repetitions before the fix; the hosted log supplies the observed timing failure.
+After the fix, 100 race-enabled repetitions, `go test -race ./internal/md`,
+`golangci-lint run` and `git diff --check` passed. A fresh full hosted run is
+required on the follow-up main commit before handoff.

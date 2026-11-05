@@ -183,12 +183,23 @@ func TestRangeOnlyPrintExtendsRangeWithoutChangingLast(t *testing.T) {
 }
 
 func TestExtendedSessionPolicyUsesExchangeTimeAndKeepsOddLotsPriceIneligible(t *testing.T) {
-	c, drain := runCore(t)
+	c, _ := runCore(t)
 	c.Feed(feed.TicksEvent{Ticks: []feed.Tick{
 		conditionTick(1, -2*time.Hour.Milliseconds(), 101, 10, feed.TradeConditionFormT, feed.Buy),
 		conditionTick(2, -time.Hour.Milliseconds(), 999, 10, feed.TradeConditionOddLot, feed.Sell),
 	}})
-	ticks := tapeFrom(drain())
+	var ticks []feed.Tick
+	deadline := time.After(5 * time.Second)
+	for ticks == nil {
+		select {
+		case update := <-c.Updates():
+			if tape, ok := update.(TapeUpdate); ok {
+				ticks = tape.Ticks
+			}
+		case <-deadline:
+			t.Fatal("extended-session tape update did not arrive")
+		}
+	}
 	if len(ticks) != 2 || !ticks[0].RangeEligible || !ticks[0].LastEligible || ticks[1].RangeEligible || ticks[1].LastEligible || !ticks[1].VolumeEligible {
 		t.Fatalf("extended eligibility = %+v", ticks)
 	}
