@@ -138,6 +138,7 @@ type Orchestrator struct {
 	older      singleflight.Group
 	olderDay   singleflight.Group
 	warm       singleflight.Group
+	bootstrap  singleflight.Group
 	archiveSem chan struct{}
 	foreground chan struct{}
 	warmMu     sync.Mutex
@@ -166,6 +167,48 @@ const chartHistorySlowThreshold = 3 * time.Second
 
 var focusedCacheTimeout = 3 * time.Second
 
+// BootstrapChartHistory confirms an uncached symbol using recent provider bars
+// when OpenD cannot validate it. Persist the bars before admitting the chart so
+// the regular archive-first seed can display them on its first load.
+func (o *Orchestrator) BootstrapChartHistory(ctx context.Context, symbol string) bool {
+	value, _, _ := o.bootstrap.Do(symbol, func() (any, error) {
+		now := o.clk.Now()
+		var daily, minute []feed.Bar
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			to := completedDailyTo(now)
+			from := o.dailyFrom(now)
+			if recent := to.AddDate(0, -6, 0); recent.After(from) {
+				from = recent
+			}
+			daily, _, _ = walkChain(ctx, symbol, from, to, o.daily, boundedChartFetch(dailyBars), true)
+		})
+		wg.Go(func() {
+			to := completed1mTo(now)
+			minute, _, _ = walkChain(ctx, symbol, intradayFrom(to, 5), to, o.intraday, boundedChartFetch(intraday1m), false)
+		})
+		wg.Wait()
+		if ctx.Err() != nil {
+			return false, nil
+		}
+		minuteSaved := o.archiveCache(symbol, "1m", minute)
+		dailySaved := o.archiveCache(symbol, "1d", daily)
+		return dailySaved || minuteSaved, nil
+	})
+	return ctx.Err() == nil && value.(bool)
+}
+
+func boundedChartFetch(pick fetchFunc) fetchFunc {
+	return func(source Source) func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error) {
+		return func(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
+			// An Alpaca startup cooldown must leave time for the daily fallback.
+			ctx, cancel := context.WithTimeout(ctx, focusedCacheTimeout)
+			defer cancel()
+			return pick(source)(ctx, symbol, from, to)
+		}
+	}
+}
+
 // WarmArchive fills the configured persistent history only. It never publishes to md.Core.
 func (o *Orchestrator) WarmArchive(ctx context.Context, symbol string) error {
 	days := o.cfg.IntradayDays
@@ -185,9 +228,9 @@ func (o *Orchestrator) WarmArchive(ctx context.Context, symbol string) error {
 }
 
 // PrepareChart loads the configured archive windows plus both OpenD caches,
-// then submits one ordered core seed. Its dedicated slot cannot queue behind
-// scanner/archive work.
-func (o *Orchestrator) PrepareChart(ctx context.Context, symbol string) error {
+// then submits one ordered core seed. It reports whether a history provider
+// can fill in for a failed OpenD cache read.
+func (o *Orchestrator) PrepareChart(ctx context.Context, symbol string) (bool, error) {
 	started := time.Now()
 	queued := time.Now()
 	var queueWait time.Duration
@@ -196,7 +239,7 @@ func (o *Orchestrator) PrepareChart(ctx context.Context, symbol string) error {
 		defer func() { <-o.foreground }()
 		queueWait = time.Since(queued)
 	case <-ctx.Done():
-		return ctx.Err()
+		return false, ctx.Err()
 	}
 
 	now := o.clk.Now()
@@ -247,7 +290,7 @@ func (o *Orchestrator) PrepareChart(ctx context.Context, symbol string) error {
 		daily = append(daily, clipBars(cachedDaily.bars, fromDaily.UnixMilli(), now.UnixMilli())...)
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return false, ctx.Err()
 	}
 	coreStarted := time.Now()
 	o.seeder.SeedChartHistory(symbol, daily, bars1m, bars10s)
@@ -271,7 +314,7 @@ func (o *Orchestrator) PrepareChart(ctx context.Context, symbol string) error {
 			"coreSeed", coreSeedDuration.Round(time.Millisecond),
 			"total", total.Round(time.Millisecond))
 	}
-	return nil
+	return cached1m.err != nil && len(o.intraday) > 0 || cachedDaily.err != nil && len(o.daily) > 0, nil
 }
 
 func clipBars(bars []feed.Bar, fromMs, toMs int64) []feed.Bar {
@@ -284,19 +327,21 @@ func clipBars(bars []feed.Bar, fromMs, toMs int64) []feed.Bar {
 	return out
 }
 
-func (o *Orchestrator) archiveCache(symbol, timeframe string, bars []feed.Bar) {
+func (o *Orchestrator) archiveCache(symbol, timeframe string, bars []feed.Bar) bool {
 	if len(bars) == 0 {
-		return
+		return false
 	}
 	if a, ok := o.archive.(rangeArchive); ok {
 		if err := a.ArchiveRange(symbol, timeframe, bars[0].BucketMs, bars[len(bars)-1].BucketMs, bars); err != nil {
 			slog.Warn("chart history cache archive failed", "symbol", symbol, "timeframe", timeframe, "err", err)
+			return false
 		}
 	} else if timeframe == "1m" {
 		o.archive1m(bars)
 	} else {
 		o.archiveDailyBars(bars)
 	}
+	return true
 }
 
 func (o *Orchestrator) symbolWarmLock(symbol string) *sync.Mutex {

@@ -811,17 +811,24 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 				Concurrency:   cfg.Backfill.Concurrency,
 			},
 		)
+		if len(dailyChain) > 0 || len(intradayChain) > 0 {
+			hub.SetHistoryFallback(orch.BootstrapChartHistory)
+		}
 		prepareChart = func(sym string, done func(ok bool)) {
 			warmSeen.Store(sym, struct{}{})
 			backfillWG.Add(1)
 			go func() {
 				defer backfillWG.Done()
-				err := orch.PrepareChart(ctx, sym)
+				needsProviderHistory, err := orch.PrepareChart(ctx, sym)
 				if done != nil {
 					done(err == nil)
 				}
 				if err == nil {
 					err = orch.WarmArchive(ctx, sym)
+					if needsProviderHistory && ctx.Err() == nil {
+						_, seedErr := orch.PrepareChart(ctx, sym)
+						err = errors.Join(err, seedErr)
+					}
 				}
 				if err != nil && ctx.Err() == nil {
 					log.Warn("focused history warm failed", "symbol", sym, "err", err)
@@ -914,7 +921,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	// runSealScheduler (RequestSeal, joined via sealSchedWG — also depends
 	// only on ctx, same reasoning as dropWG), exec.Core.Run
 	// (AppendExecEvent, joined via execDone), and every uihub connection's
-	// dispatch loop (SetConfig via commandHandler.handle, joined via
+	// dispatch loop (config and chart bootstrap writes, joined via
 	// srv.Wait()). brokerWG has no store writes but is joined here too since
 	// broker goroutines feed exec.Core, not the store.
 	//

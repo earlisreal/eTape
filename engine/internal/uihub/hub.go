@@ -350,6 +350,11 @@ func (h *Hub) SetKnownSymbol(fn func(string) bool) {
 	}
 }
 
+// SetHistoryFallback installs the US symbol bootstrap used when OpenD is unavailable.
+func (h *Hub) SetHistoryFallback(fn func(context.Context, string) bool) {
+	h.cmd.historyFallback.Store(&historyFallbackBox{fn: fn})
+}
+
 func (h *Hub) feed() Feed {
 	if b := h.feedSlot.Load(); b != nil {
 		return b.f

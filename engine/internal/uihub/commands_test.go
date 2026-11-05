@@ -757,6 +757,36 @@ func TestEnsureSymbol_FeedUnavailableBlocks(t *testing.T) {
 	}
 }
 
+func TestEnsureSymbol_HistoryFallback(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		liveErr   error
+		hasBars   bool
+		wantCalls int
+		accepted  bool
+	}{
+		{name: "offline with history", liveErr: feed.ErrFeedUnavailable, hasBars: true, wantCalls: 1, accepted: true},
+		{name: "offline without history", liveErr: feed.ErrFeedUnavailable, wantCalls: 1},
+		{name: "unknown symbol", liveErr: feed.ErrUnknownSymbol, hasBars: true},
+		{name: "OpenD available", accepted: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cd, dem, _ := newCmdWith(t, tt.liveErr, false)
+			calls := 0
+			cd.historyFallback.Store(&historyFallbackBox{fn: func(_ context.Context, symbol string) bool {
+				calls++
+				return symbol == "US.AAPL" && tt.hasBars
+			}})
+			ack, _ := cd.handle(t.Context(), "EnsureSymbol",
+				[]byte(`{"demandId":"p1","symbol":"US.AAPL","profile":"focused"}`), 1, func(wsmsg.AckMsg) {})
+			if calls != tt.wantCalls || (ack.Status == wsmsg.AckAccepted) != tt.accepted ||
+				(len(dem.ensured) == 1) != tt.accepted {
+				t.Fatalf("history calls=%d, ack=%+v, demand count=%d", calls, ack, len(dem.ensured))
+			}
+		})
+	}
+}
+
 func TestEnsureSymbol_NilFeedAcceptsNoProbe(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, true) // feed getter returns nil (demo)
 	ack, _ := cd.handle(context.Background(), "EnsureSymbol",

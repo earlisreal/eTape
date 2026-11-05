@@ -153,7 +153,7 @@ no Go or Node toolchain required.
 |---|---|---|
 | Windows (x64) | `eTape-<version>-windows-amd64.zip` | Unzip and run `etape.exe`. Click "Try demo" in the app to start with a synthetic market (no setup needed) — or configure OpenD + venues in settings for live mode. `README-FIRST.txt` inside covers the details. |
 | macOS (Apple Silicon) | `eTape-<version>-macos-arm64.tar.gz` | `tar xzf` it, then run `./etape-darwin-arm64`. Click "Try demo" in the app for a synthetic market, or configure settings for live mode. (Developers: `./etape-darwin-arm64 -demo` is equivalent.) |
-| Linux (Ubuntu 24.04 or 26.04 LTS, x64) | `eTape-<version>-linux-amd64.tar.gz` | `tar xzf` it, then run `./etape-linux-amd64` in a terminal. It opens the default browser; if that fails, open `http://127.0.0.1:8686` manually. Press Ctrl+C to stop it. Use `./etape-linux-amd64 -demo` for a session without OpenD; live mode needs OpenD installed and configured separately. |
+| Linux (Ubuntu 24.04 or 26.04 LTS, x64) | `eTape-<version>-linux-amd64.tar.gz` | `tar xzf` it, then run `./etape-linux-amd64` in a terminal. It opens the default browser. If that fails, open `http://127.0.0.1:8686` manually. Press Ctrl+C to stop it. Use `./etape-linux-amd64 -demo` for synthetic data. Live quotes require a separate OpenD installation. |
 
 The Linux archive is portable and does not install a desktop launcher or OpenD.
 To upgrade, stop eTape with Ctrl+C, replace the extracted executable, and start
@@ -191,7 +191,7 @@ session:
 
 ## Live market data: moomoo OpenD
 
-eTape's market data comes from **moomoo OpenD**, the local gateway that ships with
+eTape's live market data comes from **moomoo OpenD**, the local gateway that ships with
 moomoo's [OpenAPI](https://openapi.moomoo.com/) program. One-time setup:
 
 1. **Create a moomoo account** at [moomoo.com](https://www.moomoo.com/) and enable
@@ -208,6 +208,12 @@ moomoo's [OpenAPI](https://openapi.moomoo.com/) program. One-time setup:
 
 Then just type a ticker in any panel — the engine subscribes on demand, and the
 scanner keeps the day's leading symbols warm automatically.
+
+When OpenD is unavailable, US charts can open from archived bars or fetch
+history for a new symbol. With backfill enabled, Alpaca supplies daily and
+one-minute history and Yahoo can supply daily history as a fallback. Choose
+the daily, weekly, or monthly timeframe if only Yahoo is configured. See [Alpaca setup](#setting-up-alpaca)
+for Alpaca paper credentials.
 
 **Quote entitlements** (check what your moomoo account includes for US stocks):
 

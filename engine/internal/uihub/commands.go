@@ -135,6 +135,9 @@ func validateScannerWorkspaceConfig(workspaceID string, raw json.RawMessage) err
 type watchlistBox struct{ wl watchlistCtl }
 type scannerBox struct{ scanner scannerCtl }
 type knownSymbolBox struct{ fn func(string) bool }
+type historyFallbackBox struct {
+	fn func(context.Context, string) bool
+}
 
 // commands.tester holds the venueTester dependency; it is named "tester"
 // rather than "probe" because *commands already has an unrelated probe
@@ -149,6 +152,7 @@ type commands struct {
 	va                    venueAdmin
 	feed                  func() Feed
 	knownSymbol           atomic.Pointer[knownSymbolBox]
+	historyFallback       atomic.Pointer[historyFallbackBox]
 	tester                venueTester
 	locates               LocateRegistry
 	heldStopLimitIdentity map[string]string
@@ -717,6 +721,10 @@ func (cd *commands) probe(ctx context.Context, symbol string) string {
 	case errors.Is(err, feed.ErrUnknownSymbol):
 		return "unknown symbol " + symbol
 	default:
+		if fallback := cd.historyFallback.Load(); fallback != nil && strings.HasPrefix(symbol, "US.") &&
+			errors.Is(err, feed.ErrFeedUnavailable) && fallback.fn(ctx, symbol) {
+			return ""
+		}
 		return "feed unavailable"
 	}
 }

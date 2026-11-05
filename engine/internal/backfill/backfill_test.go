@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/session"
+	"github.com/earlisreal/eTape/engine/internal/store"
 )
 
 func TestIntradayFromUsesCalendarDays(t *testing.T) {
@@ -97,7 +99,7 @@ func TestWarmUsesTieredSegmentsAndDoesNotSeedDeepSeries(t *testing.T) {
 	deepSeed := &fakeSeeder{}
 	deep := New(nil, nil, deepTail, deepSeed, &fakeArchive{},
 		clock.NewFake(fixedNow()), Config{IntradayDays: 2, Concurrency: 1})
-	if err := deep.PrepareChart(context.Background(), "US.DEEP"); err != nil {
+	if _, err := deep.PrepareChart(context.Background(), "US.DEEP"); err != nil {
 		t.Fatal(err)
 	}
 	if got := deepTail.calls.Load(); got != 1 {
@@ -217,6 +219,36 @@ func (t *fakeTail) CachedDaily(ctx context.Context, _ string) ([]feed.Bar, error
 	return t.daily, t.dailyErr
 }
 
+func TestBootstrapChartHistoryLoadsOfflineChart(t *testing.T) {
+	now := fixedNow()
+	archive, err := store.Open(store.Options{Path: filepath.Join(t.TempDir(), "bars.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = archive.Close() })
+	daily := bar(completedDailyTo(now).UnixMilli())
+	minute := bar(completed1mTo(now).UnixMilli())
+	alpaca := &fakeFetcher{dErr: errors.New("Alpaca daily unavailable"), m1: []feed.Bar{minute}}
+	yahoo := &fakeFetcher{daily: []feed.Bar{daily}}
+	seed := &fakeSeeder{}
+	offline := errors.New("OpenD unavailable")
+	o := New(chain(alpaca, yahoo), chain(alpaca), &fakeTail{err: offline, dailyErr: offline}, seed, archive,
+		clock.NewFake(now), Config{})
+	if archive.HasArchivedSymbol(daily.Symbol) || !o.BootstrapChartHistory(t.Context(), daily.Symbol) {
+		t.Fatal("provider bars should admit a previously unknown chart")
+	}
+	if !archive.HasArchivedSymbol(daily.Symbol) {
+		t.Fatal("bootstrap should make the symbol known before chart demand")
+	}
+	needsProviderHistory, err := o.PrepareChart(t.Context(), daily.Symbol)
+	if err != nil || !needsProviderHistory {
+		t.Fatalf("offline preparation = %t, %v", needsProviderHistory, err)
+	}
+	if !reflect.DeepEqual(seed.daily, []feed.Bar{daily}) || !reflect.DeepEqual(seed.hist, []feed.Bar{minute}) {
+		t.Fatalf("first chart seed = daily %v, minute %v", seed.daily, seed.hist)
+	}
+}
+
 func TestFocusedCacheTimeoutReadsCachesConcurrently(t *testing.T) {
 	oldTimeout := focusedCacheTimeout
 	focusedCacheTimeout = time.Millisecond
@@ -227,7 +259,7 @@ func TestFocusedCacheTimeoutReadsCachesConcurrently(t *testing.T) {
 	o := New(nil, nil, tail, &fakeSeeder{}, &fakeArchive{},
 		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
 	started := time.Now()
-	if err := o.PrepareChart(context.Background(), "US.AAPL"); err != nil {
+	if _, err := o.PrepareChart(context.Background(), "US.AAPL"); err != nil {
 		t.Fatal(err)
 	}
 	if elapsed := time.Since(started); elapsed >= 55*time.Millisecond {
@@ -245,7 +277,7 @@ func TestPrepareChartClipsDailyArchiveBeforeCore(t *testing.T) {
 		bar(now.AddDate(-3, 0, 0).UnixMilli()),
 		bar(now.AddDate(0, -6, 0).UnixMilli()),
 	}}, clock.NewFake(now), Config{DailyYears: 1})
-	if err := o.PrepareChart(context.Background(), "US.AAPL"); err != nil {
+	if _, err := o.PrepareChart(context.Background(), "US.AAPL"); err != nil {
 		t.Fatal(err)
 	}
 	if len(seed.daily) != 1 || seed.daily[0].BucketMs != now.AddDate(0, -6, 0).UnixMilli() {
@@ -277,7 +309,10 @@ func TestPrepareChartDoesNotWaitForArchiveSlot(t *testing.T) {
 	<-fetch.started
 
 	prepared := make(chan error, 1)
-	go func() { prepared <- o.PrepareChart(context.Background(), "US.AAPL") }()
+	go func() {
+		_, err := o.PrepareChart(context.Background(), "US.AAPL")
+		prepared <- err
+	}()
 	select {
 	case err := <-prepared:
 		if err != nil {
