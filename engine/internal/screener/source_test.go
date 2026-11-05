@@ -60,9 +60,9 @@ func TestDiscoveryPaginatesAndExcludesOTCAndFunds(t *testing.T) {
 		return sourceFrame(t, &screenpb.Response{RetType: proto.Int32(0), S2C: &screenpb.S2C{LastPage: proto.Int32(1), DataList: []*screenpb.StockScreenItem{screenItem("US.BBB")}}}), nil
 	})
 	date := testDate("2026-11-04")
-	stocks, total, warning, err := NewOpenDSource(r, nil).Discover(context.Background(), testFilters(), date, date.Add(17*time.Hour))
-	if err != nil || len(stocks) != 2 || total != 2 || warning != "" || len(pages) != 2 || pages[1] != 200 {
-		t.Fatalf("stocks=%+v total=%d pages=%v warning=%s err=%v", stocks, total, pages, warning, err)
+	discovery, err := NewMarketSource(r, nil, nil).Discover(t.Context(), testFilters(), date, date.Add(17*time.Hour))
+	if err != nil || len(discovery.Stocks) != 2 || discovery.Universe != 2 || discovery.Warning != "" || len(pages) != 2 || pages[1] != 200 {
+		t.Fatalf("discovery=%+v pages=%v err=%v", discovery, pages, err)
 	}
 }
 
@@ -85,9 +85,9 @@ func TestDiscoveryFallsBackWithoutTruncatingUniverse(t *testing.T) {
 			if !afterClose {
 				now = date.AddDate(0, 0, 1).Add(12 * time.Hour)
 			}
-			stocks, total, warning, err := NewOpenDSource(r, nil).Discover(context.Background(), testFilters(), date, now)
-			if err != nil || len(stocks) != 1 || total != 1 || (afterClose && (warning == "" || calls != 1)) || (!afterClose && calls != 0) {
-				t.Fatalf("stocks=%+v total=%d warning=%s calls=%d err=%v", stocks, total, warning, calls, err)
+			discovery, err := NewMarketSource(r, nil, nil).Discover(t.Context(), testFilters(), date, now)
+			if err != nil || len(discovery.Stocks) != 1 || discovery.Universe != 1 || (afterClose && (discovery.Warning == "" || calls != 1)) || (!afterClose && calls != 0) {
+				t.Fatalf("discovery=%+v calls=%d err=%v", discovery, calls, err)
 			}
 		})
 	}

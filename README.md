@@ -102,7 +102,9 @@ and the broker of your choice for execution, and everything else is free and ope
   custom trading-day highs; Near/New/Either conditions and optional close
   confirmation. Includes price, liquidity, market-cap, trend, momentum and
   volatility filters, saved presets, sortable results, linked chart review and
-  Watchlist actions. [Data coverage and rules](engine/internal/screener/README.md).
+  Watchlist actions. When OpenD is unavailable, screening falls back to Yahoo
+  Finance and uses delayed Alpaca SIP history when configured.
+  [Data coverage and rules](engine/internal/screener/README.md).
 - Session-aware gap scanner with float, daily Vol, Session Volume, Dollar Turnover, REL VOL (Daily Rate), and inclusive Last-price bounds using the session-aware displayed price (zero disables, unknown/non-positive values fail active bounds, and admissions stay sticky), plus %-change filters, Reported Short Interest context, and per-Scanner column visibility/order
 - Independent Scanner Panels with per-panel filters, sticky boards, sorting,
   seen state and sound; one shared quota-controlled service supplies discovery.

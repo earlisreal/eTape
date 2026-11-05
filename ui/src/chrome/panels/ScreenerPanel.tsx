@@ -100,7 +100,7 @@ export function ScreenerPanel({ config, screenerId, stores, commands, onConfigCh
         </select></label>{numberField("Max % above average", "maxExtensionPct")}
       </div><div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10 }}>
         {([20, 50, 200] as const).map(n => { const key = `aboveSma${n}` as const; return <label key={n}><input type="checkbox" checked={filters[key]} onChange={e => update({ [key]: e.target.checked })} />Above SMA {n}</label>; })}
-      </div><p style={{ color: palette.textMuted, fontSize: 11 }}>Blank numeric bounds are off. Average $ volume uses 20 sessions of close × volume; 1M change uses 21 sessions; ATR uses 14-session mean true range. Market cap is close × latest reported issued shares.</p></details>
+      </div><p style={{ color: palette.textMuted, fontSize: 11 }}>Blank numeric bounds are off. Average $ volume uses 20 sessions of close × volume. 1M change uses 21 sessions and ATR uses 14-session mean true range. Market cap uses the completed close and estimated shares outstanding.</p></details>
       <details><summary style={{ cursor: "pointer" }}>Save a preset</summary><div style={{ display: "flex", gap: 6, marginTop: 8 }}>
         <input aria-label="Preset name" placeholder="Preset name" maxLength={60} style={input} value={presetName} onChange={e => setPresetName(e.target.value)} />
         <Button disabled={!presetName.trim()} onClick={savePreset}>Save preset</Button>

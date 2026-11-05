@@ -14,12 +14,12 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
+	"github.com/earlisreal/eTape/engine/internal/hist/yahoo"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
 const (
 	yahooMetadataBase           = "https://query1.finance.yahoo.com"
-	yahooMetadataCookieURL      = "https://fc.yahoo.com"
 	yahooMetadataTTL            = 24 * time.Hour
 	yahooMetadataRetry          = time.Hour
 	yahooMetadataRequestTimeout = 8 * time.Second
@@ -40,31 +40,27 @@ type yahooMetadataEntry struct {
 }
 
 type yahooMetadataCache struct {
-	base      string
-	cookieURL string
-	hc        *http.Client
-	clk       clock.Clock
-	bucket    *netx.TokenBucket
-	mu        sync.Mutex
-	sessionMu sync.Mutex
-	cookie    string
-	crumb     string
-	entries   map[string]yahooMetadataEntry
+	base    string
+	hc      *http.Client
+	clk     clock.Clock
+	bucket  *netx.TokenBucket
+	mu      sync.Mutex
+	session *yahoo.Session
+	entries map[string]yahooMetadataEntry
 }
 
 func newYahooMetadataCache(base string, clk clock.Clock, hc *http.Client) *yahooMetadataCache {
-	cookieURL := yahooMetadataCookieURL
+	if hc == nil {
+		hc = netx.NewHTTPClient(8 * time.Second)
+	}
+	auth := yahoo.NewSession(base, hc, yahooMetadataUA)
 	if base == "" {
 		base = yahooMetadataBase
 	} else {
 		base = strings.TrimRight(base, "/")
-		cookieURL = base + "/fc.yahoo.com"
-	}
-	if hc == nil {
-		hc = netx.NewHTTPClient(8 * time.Second)
 	}
 	return &yahooMetadataCache{
-		base: base, cookieURL: cookieURL, hc: hc, clk: clk,
+		base: base, hc: hc, clk: clk, session: auth,
 		bucket:  netx.NewTokenBucket(clk, 30.0/60.0, 5),
 		entries: map[string]yahooMetadataEntry{},
 	}
@@ -145,23 +141,23 @@ func (c *yahooMetadataCache) fetch(ctx context.Context, symbol string) (yahooMet
 	defer cancel()
 	// Rate-limit admission can wait for the shared bucket while the actual
 	// Yahoo session/profile request remains bounded below.
-	if err := c.ensureSession(requestCtx); err != nil {
-		return yahooMetadata{}, err
-	}
 	ticker := strings.ReplaceAll(strings.TrimPrefix(symbol, "US."), ".", "-")
 	if ticker == "" {
 		return yahooMetadata{}, fmt.Errorf("empty Yahoo ticker for %q", symbol)
 	}
-	cookie, crumb := c.session()
+	cookie, crumb, err := c.session.Credentials(requestCtx)
+	if err != nil {
+		return yahooMetadata{}, err
+	}
 	value, err := c.fetchProfile(requestCtx, ticker, cookie, crumb)
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "invalid crumb") {
 		return value, err
 	}
-	c.clearSession()
-	if err := c.ensureSession(requestCtx); err != nil {
+	c.session.Invalidate(cookie, crumb)
+	cookie, crumb, err = c.session.Credentials(requestCtx)
+	if err != nil {
 		return yahooMetadata{}, err
 	}
-	cookie, crumb = c.session()
 	return c.fetchProfile(requestCtx, ticker, cookie, crumb)
 }
 
@@ -219,82 +215,6 @@ type yahooHTTPError struct {
 
 func (e yahooHTTPError) Error() string {
 	return fmt.Sprintf("yahoo profile: status=%d body=%s", e.status, e.body)
-}
-
-func (c *yahooMetadataCache) ensureSession(ctx context.Context) error {
-	c.sessionMu.Lock()
-	defer c.sessionMu.Unlock()
-	if cookie, crumb := c.session(); cookie != "" && crumb != "" {
-		return nil
-	}
-	cookie, err := c.fetchCookie(ctx)
-	if err != nil {
-		return err
-	}
-	crumb, err := c.fetchCrumb(ctx, cookie)
-	if err != nil {
-		return err
-	}
-	c.mu.Lock()
-	c.cookie, c.crumb = cookie, crumb
-	c.mu.Unlock()
-	return nil
-}
-
-func (c *yahooMetadataCache) session() (cookie, crumb string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.cookie, c.crumb
-}
-
-func (c *yahooMetadataCache) clearSession() {
-	c.mu.Lock()
-	c.cookie, c.crumb = "", ""
-	c.mu.Unlock()
-}
-
-func (c *yahooMetadataCache) fetchCookie(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cookieURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", yahooMetadataUA)
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-	cookies := resp.Cookies()
-	values := make([]string, 0, len(cookies))
-	for _, cookie := range cookies {
-		values = append(values, cookie.Name+"="+cookie.Value)
-	}
-	if len(values) == 0 {
-		return "", fmt.Errorf("yahoo session: no cookie from %s", c.cookieURL)
-	}
-	return strings.Join(values, "; "), nil
-}
-
-func (c *yahooMetadataCache) fetchCrumb(ctx context.Context, cookie string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/test/getcrumb", nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "text/plain")
-	req.Header.Set("User-Agent", yahooMetadataUA)
-	req.Header.Set("Cookie", cookie)
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-	crumb := strings.TrimSpace(string(body))
-	if resp.StatusCode != http.StatusOK || crumb == "" {
-		return "", fmt.Errorf("yahoo session: crumb status=%d body=%s", resp.StatusCode, body)
-	}
-	return crumb, nil
 }
 
 func applyYahooMetadata(payload *wsmsg.StockDetailPayload, value yahooMetadata) {

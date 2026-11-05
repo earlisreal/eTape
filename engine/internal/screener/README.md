@@ -21,20 +21,34 @@ A prior-session run skips today's prefilter. Snapshots supply issued shares
 for estimated cap: completed close × latest reported issued shares. OpenD
 requests yield to foreground work and consume no subscription/history slots.
 
-Yahoo's [daily transport](../hist/yahoo/README.md) fetches quote-price history
-from listing. Screener keeps split-adjusted quote OHLC without the
-dividend-adjusted-close multiplier. It respects `backfill.yahoo.enabled`, while
-remaining independent of chart `daily_years` and cached archive contents.
+When OpenD stock discovery is unavailable, the Screener uses Yahoo Finance's
+paginated US equity catalog for NYSE, Nasdaq and AMEX. Yahoo first-trade dates
+set the listing boundary. Yahoo's market cap divided by its matching quote
+estimates shares outstanding for the completed-close cap calculation. Active
+market-cap bounds still require an estimate. For all-time screens that need
+Yahoo daily history, a same-session 52-week high and day high can rule out
+distant candidates before downloading their history.
+
+With Alpaca SIP backfill configured, offline screens can evaluate batches of
+split-adjusted [Alpaca daily bars](../hist/alpaca/README.md) from about 16 minutes
+after the regular close. Volume is Alpaca's reported daily volume. The service
+uses [Yahoo daily history](../hist/yahoo/README.md) for histories that Alpaca
+cannot cover, including all-time screens for listings before 2016. Yahoo keeps
+split-adjusted quote OHLC. Screening requires `backfill.yahoo.enabled` and
+uses its own history windows. Linked chart review uses the regular chart
+history fallback, which requires backfill to be enabled for uncached symbols.
+
 Unknown listing dates, missing history boundaries/expected sessions, invalid
 bars or an absent completed session leave the selected high unavailable. Old
 provider sessions remain eligible where modern holiday rules differ. The shared
 date calendar represents historical closures, including the 1994 national
 mourning closure, so complete ranges remain eligible. No 52-week or chart-cache
 substitute is labelled ATH. Results depend on provider
-coverage; the unofficial Yahoo endpoint can fail or change. The first screen
-can take several minutes under pacing. Progress and Cancel remain available.
-Verified histories are cached for 15 minutes; missing histories retry on the
-next run. Demo uses synthetic archive data only.
+coverage. The unofficial Yahoo endpoints can fail or change. A broad first run
+can take a while, especially when many symbols need individual Yahoo histories.
+Results appear as stocks are checked and Cancel remains available. Verified
+Yahoo histories are cached for 15 minutes. Missing histories retry on the next
+run. Demo uses synthetic archive data only.
 
 High lookbacks: All-time, six calendar months, one calendar year, or custom
 1–2520 trading sessions. Calendar subtraction clamps month ends. Previous High

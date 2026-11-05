@@ -3,6 +3,7 @@ package screener
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"regexp"
 	"slices"
 	"sync"
@@ -24,9 +25,10 @@ type job struct {
 	nextProgress time.Time
 }
 type cachedHistory struct {
-	date string
-	at   time.Time
-	bars []feed.Bar
+	date    string
+	listing time.Time
+	at      time.Time
+	bars    []feed.Bar
 }
 
 type Service struct {
@@ -180,63 +182,83 @@ func (s *Service) run(ctx context.Context, j *job) {
 		s.finish(ctx, j, err)
 		return
 	}
-	stocks, total, warning, err := s.source.Discover(ctx, j.state.Filters, date, s.clk.Now())
+	discovery, err := s.source.Discover(ctx, j.state.Filters, date, s.clk.Now())
 	if err != nil {
 		s.finish(ctx, j, err)
 		return
 	}
 	s.update(j, func(state *wsmsg.ScreenerState) {
 		state.Status = "running"
-		state.Universe = total
-		state.Candidates = len(stocks)
-		state.Warning = warning
+		state.Universe = discovery.Universe
+		state.Candidates = len(discovery.Stocks)
+		state.Warning = discovery.Warning
 	})
-	for _, stock := range stocks {
+	for batch := range slices.Chunk(discovery.Stocks, 64) {
 		if ctx.Err() != nil {
 			s.finish(ctx, j, ctx.Err())
 			return
 		}
-		cached, ok := s.cache[stock.Symbol]
-		var bars []feed.Bar
-		if ok && cached.date == j.state.AsOf && s.clk.Now().Sub(cached.at) < 15*time.Minute {
-			bars = cached.bars
-		} else {
-			bars, err = s.source.Daily(ctx, stock, date)
-		}
-		var row wsmsg.ScreenerRow
-		var match bool
-		if err == nil {
-			row, match, err = Evaluate(j.state.Filters, stock, bars, date)
-		}
-		if err == nil && (!ok || cached.date != j.state.AsOf || s.clk.Now().Sub(cached.at) >= 15*time.Minute) {
-			if old, exists := s.cache[stock.Symbol]; exists {
-				s.cacheBars -= len(old.bars)
-				delete(s.cache, stock.Symbol)
+		var batchBars map[string][]feed.Bar
+		if discovery.BatchDaily != nil {
+			batchBars, err = discovery.BatchDaily(ctx, batch)
+			if err != nil && ctx.Err() == nil {
+				slog.Warn("screener: Alpaca SIP history unavailable", "err", err)
+				discovery.BatchDaily = nil
+				s.update(j, func(state *wsmsg.ScreenerState) {
+					state.Warning = "OpenD unavailable. Using Yahoo Finance for stock discovery. Delayed Alpaca SIP is unavailable for the remaining stocks, so the screen will use Yahoo daily history."
+				})
 			}
-			for len(s.cache) > 0 && (len(s.cache) >= 512 || s.cacheBars+len(bars) > 500_000) {
-				for key, old := range s.cache {
-					s.cacheBars -= len(old.bars)
-					delete(s.cache, key)
-					break
+		}
+		for _, stock := range batch {
+			if ctx.Err() != nil {
+				s.finish(ctx, j, ctx.Err())
+				return
+			}
+			row, match, evalErr := s.evaluateStock(ctx, j, stock, date, batchBars[stock.Symbol])
+			s.update(j, func(state *wsmsg.ScreenerState) {
+				state.Checked++
+				if evalErr != nil {
+					state.Unavailable++
+				} else if match {
+					state.Rows = append(state.Rows, row)
 				}
-			}
-			if len(bars) <= 500_000 {
-				s.cache[stock.Symbol] = cachedHistory{date: j.state.AsOf, at: s.clk.Now(), bars: slices.Clone(bars)}
-				s.cacheBars += len(bars)
-			}
-		} else if err != nil && ok {
-			s.cacheBars -= len(cached.bars)
-			delete(s.cache, stock.Symbol)
+			})
 		}
-		s.update(j, func(state *wsmsg.ScreenerState) {
-			state.Checked++
-			if err != nil {
-				state.Unavailable++
-			} else if match {
-				state.Rows = append(state.Rows, row)
-			}
-		})
-		err = nil
 	}
 	s.finish(ctx, j, nil)
+}
+
+func (s *Service) evaluateStock(ctx context.Context, j *job, stock Instrument, date time.Time, batchBars []feed.Bar) (wsmsg.ScreenerRow, bool, error) {
+	if len(batchBars) > 0 {
+		if row, match, err := Evaluate(j.state.Filters, stock, batchBars, date); err == nil {
+			return row, match, nil
+		}
+	}
+	cached, ok := s.cache[stock.Symbol]
+	if ok && cached.date == j.state.AsOf && cached.listing.Equal(stock.ListingDate) && s.clk.Now().Sub(cached.at) < 15*time.Minute {
+		if row, match, err := Evaluate(j.state.Filters, stock, cached.bars, date); err == nil {
+			return row, match, nil
+		}
+	}
+	if ok {
+		s.cacheBars -= len(cached.bars)
+		delete(s.cache, stock.Symbol)
+	}
+	bars, err := s.source.Daily(ctx, stock, date)
+	if err != nil {
+		return wsmsg.ScreenerRow{}, false, err
+	}
+	row, match, err := Evaluate(j.state.Filters, stock, bars, date)
+	if err == nil && len(bars) <= 500_000 {
+		for len(s.cache) > 0 && (len(s.cache) >= 512 || s.cacheBars+len(bars) > 500_000) {
+			for key, old := range s.cache {
+				s.cacheBars -= len(old.bars)
+				delete(s.cache, key)
+				break
+			}
+		}
+		s.cache[stock.Symbol] = cachedHistory{date: j.state.AsOf, listing: stock.ListingDate, at: s.clk.Now(), bars: slices.Clone(bars)}
+		s.cacheBars += len(bars)
+	}
+	return row, match, err
 }

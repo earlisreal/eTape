@@ -2,7 +2,9 @@ package screener
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -15,6 +17,8 @@ import (
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
 	staticpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetstaticinfo"
 	screenpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotstockscreen"
+	"github.com/earlisreal/eTape/engine/internal/hist/alpaca"
+	"github.com/earlisreal/eTape/engine/internal/hist/yahoo"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
@@ -22,34 +26,56 @@ import (
 type Requester interface {
 	Request(context.Context, uint32, proto.Message) (opend.Frame, error)
 }
-type DailyFetcher func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error)
+
+type Discovery struct {
+	Stocks     []Instrument
+	Universe   int
+	Warning    string
+	BatchDaily func(context.Context, []Instrument) (map[string][]feed.Bar, error)
+}
 
 type Source interface {
-	Discover(context.Context, wsmsg.ScreenerFilters, time.Time, time.Time) ([]Instrument, int, string, error)
+	Discover(context.Context, wsmsg.ScreenerFilters, time.Time, time.Time) (Discovery, error)
 	Daily(context.Context, Instrument, time.Time) ([]feed.Bar, error)
 }
 
-type OpenDSource struct {
-	r     Requester
-	fetch DailyFetcher
+type MarketSource struct {
+	r      Requester
+	yahoo  *yahoo.Client
+	alpaca *alpaca.Client
 }
 
-func NewOpenDSource(r Requester, fetch DailyFetcher) *OpenDSource {
-	return &OpenDSource{r: r, fetch: fetch}
+func NewMarketSource(r Requester, yahoo *yahoo.Client, alpaca *alpaca.Client) *MarketSource {
+	return &MarketSource{r: r, yahoo: yahoo, alpaca: alpaca}
 }
 
-func (s *OpenDSource) Discover(ctx context.Context, f wsmsg.ScreenerFilters, date, now time.Time) ([]Instrument, int, string, error) {
+func (s *MarketSource) Discover(ctx context.Context, f wsmsg.ScreenerFilters, date, now time.Time) (Discovery, error) {
+	discovery, err := s.discoverOpenD(ctx, f, date, now)
+	if ctx.Err() != nil {
+		return Discovery{}, ctx.Err()
+	}
+	if err == nil {
+		return discovery, nil
+	}
+	discovery, fallbackErr := s.discoverYahoo(ctx, f, date)
+	if fallbackErr != nil {
+		return Discovery{}, fmt.Errorf("OpenD stock discovery unavailable (%v). Yahoo Finance fallback failed: %w", err, fallbackErr)
+	}
+	return discovery, nil
+}
+
+func (s *MarketSource) discoverOpenD(ctx context.Context, f wsmsg.ScreenerFilters, date, now time.Time) (Discovery, error) {
 	ctx = opend.WithBackgroundRequest(ctx)
 	frame, err := s.r.Request(ctx, opend.ProtoQotGetStaticInfo, &staticpb.Request{C2S: &staticpb.C2S{Market: proto.Int32(11), SecType: proto.Int32(3)}})
 	if err != nil {
-		return nil, 0, "", err
+		return Discovery{}, err
 	}
 	var response staticpb.Response
 	if err = proto.Unmarshal(frame.Body, &response); err != nil {
-		return nil, 0, "", err
+		return Discovery{}, err
 	}
 	if response.GetRetType() != 0 {
-		return nil, 0, "", fmt.Errorf("stock universe: %s", response.GetRetMsg())
+		return Discovery{}, fmt.Errorf("stock universe: %s", response.GetRetMsg())
 	}
 	var stocks []Instrument
 	seen := map[string]bool{}
@@ -74,13 +100,16 @@ func (s *OpenDSource) Discover(ctx context.Context, f wsmsg.ScreenerFilters, dat
 	slices.SortFunc(stocks, func(a, b Instrument) int { return strings.Compare(a.Symbol, b.Symbol) })
 	universe := len(stocks)
 	if universe == 0 {
-		return nil, 0, "", fmt.Errorf("OpenD returned no listed US stocks")
+		return Discovery{}, fmt.Errorf("OpenD returned no listed US stocks")
 	}
 	warning := ""
 	// The provider's rolling-high prefilter is a superset of the selected
 	// lookback. Never use today's screen when evaluating a prior session.
 	if date.Equal(session.Schedule(now).Date) {
 		codes, screenErr := s.highCandidates(ctx, f)
+		if errors.Is(screenErr, opend.ErrNotConnected) {
+			return Discovery{}, screenErr
+		}
 		if screenErr != nil {
 			warning = "High prefilter unavailable; checking the full US stock universe."
 		} else {
@@ -88,12 +117,15 @@ func (s *OpenDSource) Discover(ctx context.Context, f wsmsg.ScreenerFilters, dat
 		}
 	}
 	if err = s.shares(ctx, stocks); err != nil {
+		if errors.Is(err, opend.ErrNotConnected) || ctx.Err() != nil {
+			return Discovery{}, err
+		}
 		warning = strings.TrimSpace(warning + " Some market-cap data is unavailable; active market-cap bounds exclude stocks missing it.")
 	}
-	return stocks, universe, warning, nil
+	return Discovery{Stocks: stocks, Universe: universe, Warning: warning}, nil
 }
 
-func (s *OpenDSource) highCandidates(ctx context.Context, f wsmsg.ScreenerFilters) (map[string]bool, error) {
+func (s *MarketSource) highCandidates(ctx context.Context, f wsmsg.ScreenerFilters) (map[string]bool, error) {
 	days := 60
 	if f.Lookback == "trading-days" {
 		days = min(days, f.TradingDays)
@@ -149,7 +181,7 @@ func (s *OpenDSource) highCandidates(ctx context.Context, f wsmsg.ScreenerFilter
 	return nil, fmt.Errorf("high discovery exceeded pagination limit")
 }
 
-func (s *OpenDSource) shares(ctx context.Context, stocks []Instrument) error {
+func (s *MarketSource) shares(ctx context.Context, stocks []Instrument) error {
 	var failure error
 	for offset := 0; offset < len(stocks); offset += 300 {
 		batch := stocks[offset:min(offset+300, len(stocks))]
@@ -159,6 +191,9 @@ func (s *OpenDSource) shares(ctx context.Context, stocks []Instrument) error {
 		}
 		frame, err := s.r.Request(ctx, opend.ProtoQotGetSecuritySnapshot, &snappb.Request{C2S: &snappb.C2S{SecurityList: securities}})
 		if err != nil {
+			if errors.Is(err, opend.ErrNotConnected) || ctx.Err() != nil {
+				return err
+			}
 			failure = err
 			continue
 		}
@@ -184,12 +219,135 @@ func (s *OpenDSource) shares(ctx context.Context, stocks []Instrument) error {
 	return failure
 }
 
-func (s *OpenDSource) Daily(ctx context.Context, stock Instrument, date time.Time) ([]feed.Bar, error) {
+var yahooTicker = regexp.MustCompile(`^[A-Z0-9]+([.-][A-Z0-9]+)?$`)
+
+// Alpaca's SIP history begins in 2016. An ATH needs the listing boundary.
+var alpacaHistoryFloor = time.Date(2016, 1, 1, 0, 0, 0, 0, session.Loc())
+
+func (s *MarketSource) discoverYahoo(ctx context.Context, f wsmsg.ScreenerFilters, date time.Time) (Discovery, error) {
+	quotes, err := s.yahoo.ListedUSEquities(ctx)
+	if err != nil {
+		return Discovery{}, err
+	}
+	result := Discovery{Warning: "OpenD unavailable. Using Yahoo Finance for US stock discovery."}
+	closeAt := session.Schedule(date).Close
+	nextDay := date.AddDate(0, 0, 1)
+	near := f.NearPct
+	if f.Mode == "new" {
+		near = 0
+	}
+	seen := make(map[string]bool, len(quotes))
+	for _, q := range quotes {
+		if q.Type != "EQUITY" || !yahooTicker.MatchString(q.Symbol) {
+			continue
+		}
+		switch q.Exchange {
+		case "ASE", "NAS", "NCM", "NGM", "NMS", "NYQ":
+		default:
+			continue
+		}
+		stock := Instrument{Symbol: "US." + strings.ReplaceAll(q.Symbol, "-", "."), Name: q.Name}
+		if seen[stock.Symbol] {
+			continue
+		}
+		seen[stock.Symbol] = true
+		result.Universe++
+		if q.FirstTradeMs != 0 {
+			stock.ListingDate = session.Schedule(time.UnixMilli(q.FirstTradeMs)).Date
+		}
+		if positive(q.MarketCap) && positive(q.Price) {
+			stock.Shares = q.MarketCap / q.Price
+		}
+		quoteTime := time.Unix(q.MarketTime, 0)
+		// The 52-week high is a lower bound on ATH. Use a broad cutoff against
+		// the session high (an upper bound on the close), then check daily bars.
+		if f.Lookback == "all-time" && (s.alpaca == nil || stock.ListingDate.Before(alpacaHistoryFloor)) &&
+			!quoteTime.Before(closeAt) && quoteTime.Before(nextDay) && positive(q.DayHigh) && positive(q.FiftyTwoWeekHigh) &&
+			(q.FiftyTwoWeekHigh-q.DayHigh)/q.FiftyTwoWeekHigh*100 > near+1 {
+			continue
+		}
+		result.Stocks = append(result.Stocks, stock)
+	}
+	if result.Universe == 0 {
+		return Discovery{}, errors.New("stock discovery: Yahoo returned no listed US stocks")
+	}
+	if s.alpaca != nil {
+		result.Warning += " Uses delayed Alpaca SIP history where it covers the lookback, with Yahoo daily history as a fallback."
+		result.BatchDaily = s.alpacaHistory(f, date)
+	}
+	return result, nil
+}
+
+func (s *MarketSource) alpacaHistory(f wsmsg.ScreenerFilters, date time.Time) func(context.Context, []Instrument) (map[string][]feed.Bar, error) {
+	start := lookbackStart(f, date)
+	windowStart := start
+	if f.Lookback != "all-time" {
+		// Rows always display 21-session change. Longer SMA bounds need more history.
+		sessions := 22
+		if f.MaxExtensionPct > 0 {
+			sessions = max(sessions, f.ExtensionSMA)
+		}
+		if f.AboveSMA50 {
+			sessions = max(sessions, 50)
+		}
+		if f.AboveSMA200 {
+			sessions = 200
+		}
+		recent := date
+		for i := 1; i < sessions; i++ {
+			recent = session.PreviousTradingDay(recent)
+		}
+		if recent.Before(windowStart) {
+			windowStart = recent
+		}
+	}
+	return func(ctx context.Context, stocks []Instrument) (map[string][]feed.Bar, error) {
+		from := date
+		var symbols []string
+		for _, stock := range stocks {
+			coverageStart := start
+			if stock.ListingDate.After(coverageStart) {
+				coverageStart = stock.ListingDate
+			}
+			if coverageStart.Before(alpacaHistoryFloor) || !coverageStart.Before(date) {
+				continue
+			}
+			stockFrom := windowStart
+			if stock.ListingDate.After(stockFrom) {
+				stockFrom = stock.ListingDate
+			}
+			if stockFrom.Before(from) {
+				from = stockFrom
+			}
+			symbols = append(symbols, stock.Symbol)
+		}
+		if len(symbols) == 0 {
+			return nil, nil
+		}
+		if from.Before(alpacaHistoryFloor) {
+			from = alpacaHistoryFloor
+		}
+		histories, err := s.alpaca.ScreenerDailyBatch(ctx, symbols, from, date)
+		if err != nil {
+			return nil, err
+		}
+		for _, stock := range stocks {
+			if bars := histories[stock.Symbol]; len(bars) > 0 && stock.ListingDate.After(from) {
+				histories[stock.Symbol] = slices.DeleteFunc(bars, func(bar feed.Bar) bool {
+					return bar.BucketMs < stock.ListingDate.UnixMilli()
+				})
+			}
+		}
+		return histories, nil
+	}
+}
+
+func (s *MarketSource) Daily(ctx context.Context, stock Instrument, date time.Time) ([]feed.Bar, error) {
 	from := stock.ListingDate
 	if from.IsZero() {
 		from = date.AddDate(-12, 0, 0)
 	}
-	return s.fetch(ctx, stock.Symbol, from, date.AddDate(0, 0, 1))
+	return s.yahoo.ScreenerDailyBars(ctx, stock.Symbol, from, date.AddDate(0, 0, 1))
 }
 
 // DemoSource reads only the throwaway synthetic archive, never a live provider.
@@ -198,11 +356,11 @@ type DemoSource struct {
 	Read    func(string) ([]feed.Bar, error)
 }
 
-func (s DemoSource) Discover(ctx context.Context, _ wsmsg.ScreenerFilters, _ time.Time, _ time.Time) ([]Instrument, int, string, error) {
+func (s DemoSource) Discover(ctx context.Context, _ wsmsg.ScreenerFilters, _ time.Time, _ time.Time) (Discovery, error) {
 	var stocks []Instrument
 	for _, symbol := range s.Symbols {
 		if err := ctx.Err(); err != nil {
-			return nil, 0, "", err
+			return Discovery{}, err
 		}
 		bars, err := s.Read(symbol)
 		if err != nil || len(bars) == 0 {
@@ -210,7 +368,7 @@ func (s DemoSource) Discover(ctx context.Context, _ wsmsg.ScreenerFilters, _ tim
 		}
 		stocks = append(stocks, Instrument{Symbol: symbol, Name: "Demo " + strings.TrimPrefix(symbol, "US."), ListingDate: session.Schedule(time.UnixMilli(bars[0].BucketMs)).Date, Shares: 100_000_000})
 	}
-	return stocks, len(stocks), "Demo: generated daily history; no live market data.", nil
+	return Discovery{Stocks: stocks, Universe: len(stocks), Warning: "Demo: generated daily history; no live market data."}, nil
 }
 func (s DemoSource) Daily(ctx context.Context, stock Instrument, _ time.Time) ([]feed.Bar, error) {
 	if err := ctx.Err(); err != nil {

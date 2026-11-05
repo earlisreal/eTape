@@ -75,7 +75,9 @@ per panel in its Workspace document. `ScreenerStore` routes low-frequency
 until another run and survive reconnects during the engine run. Double-click
 or Enter loads a symbol into the selected Link Group; + Watch adds it to the
 global Watchlist. Missing history is counted; cancellation/errors label partial
-results. See [Screener data rules](../engine/internal/screener/README.md).
+results. When OpenD is unavailable, the status shows Yahoo stock discovery and
+whether delayed Alpaca SIP history is available. Linked charts can load from
+the archive or enabled history providers. See [Screener data rules](../engine/internal/screener/README.md).
 
 Closing a workspace pauses its Scanner demand; an enabled Monitoring workspace
 keeps following its selected Scanner Source, including when that source window

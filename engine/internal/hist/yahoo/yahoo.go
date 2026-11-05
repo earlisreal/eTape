@@ -47,24 +47,28 @@ var errNoData = errors.New("yahoo: no data for range")
 
 // Client is the Yahoo daily-bars transport.
 type Client struct {
-	base   string
-	hc     *http.Client
-	clk    clock.Clock
-	bucket *netx.TokenBucket
+	base    string
+	hc      *http.Client
+	clk     clock.Clock
+	bucket  *netx.TokenBucket
+	session *Session
 }
 
 // New builds a Client. base defaults to the production host; tests pass a mock
 // server URL. Conservative rate limit (~30 req/60 s, burst 5) since this is an
 // unofficial endpoint.
 func New(base string, clk clock.Clock) *Client {
+	hc := netx.NewHTTPClient(15 * time.Second)
+	auth := NewSession(base, hc, browserUA)
 	if base == "" {
 		base = defaultBase
 	}
 	return &Client{
-		base:   base,
-		hc:     netx.NewHTTPClient(15 * time.Second),
-		clk:    clk,
-		bucket: netx.NewTokenBucket(clk, 30.0/60.0, 5),
+		base:    base,
+		hc:      hc,
+		clk:     clk,
+		bucket:  netx.NewTokenBucket(clk, 30.0/60.0, 5),
+		session: auth,
 	}
 }
 

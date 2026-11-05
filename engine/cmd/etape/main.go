@@ -785,6 +785,13 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			}
 			tail = fd // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
 		}
+		if cfg.Backfill.Yahoo.Enabled {
+			var screenerSIP *histalpaca.Client
+			if cfg.Backfill.Alpaca.Feed == "sip" {
+				screenerSIP = alpacaSrc
+			}
+			screenerSource = screener.NewMarketSource(client, histyahoo.New("", clock.System{}), screenerSIP)
+		}
 	}
 	hub.SetFeed(feedForHub) // enables on-demand EnsureSymbol/ReleaseSymbol + FocusGroup probe
 	alerts.SetDemand(engineAlertDemand{feed: feedForHub})
@@ -898,9 +905,6 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		})
 	}
 	startPollers(ctx, cfg, scannerDefaults, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, accountPoller, firstAlpacaAssetReader(vbs), backfillOne, scannerHistoryFetch, !*demo, &scanWG)
-	if screenerSource == nil && cfg.Backfill.Yahoo.Enabled {
-		screenerSource = screener.NewOpenDSource(pollReq, histyahoo.New("", clock.System{}).ScreenerDailyBars)
-	}
 	screenService := screener.New(ctx, uihubClk, screenerSource, hub)
 	hub.SetScreener(screenService)
 	scanWG.Add(1)

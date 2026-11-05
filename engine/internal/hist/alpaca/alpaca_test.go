@@ -7,12 +7,55 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
+	"github.com/earlisreal/eTape/engine/internal/session"
 )
+
+func TestScreenerDailyBatchWaitsForDelayedCloseAndPaginates(t *testing.T) {
+	date := time.Date(2026, 11, 4, 0, 0, 0, 0, session.Loc())
+	closeAt := session.Schedule(date).Close
+	clk := clock.NewFake(closeAt.Add(15 * time.Minute))
+	var pages atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.URL.Path != "/v2/stocks/bars" || q.Get("symbols") != "AAPL,BRK.B" ||
+			q.Get("timeframe") != "1Day" || q.Get("feed") != "sip" || q.Get("adjustment") != "split" ||
+			q.Get("end") != closeAt.Add(time.Minute).UTC().Format(time.RFC3339) {
+			t.Errorf("unexpected SIP request %s %v", r.URL.Path, q)
+		}
+		if pages.Add(1) == 1 {
+			if q.Has("page_token") {
+				t.Errorf("unexpected first page token %q", q.Get("page_token"))
+			}
+			_, _ = w.Write([]byte(`{"bars":{"AAPL":[{"t":"2026-11-04T05:00:00Z","c":10}]},"next_page_token":"second"}`))
+			return
+		}
+		if q.Get("page_token") != "second" {
+			t.Errorf("unexpected next page token %q", q.Get("page_token"))
+		}
+		_, _ = w.Write([]byte(`{"bars":{"BRK.B":[{"t":"2026-11-04T05:00:00Z","c":20}]},"next_page_token":null}`))
+	}))
+	defer server.Close()
+	client := New(server.URL, "key", "secret", "sip", clk)
+	client.bucket = netx.NewTokenBucket(clk, 2.5, 3)
+	symbols := []string{"US.AAPL", "US.BRK.B"}
+	if _, err := client.ScreenerDailyBatch(t.Context(), symbols, date, date); err == nil || pages.Load() != 0 {
+		t.Fatalf("SIP should wait for the completed close: requests=%d error=%v", pages.Load(), err)
+	}
+	clk.Advance(2 * time.Minute)
+	bars, err := client.ScreenerDailyBatch(t.Context(), symbols, date, date)
+	if err != nil || len(bars["US.AAPL"]) != 1 || len(bars["US.BRK.B"]) != 1 || pages.Load() != 2 {
+		t.Fatalf("SIP batch bars=%+v pages=%d err=%v", bars, pages.Load(), err)
+	}
+	if bars["US.BRK.B"][0].Symbol != "US.BRK.B" || bars["US.BRK.B"][0].BucketMs != date.UnixMilli() {
+		t.Fatalf("incorrect chart symbol or session bucket: %+v", bars["US.BRK.B"])
+	}
+}
 
 func TestHistoricalRequestsRestoreCooldownAndPersistRetryAfter(t *testing.T) {
 	clk := clock.NewFake(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))

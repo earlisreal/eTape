@@ -819,6 +819,17 @@ func TestFocusGroup_ProbesAndAcks(t *testing.T) {
 	}
 }
 
+func TestFocusGroupAcceptsChartHistoryWithOpenDOffline(t *testing.T) {
+	cd, _, _ := newCmdWith(t, feed.ErrFeedUnavailable, false)
+	cd.historyFallback.Store(&historyFallbackBox{fn: func(_ context.Context, symbol string) bool {
+		return symbol == "US.BRK.B"
+	}})
+	ack, _ := cd.handle(t.Context(), "FocusGroup", []byte(`{"group":"blue","symbol":"US.BRK.B"}`), 1, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckAccepted {
+		t.Fatalf("offline chart focus ack = %+v", ack)
+	}
+}
+
 type spyVenueAdmin struct {
 	setCalled       bool
 	putCalled       bool

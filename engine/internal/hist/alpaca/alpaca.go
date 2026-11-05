@@ -20,6 +20,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
 const defaultDataBase = "https://data.alpaca.markets"
@@ -120,17 +121,51 @@ type barsResp struct {
 	NextPageToken *string   `json:"next_page_token"`
 }
 
-// bars pages through /v2/stocks/{sym}/bars, mapping each UTC bar-start to an
-// epoch-ms bucket start. The symbol keeps its US. prefix on the returned bars
-// (the rest of eTape keys by that string) but is stripped for the URL path.
-//
-// adjustment: DailyBars passes "all" (split + dividend, closest to moomoo
-// forward-rehab) — daily stays adjusted for continuous official prices.
-// Intraday1m passes "raw" (unadjusted) so 1m/cascaded 5m/15m/etc. history
-// matches the raw scale of the live tick/quote feed; forward adjustment on
-// intraday would scale pre-split bars up by the split ratio, corrupting
-// anything computed over a window straddling a reverse split (moomoo mirrors
-// this split — see opend/backfill.go's historyBars).
+// ScreenerDailyBatch reads split-adjusted SIP bars for several symbols at once.
+// Daily OHLC excludes extended-hours trades. Volume is Alpaca's reported volume.
+func (c *Client) ScreenerDailyBatch(ctx context.Context, symbols []string, from, date time.Time) (map[string][]feed.Bar, error) {
+	cutoff := c.clk.Now().Add(-recentSIPClampBuffer)
+	if cutoff.Before(session.Schedule(date).Close) {
+		return nil, fmt.Errorf("the regular session is still within Alpaca's SIP delay")
+	}
+	if err := c.waitStartup(ctx); err != nil {
+		return nil, err
+	}
+	to := date.AddDate(0, 0, 1).Add(-time.Second)
+	if cutoff.Before(to) {
+		to = cutoff
+	}
+	codes := make([]string, 0, len(symbols))
+	for _, symbol := range symbols {
+		codes = append(codes, strings.TrimPrefix(symbol, "US."))
+	}
+	q := c.barQuery("1Day", "split", from, to)
+	q.Set("feed", "sip")
+	q.Set("symbols", strings.Join(codes, ","))
+	out := make(map[string][]feed.Bar, len(symbols))
+	for range maxPages {
+		var page struct {
+			Bars          map[string][]barJSON `json:"bars"`
+			NextPageToken string               `json:"next_page_token"`
+		}
+		if err := c.barPage(ctx, "/v2/stocks/bars", q, true, &page); err != nil {
+			return nil, err
+		}
+		for code, bars := range page.Bars {
+			symbol := "US." + code
+			out[symbol] = appendBars(out[symbol], symbol, bars)
+		}
+		if page.NextPageToken == "" {
+			return out, nil
+		}
+		if page.NextPageToken == q.Get("page_token") {
+			return nil, fmt.Errorf("alpaca data: pagination did not advance")
+		}
+		q.Set("page_token", page.NextPageToken)
+	}
+	return nil, fmt.Errorf("alpaca data: pagination exceeded %d pages", maxPages)
+}
+
 func (c *Client) waitStartup(ctx context.Context) error {
 	if delay := c.readyAt.Sub(c.clk.Now()); delay > 0 {
 		select {
@@ -142,89 +177,98 @@ func (c *Client) waitStartup(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// bars keeps the US. prefix on returned bars, stripping it for the URL path.
+// Chart daily bars use all adjustments, while minute bars stay on the raw
+// price scale of live ticks. Scanner daily volume also uses raw bars.
 func (c *Client) bars(ctx context.Context, symbol, timeframe, adjustment string, from, to time.Time, background bool) ([]feed.Bar, error) {
 	if err := c.waitStartup(ctx); err != nil {
 		return nil, err
 	}
 	sym := strings.TrimPrefix(symbol, "US.")
+	path := "/v2/stocks/" + url.PathEscape(sym) + "/bars"
+	q := c.barQuery(timeframe, adjustment, from, to)
 	var out []feed.Bar
-	pageToken := ""
-	for page := 0; page < maxPages; page++ {
-		q := url.Values{}
-		q.Set("timeframe", timeframe)
-		q.Set("start", from.UTC().Format(time.RFC3339))
-		q.Set("end", to.UTC().Format(time.RFC3339))
-		q.Set("adjustment", adjustment)
-		q.Set("feed", c.feed)
-		q.Set("limit", "10000")
-		if pageToken != "" {
-			q.Set("page_token", pageToken)
-		}
-		var err error
-		if background {
-			err = c.bucket.TakeWithReserve(ctx, 1)
-		} else {
-			err = c.bucket.Take(ctx)
-		}
-		if err != nil {
-			return nil, err
-		}
-		reqURL := c.base + "/v2/stocks/" + url.PathEscape(sym) + "/bars?" + q.Encode()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("APCA-API-KEY-ID", c.keyID)
-		req.Header.Set("APCA-API-SECRET-KEY", c.secret)
-		if c.cooldown != nil {
-			if err := c.cooldown.Record(); err != nil {
-				return nil, err
-			}
-		}
-		resp, err := c.hc.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		budget := alpacaResponseBudget(resp.Header, resp.StatusCode, c.clk.Now())
-		if budget.remaining >= 0 && !budget.resetAt.IsZero() {
-			c.bucket.ObserveBudget(budget.remaining, budget.resetAt)
-		}
-		if !budget.deferUntil.IsZero() {
-			c.bucket.DeferUntil(budget.deferUntil)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if c.cooldown != nil && !budget.deferUntil.IsZero() {
-			if err := c.cooldown.DeferUntil(budget.deferUntil); err != nil {
-				return nil, err
-			}
-		}
-		if resp.StatusCode >= 400 {
-			return nil, fmt.Errorf("alpaca data: status=%d body=%s", resp.StatusCode, body)
-		}
+	for range maxPages {
 		var br barsResp
-		if err := json.Unmarshal(body, &br); err != nil {
-			return nil, fmt.Errorf("alpaca data decode: %w", err)
+		if err := c.barPage(ctx, path, q, background, &br); err != nil {
+			return nil, err
 		}
-		for _, b := range br.Bars {
-			ts, err := time.Parse(time.RFC3339, b.T)
-			if err != nil {
-				continue
-			}
-			out = append(out, feed.Bar{
-				Symbol: symbol, BucketMs: ts.UnixMilli(),
-				O: b.O, H: b.H, L: b.L, C: b.C, Volume: b.V,
-			})
-		}
+		out = appendBars(out, symbol, br.Bars)
 		if br.NextPageToken == nil || *br.NextPageToken == "" {
-			break
+			return out, nil
 		}
-		if page == maxPages-1 {
-			return nil, fmt.Errorf("alpaca data: pagination exceeded %d pages", maxPages)
-		}
-		pageToken = *br.NextPageToken
+		q.Set("page_token", *br.NextPageToken)
 	}
-	return out, nil
+	return nil, fmt.Errorf("alpaca data: pagination exceeded %d pages", maxPages)
+}
+
+func (c *Client) barQuery(timeframe, adjustment string, from, to time.Time) url.Values {
+	return url.Values{
+		"timeframe": {timeframe}, "adjustment": {adjustment}, "feed": {c.feed}, "limit": {"10000"},
+		"start": {from.UTC().Format(time.RFC3339)}, "end": {to.UTC().Format(time.RFC3339)},
+	}
+}
+
+func appendBars(out []feed.Bar, symbol string, bars []barJSON) []feed.Bar {
+	for _, b := range bars {
+		ts, err := time.Parse(time.RFC3339, b.T)
+		if err != nil {
+			continue
+		}
+		out = append(out, feed.Bar{
+			Symbol: symbol, BucketMs: ts.UnixMilli(),
+			O: b.O, H: b.H, L: b.L, C: b.C, Volume: b.V,
+		})
+	}
+	return out
+}
+
+func (c *Client) barPage(ctx context.Context, path string, query url.Values, background bool, out any) error {
+	var err error
+	if background {
+		err = c.bucket.TakeWithReserve(ctx, 1)
+	} else {
+		err = c.bucket.Take(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path+"?"+query.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("APCA-API-KEY-ID", c.keyID)
+	req.Header.Set("APCA-API-SECRET-KEY", c.secret)
+	if c.cooldown != nil {
+		if err := c.cooldown.Record(); err != nil {
+			return err
+		}
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	budget := alpacaResponseBudget(resp.Header, resp.StatusCode, c.clk.Now())
+	if budget.remaining >= 0 && !budget.resetAt.IsZero() {
+		c.bucket.ObserveBudget(budget.remaining, budget.resetAt)
+	}
+	if !budget.deferUntil.IsZero() {
+		c.bucket.DeferUntil(budget.deferUntil)
+		if c.cooldown != nil {
+			if err := c.cooldown.DeferUntil(budget.deferUntil); err != nil {
+				return err
+			}
+		}
+	}
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		return fmt.Errorf("alpaca data: status=%d body=%s", resp.StatusCode, body)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("alpaca data decode: %w", err)
+	}
+	return nil
 }
 
 type alpacaBudget struct {
