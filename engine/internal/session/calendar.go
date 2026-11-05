@@ -78,14 +78,16 @@ func isTradingDate(d time.Time) bool {
 		return false
 	}
 	y, m, day := d.Date()
-	if sameDate(d, observed(y, time.January, 1)) || sameDate(d, observed(y+1, time.January, 1)) ||
-		(m == time.January && wd == time.Monday && day >= 15 && day <= 21) ||
+	// NYSE does not move a Saturday New Year's Day back into December.
+	if (m == time.January && (day == 1 || (day == 2 && wd == time.Monday))) ||
+		(y >= 1998 && m == time.January && wd == time.Monday && day >= 15 && day <= 21) ||
 		(m == time.February && wd == time.Monday && day >= 15 && day <= 21) ||
 		sameDate(d, goodFriday(y)) ||
 		(m == time.May && wd == time.Monday && day+7 > daysInMonth(y, m)) ||
 		(y >= 2022 && sameDate(d, observed(y, time.June, 19))) ||
 		sameDate(d, observed(y, time.July, 4)) ||
 		(m == time.September && wd == time.Monday && day <= 7) ||
+		(y >= 1972 && y <= 1980 && y%4 == 0 && m == time.November && wd == time.Tuesday && day >= 2 && day <= 8) ||
 		(m == time.November && wd == time.Thursday && day >= 22 && day <= 28) ||
 		sameDate(d, observed(y, time.December, 25)) {
 		return false
@@ -130,7 +132,8 @@ func observed(y int, m time.Month, day int) time.Time {
 func exceptionalClosure(d time.Time) bool {
 	k := d.Format("2006-01-02")
 	switch k {
-	case "2001-09-11", "2001-09-12", "2001-09-13", "2001-09-14",
+	case "1972-12-28", "1973-01-25", "1977-07-14", "1985-09-27", "1994-04-27",
+		"2001-09-11", "2001-09-12", "2001-09-13", "2001-09-14",
 		"2004-06-11", "2007-01-02", "2012-10-29", "2012-10-30",
 		"2018-12-05", "2025-01-09":
 		return true

@@ -27,8 +27,10 @@ dividend-adjusted-close multiplier. It respects `backfill.yahoo.enabled`, while
 remaining independent of chart `daily_years` and cached archive contents.
 Unknown listing dates, missing history boundaries/expected sessions, invalid
 bars or an absent completed session leave the selected high unavailable. Old
-provider sessions remain eligible where modern holiday rules differ. No
-52-week or chart-cache substitute is labelled ATH. Results depend on provider
+provider sessions remain eligible where modern holiday rules differ. The shared
+date calendar represents historical closures, including the 1994 national
+mourning closure, so complete ranges remain eligible. No 52-week or chart-cache
+substitute is labelled ATH. Results depend on provider
 coverage; the unofficial Yahoo endpoint can fail or change. The first screen
 can take several minutes under pacing. Progress and Cancel remain available.
 Verified histories are cached for 15 minutes; missing histories retry on the

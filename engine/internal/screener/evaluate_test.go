@@ -104,11 +104,32 @@ func TestLookbacksExcludeSignalSessionAndRespectBoundary(t *testing.T) {
 
 func TestATHPreservesSessionsBeforeModernHolidayRules(t *testing.T) {
 	date := testDate("1997-01-22")
-	stock, bars := history(date, 4)
-	bars = append(bars, feed.Bar{Symbol: stock.Symbol, BucketMs: testDate("1997-01-20").UnixMilli(), O: 95, H: 200, L: 90, C: 97, Volume: 1000, Turnover: 97000})
+	stock, bars := history(date, 5)
+	for i := range bars {
+		if bars[i].BucketMs == testDate("1997-01-20").UnixMilli() {
+			bars[i].H = 200
+		}
+	}
 	row, _, err := Evaluate(testFilters(), stock, bars, date)
 	if err != nil || row.PreviousHigh != 200 {
 		t.Fatalf("row=%+v err=%v", row, err)
+	}
+}
+
+func TestHistoricalMarketClosureDoesNotInvalidateATHCoverage(t *testing.T) {
+	date := testDate("1994-04-28")
+	stock := Instrument{Symbol: "US.TEST", ListingDate: testDate("1994-04-25")}
+	var bars []feed.Bar
+	for _, raw := range []string{"1994-04-25", "1994-04-26", "1994-04-28"} {
+		bars = append(bars, feed.Bar{Symbol: stock.Symbol, BucketMs: testDate(raw).UnixMilli(), O: 95, H: 100, L: 90, C: 97, Volume: 1000})
+	}
+	bars[2].H = 102
+	bars[2].C = 101
+	f := testFilters()
+	f.Mode = "new"
+	row, match, err := Evaluate(f, stock, bars, date)
+	if err != nil || !match || row.PreviousHigh != 100 {
+		t.Fatalf("row=%+v match=%v err=%v", row, match, err)
 	}
 }
 
