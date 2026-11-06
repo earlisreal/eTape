@@ -12,7 +12,6 @@ export type Topic =
   | "alerts.state" | "alerts.trigger"
   | "md.quote" | "md.book" | "md.tape" | "md.tape.status" | "md.bars" | "md.indicator"
   | "scanner.rank" | "scanner.hit"
-  | "screener.state"
   | "news.item"
   | "stock.detail"
   | "watchlist.rows"
@@ -1152,71 +1151,4 @@ export interface PriceAlertPreviewArgs {
 export interface PriceAlertPreview {
   price: number /* float64 */;
   tsMs: number /* int64 */;
-}
-
-//////////
-// source: screener.go
-
-/**
- * ScreenerFilters always evaluates the latest completed regular session.
- * Calendar lookbacks are distinct from a custom number of trading sessions.
- */
-export interface ScreenerFilters {
-  lookback: string; // all-time, 6-month, 1-year, trading-days
-  tradingDays: number /* int */;
-  mode: string; // near, new, either
-  nearPct: number /* float64 */;
-  requireClose: boolean;
-  minPrice: number /* float64 */;
-  maxPrice: number /* float64 */;
-  minDollarVolume: number /* float64 */;
-  minMarketCap: number /* float64 */;
-  maxMarketCap: number /* float64 */;
-  aboveSma20: boolean;
-  aboveSma50: boolean;
-  aboveSma200: boolean;
-  extensionSma: number /* int */;
-  maxExtensionPct: number /* float64 */;
-  minChangePct?: number /* float64 */;
-  maxChangePct?: number /* float64 */;
-  minAtrPct: number /* float64 */;
-  maxAtrPct: number /* float64 */;
-}
-export interface RunScreenerArgs {
-  panelId: string;
-  filters: ScreenerFilters;
-}
-export interface CancelScreenerArgs {
-  panelId: string;
-}
-export interface ScreenerRow {
-  symbol: string;
-  name: string;
-  close: number /* float64 */;
-  high: number /* float64 */;
-  previousHigh: number /* float64 */;
-  distancePct: number /* float64 */;
-  newHigh: boolean;
-  closeConfirmed: boolean;
-  dollarVolume?: number /* float64 */;
-  marketCap?: number /* float64 */;
-  changePct?: number /* float64 */;
-  atrPct?: number /* float64 */;
-  historyStart: string;
-}
-export interface ScreenerState {
-  panelId: string;
-  runId: number /* uint64 */;
-  status: string; // queued, discovering, running, complete, canceled, error, removed
-  asOf: string;
-  startedAt: string;
-  finishedAt: string;
-  filters: ScreenerFilters;
-  universe: number /* int */;
-  candidates: number /* int */;
-  checked: number /* int */;
-  unavailable: number /* int */;
-  warning: string;
-  error: string;
-  rows: ScreenerRow[];
 }

@@ -49,7 +49,6 @@ packages:
         | "alerts.state" | "alerts.trigger"
         | "md.quote" | "md.book" | "md.tape" | "md.tape.status" | "md.bars" | "md.indicator"
         | "scanner.rank" | "scanner.hit"
-        | "screener.state"
         | "news.item"
         | "stock.detail"
         | "watchlist.rows"

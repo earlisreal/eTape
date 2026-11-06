@@ -1,6 +1,9 @@
 # End-of-day Screener
 
-Status: implemented
+Status: retired
+
+The end-of-day Screener was removed after stock filtering proved too slow.
+The implementation details below are retained as project history.
 
 ## Approved scope
 

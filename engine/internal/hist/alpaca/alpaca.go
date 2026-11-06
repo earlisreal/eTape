@@ -20,7 +20,6 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
-	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
 const defaultDataBase = "https://data.alpaca.markets"
@@ -119,51 +118,6 @@ type barJSON struct {
 type barsResp struct {
 	Bars          []barJSON `json:"bars"`
 	NextPageToken *string   `json:"next_page_token"`
-}
-
-// ScreenerDailyBatch reads split-adjusted SIP bars for several symbols at once.
-// Daily OHLC excludes extended-hours trades. Volume is Alpaca's reported volume.
-func (c *Client) ScreenerDailyBatch(ctx context.Context, symbols []string, from, date time.Time) (map[string][]feed.Bar, error) {
-	cutoff := c.clk.Now().Add(-recentSIPClampBuffer)
-	if cutoff.Before(session.Schedule(date).Close) {
-		return nil, fmt.Errorf("the regular session is still within Alpaca's SIP delay")
-	}
-	if err := c.waitStartup(ctx); err != nil {
-		return nil, err
-	}
-	to := date.AddDate(0, 0, 1).Add(-time.Second)
-	if cutoff.Before(to) {
-		to = cutoff
-	}
-	codes := make([]string, 0, len(symbols))
-	for _, symbol := range symbols {
-		codes = append(codes, strings.TrimPrefix(symbol, "US."))
-	}
-	q := c.barQuery("1Day", "split", from, to)
-	q.Set("feed", "sip")
-	q.Set("symbols", strings.Join(codes, ","))
-	out := make(map[string][]feed.Bar, len(symbols))
-	for range maxPages {
-		var page struct {
-			Bars          map[string][]barJSON `json:"bars"`
-			NextPageToken string               `json:"next_page_token"`
-		}
-		if err := c.barPage(ctx, "/v2/stocks/bars", q, true, &page); err != nil {
-			return nil, err
-		}
-		for code, bars := range page.Bars {
-			symbol := "US." + code
-			out[symbol] = appendBars(out[symbol], symbol, bars)
-		}
-		if page.NextPageToken == "" {
-			return out, nil
-		}
-		if page.NextPageToken == q.Get("page_token") {
-			return nil, fmt.Errorf("alpaca data: pagination did not advance")
-		}
-		q.Set("page_token", page.NextPageToken)
-	}
-	return nil, fmt.Errorf("alpaca data: pagination exceeded %d pages", maxPages)
 }
 
 func (c *Client) waitStartup(ctx context.Context) error {

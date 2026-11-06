@@ -66,18 +66,8 @@ Each Scanner Panel persists its own filters with its workspace document and
 keeps a separate sticky board, sorting, seen state and sound eligibility in
 `ScannerStore`. The engine shares discovery and request budgets across panels.
 
-The separate Screener Panel runs end-of-day swing screens explicitly, with
-All-time, six-month, one-year or custom trading-day highs and Near/New/Either
-conditions. Optional filters cover price, average dollar volume, estimated cap,
-SMA trend/extension, 1M change and ATR %. Built-in and saved presets persist
-per panel in its Workspace document. `ScreenerStore` routes low-frequency
-`screener.state` snapshots by workspace/panel identity. Results stay stable
-until another run and survive reconnects during the engine run. Double-click
-or Enter loads a symbol into the selected Link Group; + Watch adds it to the
-global Watchlist. Missing history is counted; cancellation/errors label partial
-results. When OpenD is unavailable, the status shows Yahoo stock discovery and
-whether delayed Alpaca SIP history is available. Linked charts can load from
-the archive or enabled history providers. See [Screener data rules](../engine/internal/screener/README.md).
+Older saved or imported layouts drop the retired end-of-day Screener tabs and
+keep the other panels in their existing groups.
 
 Closing a workspace pauses its Scanner demand; an enabled Monitoring workspace
 keeps following its selected Scanner Source, including when that source window

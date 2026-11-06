@@ -36,7 +36,6 @@ type venueMeta struct {
 }
 
 type mirror struct {
-	screens     map[string]wsmsg.ScreenerState
 	priceAlerts wsmsg.PriceAlertState
 	global      wsmsg.GlobalLimitsView
 
@@ -81,7 +80,6 @@ type mirror struct {
 
 func newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsCap, fillsCap, eventsCap, tradesCap int) *mirror {
 	m := &mirror{
-		screens:      map[string]wsmsg.ScreenerState{},
 		global:       global,
 		quotes:       map[string]wsmsg.Quote{},
 		books:        map[string]wsmsg.Book{},
@@ -402,13 +400,6 @@ func (m *mirror) execStatus() wsmsg.ExecStatus {
 // get a snapshot). Broadcast of these is event-driven, done by the hub directly.
 func (m *mirror) applyPub(s staged) {
 	switch s.Topic {
-	case wsmsg.TopicScreenerState:
-		state := s.Payload.(wsmsg.ScreenerState)
-		if state.Status == "removed" {
-			delete(m.screens, state.PanelID)
-		} else {
-			m.screens[state.PanelID] = state
-		}
 	case wsmsg.TopicAlertsState:
 		m.priceAlerts = s.Payload.(wsmsg.PriceAlertState)
 	case wsmsg.TopicScannerRank:
@@ -485,10 +476,6 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 	}
 	var out []staged
 	switch topic {
-	case wsmsg.TopicScreenerState:
-		for _, key := range sortedKeysOf(m.screens) {
-			out = append(out, staged{Topic: topic, Key: key, Payload: m.screens[key]})
-		}
 	case wsmsg.TopicQuote:
 		for _, s := range sortedKeysOf(m.quotes) {
 			out = append(out, staged{Topic: topic, Payload: m.quotes[s]})

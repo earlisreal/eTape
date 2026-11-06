@@ -41,16 +41,6 @@ is introduced.
 
 ## Contract facts
 
-- The end-of-day [Screener](../engine/internal/screener/README.md) enumerates
-  listed US equities with OpenD 3202, paginates rolling-high candidates through
-  3252 only for the represented post-close date, and uses 3203 issued shares
-  for estimated market cap. When OpenD discovery fails, Yahoo's equity
-  screener supplies listed US symbols and metadata. Offline screening uses
-  configured Alpaca SIP split-adjusted daily batches where they cover the
-  lookback, and Yahoo daily quote OHLC for longer or missing history. The Yahoo
-  enable switch applies. Incomplete coverage fails closed. See the
-  [Alpaca historical bars contract](https://docs.alpaca.markets/us/reference/stockbars).
-
 - Symbols crossing OpenD use `US.<ticker>` form.
 - OpenD 3203 `SnapshotBasicData.volumeRatio` remains an optional provider field at the feed boundary; the Scanner does not consume or expose it. Scanner `Vol` and dollar turnover use the snapshot's base daily fields; `Session Volume` uses the matching nullable `PreMarket`, base RTH, `AfterMarket`, or `Overnight` volume field and never adds session components. REL VOL is the snapshot daily volume divided by the mean raw Alpaca SIP daily volume from up to 50 preceding completed trading dates.
 - OpenD 3249 `Qot_GetShortInterest` is the source for Reported Short Interest. It accepts one US security per request; eTape requests `num = 1`, uses the newest returned `timestampStr`/`sharesShort` record, validates a JavaScript-safe share count, and preserves the raw value without split adjustment. The Scanner worker only requests admitted board symbols, caches results in memory for 24 hours, runs one request at a time at least one second apart, and stays within OpenD's 30-requests-per-30-seconds limit.

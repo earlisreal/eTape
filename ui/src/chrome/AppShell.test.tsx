@@ -1225,6 +1225,51 @@ describe("AppShell Dockview panel constraints", () => {
   });
 });
 
+describe("AppShell retired Screener layout", () => {
+  it("restores other tabs in their group and removes the empty Screener split", async () => {
+    const connection = { id: "connection-1", panelId: "connection-status", group: null, settings: {} };
+    const watchlist = { id: "watchlist-1", panelId: "watchlist", group: null, settings: {} };
+    const retired = [
+      { id: "screener-tab", panelId: "screener", group: null, settings: {} },
+      { id: "screener-split", panelId: "screener", group: null, settings: {} },
+    ];
+    const panels = [connection, ...retired, watchlist];
+    const fromJSON = vi.spyOn(DockviewApi.prototype, "fromJSON");
+    try {
+      mount({
+        name: "default", layoutVersion: 8, panels,
+        layout: {
+          grid: {
+            height: 300, width: 600, orientation: "HORIZONTAL",
+            root: { type: "branch", size: 300, data: [
+              { type: "leaf", size: 400, data: { id: "main-group", views: [connection.id, retired[0].id, watchlist.id], activeView: retired[0].id } },
+              { type: "leaf", size: 200, data: { id: "retired-group", views: [retired[1].id], activeView: retired[1].id } },
+            ] },
+          },
+          activeGroup: "retired-group",
+          panels: Object.fromEntries(panels.map(({ id, panelId }) => [id, { id, contentComponent: id, title: panelId }])),
+        },
+      });
+
+      await screen.findByTestId("panel-tab-watchlist-1");
+      expect(screen.getByTestId("panel-tab-connection-1")).toBeTruthy();
+      expect(screen.queryAllByTestId(/^panel-tab-screener-/)).toHaveLength(0);
+      const restored = fromJSON.mock.calls[0][0];
+      expect(restored.grid.root.data).toEqual([
+        { type: "leaf", size: 400, data: { id: "main-group", views: [connection.id, watchlist.id], activeView: watchlist.id } },
+      ]);
+      expect(restored.activeGroup).toBe("main-group");
+      expect(Object.keys(restored.panels)).toEqual([connection.id, watchlist.id]);
+      fireEvent.click(screen.getByRole("button", { name: "+ Add panel" }));
+      const catalog = within(screen.getByRole("dialog", { name: "Add panel" }));
+      expect(catalog.queryByText("Screener", { exact: true })).toBeNull();
+      expect(catalog.getByText("Scanner", { exact: true })).toBeTruthy();
+    } finally {
+      fromJSON.mockRestore();
+    }
+  });
+});
+
 describe("AppShell hotkey target lifecycle", () => {
   it("seeds the focused restored panel and retargets only a user activation", async () => {
     const channel = new TargetChannel();

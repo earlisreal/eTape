@@ -231,7 +231,6 @@ export function PanelFrame(
   const props: PanelProps = { config, stores, scheduler, width: size.width, height: size.height,
     linkGroups, commands, onConfigChange, active, onGroupChange, group,
     ...(config.panelId === "scanner" ? { scannerId: `${workspaceId ?? "legacy"}/${config.id}` } : {}),
-    ...(config.panelId === "screener" ? { screenerId: `${workspaceId ?? "legacy"}/${config.id}` } : {}),
     ...(monitoring === undefined ? {} : { monitoring }), ...(scannerSync ? { scannerSync } : {}), ...(rawSymbol ? { symbol: rawSymbol } : {}) };
   useEffect(() => { symbolRef.current = rawSymbol; }, [rawSymbol]);
 

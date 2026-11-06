@@ -21,7 +21,6 @@ const (
 
 	TopicScannerRank   Topic = "scanner.rank"
 	TopicScannerHit    Topic = "scanner.hit"
-	TopicScreenerState Topic = "screener.state"
 	TopicNews          Topic = "news.item"
 	TopicStockDetail   Topic = "stock.detail"
 	TopicWatchlistRows Topic = "watchlist.rows"
@@ -45,7 +44,7 @@ const (
 var AllTopics = map[Topic]bool{
 	TopicAlertsState: true, TopicAlertsTrigger: true,
 	TopicQuote: true, TopicBook: true, TopicTape: true, TopicTapeStatus: true, TopicBars: true, TopicIndicator: true,
-	TopicScannerRank: true, TopicScannerHit: true, TopicScreenerState: true, TopicNews: true, TopicStockDetail: true, TopicWatchlistRows: true,
+	TopicScannerRank: true, TopicScannerHit: true, TopicNews: true, TopicStockDetail: true, TopicWatchlistRows: true,
 	TopicExecAccount: true, TopicExecPositions: true, TopicExecOrders: true,
 	TopicExecClosedOrders: true,
 	TopicExecFills:        true, TopicExecStatus: true, TopicExecTrades: true,

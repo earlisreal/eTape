@@ -47,6 +47,88 @@ export function isCurrentWorkspace(value: unknown): value is Workspace {
     && "layout" in workspace;
 }
 
+export function withoutScreenerPanels(workspace: Workspace): Workspace {
+  const retired = new Set(workspace.panels.filter((p) => p?.panelId === "screener").map((p) => p.id));
+  if (retired.size === 0) return workspace;
+  const panels = workspace.panels.filter((p) => p?.panelId !== "screener");
+  const layout = panels.length > 0 ? stripRetiredLayoutPanels(workspace.layout, retired) : null;
+  return { ...workspace, panels, layout };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stripRetiredLayoutPanels(raw: unknown, retired: ReadonlySet<string>): unknown {
+  if (!isRecord(raw)) return raw;
+  const layout = structuredClone(raw);
+  const isRetired = (id: unknown) => typeof id === "string" && retired.has(id);
+  const removedGroups = new Set<unknown>();
+  const survivingGroups: string[] = [];
+
+  const keepGroup = (group: unknown): boolean => {
+    if (!isRecord(group) || !Array.isArray(group.views)) return true;
+    const views = group.views.filter((id) => !isRetired(id));
+    if (views.length < group.views.length) {
+      if (views.length === 0) {
+        removedGroups.add(group.id);
+        return false;
+      }
+      group.views = views;
+      if (isRetired(group.activeView)) group.activeView = views.at(-1);
+      if (Array.isArray(group.tabGroups)) {
+        group.tabGroups = group.tabGroups.filter((tabs: unknown) => {
+          if (!isRecord(tabs) || !Array.isArray(tabs.panelIds)) return true;
+          const panelIds = tabs.panelIds.filter((id) => !isRetired(id));
+          tabs.panelIds = panelIds;
+          return panelIds.length > 0;
+        });
+      }
+    }
+    if (views.length > 0 && typeof group.id === "string") survivingGroups.push(group.id);
+    return true;
+  };
+
+  const keepNode = (node: unknown): boolean => {
+    if (!isRecord(node)) return true;
+    if (node.type === "leaf") return keepGroup(node.data);
+    if (node.type !== "branch" || !Array.isArray(node.data) || node.data.length === 0) return true;
+    const children = node.data.filter(keepNode);
+    node.data = children;
+    return children.length > 0;
+  };
+
+  const keepGrid = (grid: unknown): boolean => {
+    if (!isRecord(grid)) return true;
+    const groupsBefore = removedGroups.size;
+    const keep = keepNode(grid.root);
+    // A maximized node's saved child indices can shift when a split is removed.
+    if (removedGroups.size !== groupsBefore) delete grid.maximizedNode;
+    return keep;
+  };
+
+  if (isRecord(layout.panels)) {
+    for (const id of retired) delete layout.panels[id];
+  }
+  if (isRecord(layout.grid) && isRecord(layout.grid.root) && !keepGrid(layout.grid)) {
+    layout.grid.root = { ...layout.grid.root, type: "branch", data: [] };
+  }
+  for (const key of ["floatingGroups", "popoutGroups"]) {
+    const groups = layout[key];
+    if (Array.isArray(groups)) {
+      layout[key] = groups.filter((group: unknown) =>
+        !isRecord(group) || (group.grid ? keepGrid(group.grid) : keepGroup(group.data)));
+    }
+  }
+  if (isRecord(layout.edgeGroups)) {
+    for (const [position, edge] of Object.entries(layout.edgeGroups)) {
+      if (isRecord(edge) && !keepGroup(edge.group)) delete layout.edgeGroups[position];
+    }
+  }
+  if (removedGroups.has(layout.activeGroup)) layout.activeGroup = survivingGroups[0];
+  return layout;
+}
+
 interface CommandClient {
   sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }>;
 }
@@ -75,12 +157,12 @@ export class WorkspaceStore {
     const key = `workspace.${name}`;
     const ack = await this.client.sendCommand("GetConfig", { key });
     if (ack.status === "accepted" && ack.value && isCurrentWorkspace(ack.value)) {
-      return ack.value;
+      return withoutScreenerPanels(ack.value);
     }
     if (ack.status === "accepted" && seed && typeof ack.value === "object" && ack.value !== null) {
       const legacy = ack.value as Partial<Workspace>;
       if (Array.isArray(legacy.panels) && "layout" in legacy) {
-        return { ...legacy, name, layoutVersion: WORKSPACE_LAYOUT_VERSION } as Workspace;
+        return withoutScreenerPanels({ ...legacy, name, layoutVersion: WORKSPACE_LAYOUT_VERSION } as Workspace);
       }
     }
     if (ack.status === "accepted" && ack.value == null) {

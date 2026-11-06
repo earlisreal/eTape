@@ -3,7 +3,7 @@
 // — same machine or a fresh one. Pure module, no React/DOM, so every rule
 // here (envelope shape, id regeneration, activeVenue scrubbing) is directly
 // unit-testable; BackupSection.tsx (Task 2) is a thin UI shell around this.
-import { WORKSPACE_LAYOUT_VERSION, isCurrentWorkspace, type PanelConfig, type Workspace } from "./workspace";
+import { WORKSPACE_LAYOUT_VERSION, isCurrentWorkspace, withoutScreenerPanels, type PanelConfig, type Workspace } from "./workspace";
 import { normalizeChartBinding, normalizeOrderConfig, type ActionTemplate, type HotkeyDeckConfig, type OrderConfig } from "./exec/actionTemplate";
 
 export const SETTINGS_EXPORT_VERSION = 1;
@@ -87,7 +87,8 @@ export function parseImport(text: string): { ok: true; data: SettingsExport } | 
 // `panels` exceed what's actually placed in `layout`, the extras are dropped,
 // so already-ghosted exports are healed on import.
 export function prepareImportedWorkspace(imported: Workspace, currentName: string): Workspace {
-  return reconcileToGrid({ ...imported, name: currentName }, imported.layout);
+  const workspace = withoutScreenerPanels({ ...imported, name: currentName });
+  return reconcileToGrid(workspace, workspace.layout);
 }
 
 export function applyPanelConstraintsToLayout(
@@ -110,20 +111,20 @@ export function applyPanelConstraintsToLayout(
   return changed ? { ...layout, panels } : layout;
 }
 
-// Collect every panel id referenced by dockview's serialized grid. `layout` is
-// the SerializedDockview object stored in Workspace.layout ({ grid, panels, ... }).
-// Authoritative "what will render" = the grid tree's leaf `data.views` — `layout.panels`
-// (a separate id->metadata map) is NOT checked here; a leaf's views list is the only
-// thing that actually places a panel on screen. Defensive at every step so a
-// hand-edited/truncated file can't throw.
-function walkPanelIds(layout: unknown, visit: (id: string) => void): void {
+function walkGroupPanelIds(group: unknown, visit: (id: string) => void): void {
+  const views = (group as { views?: unknown } | null)?.views;
+  if (Array.isArray(views)) for (const id of views) if (typeof id === "string") visit(id);
+}
+
+// Follow the group's views rather than the separate panel metadata map, which
+// can also contain unplaced panels.
+function walkGridPanelIds(layout: unknown, visit: (id: string) => void): void {
   const grid = (layout as { grid?: { root?: unknown } } | null)?.grid;
   const walk = (node: unknown): void => {
     if (!node || typeof node !== "object") return;
     const n = node as { type?: string; data?: unknown };
     if (n.type === "leaf") {
-      const views = (n.data as { views?: unknown })?.views;
-      if (Array.isArray(views)) for (const v of views) if (typeof v === "string") visit(v);
+      walkGroupPanelIds(n.data, visit);
     } else if (n.type === "branch" && Array.isArray(n.data)) {
       for (const child of n.data) walk(child);
     }
@@ -133,7 +134,22 @@ function walkPanelIds(layout: unknown, visit: (id: string) => void): void {
 
 export function collectPanelIds(layout: unknown): Set<string> {
   const ids = new Set<string>();
-  walkPanelIds(layout, (id) => ids.add(id));
+  const visit = (id: string) => { ids.add(id); };
+  walkGridPanelIds(layout, visit);
+  if (!isRecord(layout)) return ids;
+  for (const groups of [layout.floatingGroups, layout.popoutGroups]) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!isRecord(group)) continue;
+      walkGridPanelIds(group, visit);
+      walkGroupPanelIds(group.data, visit);
+    }
+  }
+  if (isRecord(layout.edgeGroups)) {
+    for (const edge of Object.values(layout.edgeGroups)) {
+      if (isRecord(edge)) walkGroupPanelIds(edge.group, visit);
+    }
+  }
   return ids;
 }
 
@@ -141,7 +157,7 @@ export function collectPanelIds(layout: unknown): Set<string> {
 export function orderedPanelIds(layout: unknown): string[] {
   const ids: string[] = [];
   const seen = new Set<string>();
-  walkPanelIds(layout, (id) => {
+  walkGridPanelIds(layout, (id) => {
     if (seen.has(id)) return;
     seen.add(id);
     ids.push(id);
@@ -167,7 +183,7 @@ function isWellFormedGridRoot(node: unknown): boolean {
   return false;
 }
 
-// Pin `base`'s panel list to exactly what `layout`'s grid actually displays — the
+// Pin `base`'s panel list to what Dockview actually places in `layout` — the
 // single reconciliation point used by both export (against the LIVE dockview grid)
 // and import (against the FILE's grid), so a panel with no grid placement ("ghost")
 // never survives either path. No-op if `layout.grid.root` isn't a well-formed node

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { WorkspaceStore } from "./workspace";
+import { WorkspaceStore, type Workspace } from "./workspace";
 import { buildMonitoringWorkspace } from "./presets";
 
 function fakeClient() {
@@ -16,6 +16,17 @@ describe("WorkspaceStore", () => {
     const store = new WorkspaceStore(client);
     const ws = await store.load("main");
     expect(ws).toEqual({ name: "main", layoutVersion: 8, panels: [], layout: null });
+  });
+
+  it("opens a workspace that contained only Screener as empty", async () => {
+    const old: Workspace = {
+      name: "main", layoutVersion: 8, groups: { red: "US.AAPL" },
+      panels: [{ id: "screener-1", panelId: "screener", group: "red", settings: {} }],
+      layout: { grid: { root: { type: "branch", data: [] } } },
+    };
+    const client = { sendCommand: vi.fn().mockResolvedValue({ status: "accepted", value: old }) };
+    await expect(new WorkspaceStore(client).load("main")).resolves.toEqual({ ...old, panels: [], layout: null });
+    expect(client.sendCommand).toHaveBeenCalledTimes(1);
   });
 
   it("debounces saves into a single config write", async () => {

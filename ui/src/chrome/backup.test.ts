@@ -609,6 +609,41 @@ describe("backup: Dockview panel constraint normalization", () => {
 });
 
 describe("backup: prepareImportedWorkspace with reconciliation", () => {
+  it("drops retired Screener tabs and keeps other floating panels in an older import", () => {
+    const scanner = { id: "scanner-1", panelId: "scanner", group: null, settings: { scannerFilters: { minPrice: 5 } } };
+    const retired = [
+      { id: "screener-docked", panelId: "screener", group: null, settings: {} },
+      { id: "screener-floating", panelId: "screener", group: null, settings: {} },
+    ];
+    const panels = [...retired, scanner];
+    const imported: Workspace = {
+      name: "old", layoutVersion: 8, panels,
+      layout: {
+        grid: {
+          root: { type: "branch", data: [
+            { type: "leaf", data: { id: "docked", views: [retired[0].id], activeView: retired[0].id } },
+          ] },
+        },
+        panels: Object.fromEntries(panels.map(({ id }) => [id, { id, contentComponent: id }])),
+        activeGroup: "docked",
+        floatingGroups: [{
+          data: { id: "floating", views: [retired[1].id, scanner.id], activeView: retired[1].id },
+          position: { left: 200, top: 100, width: 500, height: 300 },
+        }],
+      },
+    };
+    const original = structuredClone(imported);
+    const result = prepareImportedWorkspace(imported, "main");
+    expect(result.name).toBe("main");
+    expect(result.panels).toEqual([scanner]);
+    expect(collectPanelIds(result.layout)).toEqual(new Set([scanner.id]));
+    expect(result.layout).toMatchObject({
+      activeGroup: "floating",
+      floatingGroups: [{ data: { id: "floating", views: [scanner.id], activeView: scanner.id } }],
+    });
+    expect(imported).toEqual(original);
+  });
+
   it("heals a ghosted file with 13 panels but only 9 placed in grid", () => {
     const panels = [
       { id: "chart-1", panelId: "chart", group: "red" as const, settings: { symbol: "AAPL" } },
