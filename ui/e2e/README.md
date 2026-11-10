@@ -4,6 +4,12 @@
 the demo engine. `serve.mjs` creates a temporary config so Settings tests do
 not write the user's `~/.eTape/config.toml`.
 
+`scanner-resize.spec.ts` drags the Chart/Scanner divider while deterministic
+Scanner updates arrive, with Scanner Sync off and on. It checks movement in
+both directions, chart symbol reassignment during the drag, and preservation
+of the chosen width after more updates and a reload. Run with the independent
+panel checks: `npx playwright test e2e/scanner-resize.spec.ts e2e/scanner-multipanel.spec.ts`.
+
 `alert-navigation.spec.ts` injects synthetic alerts into the isolated demo
 transport. It checks required panel colors, keyboard symbol activation, real
 cross-window Link Group delivery, live panel color changes, and source fallback

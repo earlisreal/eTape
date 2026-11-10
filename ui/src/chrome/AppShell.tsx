@@ -805,8 +805,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     scannerSyncRuntime.replace(next);
   }, [scannerPlan, scannerSyncRuntime, selectScannerSource, syncConfig, toggleScannerSync, workspaceName, ws]);
 
-  if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
-
   // A stable per-panel onConfigChange MERGES a settings patch into
   // ws.panels[i].settings then saves. Merge, not replace: the panels below and
   // PanelFrame all hold config captured once by dockview at panel-creation time,
@@ -820,14 +818,15 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // closure later, so a panel created before a subsequent panel was added would
   // otherwise persist a `ws` missing that later panel — silently dropping it from
   // both React state and the saved workspace doc (Finding 1, final-branch review).
-  const onConfigChange = (panelId: string, patch: Record<string, unknown>) => {
-    const current = wsRef.current ?? ws;
+  const onConfigChange = useCallback((panelId: string, patch: Record<string, unknown>) => {
+    const current = wsRef.current;
+    if (!current) return;
     const next = { ...current, panels: current.panels.map((p) => (p.id === panelId ? { ...p, settings: { ...p.settings, ...patch } } : p)) };
     wsRef.current = next;
     setWs(next);                 // keep local state authoritative for subsequent edits
     workspaceStore.save(next);   // debounced persist (config key workspace.<name>)
     refreshOwnedTarget();
-  };
+  }, [refreshOwnedTarget, workspaceStore]);
 
   // Re-links (or pins) a panel: PanelFrame's swatch/GroupPicker calls this on a
   // pick. Separate from onConfigChange (which only ever replaces `settings`) since
@@ -838,8 +837,9 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // later AppShell renders (dockview keeps panel content mounted for its whole
   // life so canvas surfaces don't remount on focus/drag) — so this handler must
   // stay correct no matter how stale the `ws` it was originally created against is.
-  const onGroupChange = (panelId: string, group: LinkGroup) => {
-    const current = wsRef.current ?? ws;
+  const onGroupChange = useCallback((panelId: string, group: LinkGroup) => {
+    const current = wsRef.current;
+    if (!current) return;
     const next = { ...current, panels: current.panels.map((p) => (p.id === panelId ? { ...p, group } : p)) };
     wsRef.current = next;
     alertNavigation.sync(next.panels);
@@ -847,7 +847,46 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     setWs(next);
     workspaceStore.save(next);
     refreshOwnedTarget();
-  };
+  }, [alertNavigation, refreshOwnedTarget, workspaceStore]);
+
+  // Drop a panel from the workspace doc and close it in dockview (if open).
+  // Reads/writes via wsRef so this stays correct whether called from a
+  // freshly-rendered handler or from the once-registered onDidRemovePanel
+  // listener below (which keeps ws.panels in sync when the user closes a
+  // dockview tab directly).
+  const removePanel = useCallback((id: string) => {
+    const current = wsRef.current;
+    if (!current || !current.panels.some((p) => p.id === id)) return; // already synced
+    hotkeyCoordinator.clearOwned(id);
+    const next = { ...current, panels: current.panels.filter((p) => p.id !== id) };
+    wsRef.current = next;
+    alertNavigation.sync(next.panels);
+    setWs(next);
+    workspaceStore.save(next);
+    apiRef.current?.getPanel(id)?.api.close();
+  }, [alertNavigation, hotkeyCoordinator, workspaceStore]);
+
+  // Dockview forces layout when its component map changes, restoring pre-drag
+  // proportions mid-resize. Only change the map when panel identities change.
+  const componentIds = JSON.stringify(ws?.panels.map((p) => p.id) ?? []);
+  const components = useMemo(() => Object.fromEntries(
+    (wsRef.current?.panels ?? []).map((p) => [
+      p.id,
+      (panelProps: IDockviewPanelProps) => <PanelFrame
+        config={wsRef.current?.panels.find((panel) => panel.id === p.id) ?? p}
+        workspaceId={workspaceName} stores={stores} scheduler={scheduler}
+        linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands}
+        onConfigChange={(settings) => onConfigChange(p.id, settings)}
+        onGroupChange={(group) => onGroupChange(p.id, group)}
+        onClose={() => removePanel(p.id)}
+        monitoring={workspaceName === MONITORING_WORKSPACE_ID}
+        scannerSyncRuntime={scannerSyncRuntime} panelSymbols={panelSymbols}
+        api={panelProps.api} />,
+    ]),
+  ), [componentIds, workspaceName, stores, scheduler, linkGroups, demandRegistry, commands,
+    onConfigChange, onGroupChange, removePanel, scannerSyncRuntime, panelSymbols]);
+
+  if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
   // Allocate a fresh panel id and default settings per panel type, add it to
   // the workspace doc, then (if dockview is already mounted) queue the actual
@@ -873,23 +912,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       });
     }
     setAddOpen(false);
-  };
-
-  // Drop a panel from the workspace doc and close it in dockview (if open).
-  // Reads/writes via wsRef so this stays correct whether called from a
-  // freshly-rendered handler or from the once-registered onDidRemovePanel
-  // listener below (which keeps ws.panels in sync when the user closes a
-  // dockview tab directly).
-  const removePanel = (id: string) => {
-    const current = wsRef.current;
-    if (!current || !current.panels.some((p) => p.id === id)) return; // already synced
-    hotkeyCoordinator.clearOwned(id);
-    const next = { ...current, panels: current.panels.filter((p) => p.id !== id) };
-    wsRef.current = next;
-    alertNavigation.sync(next.panels);
-    setWs(next);
-    workspaceStore.save(next);
-    apiRef.current?.getPanel(id)?.api.close();
   };
 
   // Replace the whole workspace doc with `next` (a preset's panels+layout, or
@@ -936,14 +958,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     // zero-panel case; the effect that nulls apiRef.current once ws.panels is
     // empty (below) is all the cleanup dockview's own unmount requires.
     if (apiRef.current && next.panels.length > 0) {
-      // `next.layout` reflects whatever `ws.layout` held in React state — and
-      // onDidLayoutChange above only ever persists a fresh layout into the
-      // SAVED doc (workspaceStore.save), never back into `ws`/`wsRef`. A
-      // caller that deliberately carries `current.layout` through unchanged
-      // (Task 13's demo entry/revert, which only rewrites panel settings/
-      // groups, never the grid) can therefore hand back a stale-or-null
-      // layout here even though dockview's own grid is fine. Same shape
-      // check onReady uses to decide "layout present".
+      // Missing layouts are reseeded from next.panels below, so a replacement
+      // cannot retain panels outside its snapshot. Match onReady's shape check.
       const layout = applyPanelConstraintsToLayout(next.layout, next.panels, PANELS) as { grid?: unknown } | null;
       const hasLayout = !!layout && typeof layout.grid === "object" && layout.grid !== null;
       pendingRef.current.push((api) => {
@@ -1040,28 +1056,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const onNewWindow = () => setNewWindowOpen(true);
   const onOpenMonitoring = () => { setAddOpen(false); openWorkspaceWindow(MONITORING_WORKSPACE_ID); };
 
-  // Stable React keys: panels are keyed by config.id so dockview drag/resize
-  // never remounts them (canvas keeps its context). Each factory is called by
-  // dockview exactly ONCE, at panel-creation time, and the resulting element is
-  // kept mounted (portal'd) for the panel's whole life — dockview does supply
-  // fresh `api`/`containerApi`/`params` props on every re-render of that portal
-  // (see IDockviewPanelProps), so PanelFrame reads its own liveness via
-  // `props.api` (a stable, subscribable object) rather than a boolean baked
-  // into this closure at creation time.
-  const components = Object.fromEntries(
-    ws.panels.map((p) => [
-      p.id,
-      (panelProps: IDockviewPanelProps) => <PanelFrame config={p} workspaceId={workspaceName} stores={stores} scheduler={scheduler}
-        linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands}
-        onConfigChange={(settings) => onConfigChange(p.id, settings)}
-        onGroupChange={(group) => onGroupChange(p.id, group)}
-        onClose={() => removePanel(p.id)}
-        monitoring={workspaceName === MONITORING_WORKSPACE_ID}
-        scannerSyncRuntime={scannerSyncRuntime} panelSymbols={panelSymbols}
-        api={panelProps.api} />,
-    ]),
-  );
-
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
     // Restore a previously saved dockview layout if present; otherwise seed the grid
@@ -1105,7 +1099,11 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       // drag/resize thereafter — saving the stale `ws` here would silently
       // drop any panel added/removed since mount from the persisted doc.
       const current = wsRef.current ?? ws;
-      workspaceStore.save({ ...current, layout: event.api.toJSON() });
+      const next = { ...current, layout: event.api.toJSON() };
+      // Later Scanner Sync/settings saves must preserve the resized grid.
+      wsRef.current = next;
+      setWs(next);
+      workspaceStore.save(next);
     });
   };
 
