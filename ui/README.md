@@ -149,7 +149,10 @@ resubmitting; a later confirmed rejection is a distinct alert. Repeated deltas,
 repaints, and initial/reconnect snapshots do not replay failure toasts. Persistent
 draft/order status remains available after dismissal.
 Submitted linked markers request edits on release, showing updated shares
-on hover and an above-budget warning after activation. If a moved stop would
+on hover and an above-budget warning after activation. Bottom chart order notices
+clear after five seconds; a repeated notice restarts the timeout. Changing the
+chart symbol or Execution Venue clears the notice immediately. Pending and
+unknown order status remain on their markers. If a moved stop would
 trigger immediately but working sells leave too few shares available, the chart
 shows the rejection and the existing stop stays armed. Waiting linked protection
 shows planned shares; deferred position sizing shows its percentage until the

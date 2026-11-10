@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { AckMsg, Order } from "../../../wire/contract";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import { ChartOrderMarkers } from "./ChartOrderMarkers";
@@ -16,6 +16,11 @@ const base: Order = {
   avgFillPrice:0, rejectReason:"", replacesId:"", createdMs:1, updatedMs:1,
 };
 
+const unavailableRiskEntry: Order = {
+  ...base, type:"STOP_LIMIT", stopPrice:100, held:{phase:"WAITING",deadlineMs:9999999999999},
+  riskEntry:{stopId:"missing-stop",budget:100,mode:"Dollar",buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"}},
+};
+
 function mount(orders: Order[] = [base], config?: OrderConfig, withAlert=false) {
   const execStore=new ExecStore();execStore.apply({kind:"snapshot",topic:"exec.orders",payload:orders});
   const host = document.createElement("div");
@@ -28,17 +33,62 @@ function mount(orders: Order[] = [base], config?: OrderConfig, withAlert=false) 
   document.body.append(host);
   const alertStore=new PriceAlertStore();
   alertStore.apply({kind:"snapshot",topic:"alerts.state",payload:{alerts:[{id:"a",symbol:"US.AAPL",price:100,state:"monitoring",condition:"at-or-above",label:"",sessions:{pre:true,rth:true,post:true},version:1,createdMs:1,updatedMs:1}],history:[],historyTotal:0,revision:1,error:""}});
-  const utils = render(<><ChartOrderMarkers chrome={getTvChrome("light")} orders={orders} execStore={execStore} venue="sim" symbol="US.AAPL" pinned={false}
+  const view = (symbol = "US.AAPL", venue = "sim") => <><ChartOrderMarkers chrome={getTvChrome("light")} orders={orders} execStore={execStore} venue={venue} symbol={symbol} pinned={false}
     availableCash={100000} buyingPower={100000}
     sendCommand={sendCommand} hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={60}
     layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} {...(config ? {config} : {})} />
-    {withAlert&&<ChartPriceAlerts store={alertStore} commands={{sendCommand}} symbol="US.AAPL" hostRef={hostRef} facadeRef={facadeRef} layoutRef={{current:()=>{}}} rightAxisWidth={60} paneHeight={400} enabled={true}/>}</>, { container:host });
-  return { ...utils, host, sendCommand, layoutRef,execStore };
+    {withAlert&&<ChartPriceAlerts store={alertStore} commands={{sendCommand}} symbol="US.AAPL" hostRef={hostRef} facadeRef={facadeRef} layoutRef={{current:()=>{}}} rightAxisWidth={60} paneHeight={400} enabled={true}/>}</>;
+  const utils = render(view(), { container:host });
+  return { ...utils, host, sendCommand, layoutRef,execStore, changeContext:(symbol:string,venue:string) => utils.rerender(view(symbol,venue)) };
 }
 
 beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document, "hasFocus").mockReturnValue(true); });
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("ChartOrderMarkers", () => {
+  it("clears the risk-preview warning after five seconds without modifying the order", () => {
+    vi.useFakeTimers();
+    const {sendCommand} = mount([unavailableRiskEntry]);
+    fireEvent.keyDown(screen.getByTestId("order-label-o1"), {key:"ArrowUp"});
+    expect(screen.getByRole("status").textContent).toBe("Risk preview unavailable or zero shares; no modification sent.");
+    act(() => vi.advanceTimersByTime(4999));
+    expect(screen.getByRole("status")).toBeTruthy();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
+  it("restarts the risk-preview warning timeout on another failed adjustment", () => {
+    vi.useFakeTimers();
+    mount([unavailableRiskEntry]);
+    const label = screen.getByTestId("order-label-o1");
+    fireEvent.keyDown(label, {key:"ArrowUp"});
+    act(() => vi.advanceTimersByTime(4000));
+    fireEvent.keyDown(label, {key:"ArrowUp"});
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByRole("status")).toBeTruthy();
+    act(() => vi.advanceTimersByTime(4000));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+  it.each([
+    {symbol:"US.MSFT",venue:"sim"},
+    {symbol:"US.AAPL",venue:"alpaca"},
+  ])("clears the risk-preview warning when switching to $symbol at $venue", ({symbol,venue}) => {
+    const {changeContext} = mount([unavailableRiskEntry]);
+    fireEvent.keyDown(screen.getByTestId("order-label-o1"), {key:"ArrowUp"});
+    expect(screen.getByRole("status")).toBeTruthy();
+    changeContext(symbol,venue);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+  it("keeps unknown order status on the marker after its notice expires", async () => {
+    vi.useFakeTimers();
+    const {host,sendCommand} = mount();
+    sendCommand.mockResolvedValue({kind:"ack",corrId:"c1",status:"blocked",ambiguous:true});
+    await act(async () => { fireEvent.keyDown(screen.getByTestId("order-label-o1"), {key:"ArrowUp"}); });
+    expect(screen.getByRole("status").textContent).toContain("Modify outcome unknown");
+    act(() => vi.advanceTimersByTime(5000));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(host.querySelector("[data-order-status]")?.textContent).toBe("UNKNOWN — verify Orders");
+  });
   it("keeps fixed protective stops without offering conversion",()=>{
     const entry:Order={...base,executedQty:10,riskEntry:{stopId:"protect",budget:100,mode:"Dollar",buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"}}};
     mount([entry,{...base,id:"protect",side:"SELL",type:"STOP_LIMIT",stopPrice:99,limitPrice:99,riskEntryId:entry.id,held:{phase:"ARMED",deadlineMs:9999999999999}}]);

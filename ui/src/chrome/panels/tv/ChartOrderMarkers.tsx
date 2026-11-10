@@ -79,7 +79,15 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
   const chooserLatest = useRef(false); chooserLatest.current = chooser !== null || lineChooser !== null;
   props.chooserOpenRef.current = chooserLatest.current;
   const groupsLatest = useRef(groups); groupsLatest.current = groups;
-  const [announcement, setAnnouncement] = useState("");
+  const [notice, setNotice] = useState({ text:"" });
+  const announcement = notice.text;
+  const setAnnouncement = (text:string) => setNotice({ text });
+  useEffect(() => {
+    if (!notice.text) return;
+    const timer = setTimeout(() => setNotice({ text:"" }), 5000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  useEffect(() => { setNotice({ text:"" }); }, [props.symbol, props.venue]);
   const [trailEdit,setTrailEdit]=useState<{order:Order;config:TrailConfig}|null>(null);
   const [trailBusy,setTrailBusy]=useState(false);
   const openTrail=(o:Order)=>{
