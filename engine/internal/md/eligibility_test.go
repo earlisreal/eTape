@@ -162,6 +162,46 @@ func TestVolumeOnlyBarUsesTrustedPriorCloseAndDedupsBeforeEligibility(t *testing
 	}
 }
 
+func TestVolumeOnlyBarKeepsLastEligibleCloseAfterQuoteUpdate(t *testing.T) {
+	const symbol = "US.CRMN"
+	bucket := time.Date(2026, time.November, 12, 6, 7, 50, 0, session.Loc())
+	c := New(Config{})
+	applyTick := func(seq int64, at time.Time, price float64, volume int64, condition feed.TradeReportCondition) {
+		tick := conditionTick(seq, at.UnixMilli()-t0Ms, price, volume, condition, feed.Buy)
+		tick.Symbol = symbol
+		c.apply(eventMsg{at: at, ev: feed.TicksEvent{Ticks: []feed.Tick{tick}}})
+	}
+	readBucket := func() Bar {
+		t.Helper()
+		for len(c.Updates()) > 0 {
+			if update, ok := (<-c.Updates()).(BarUpdate); ok && update.Bar.TF == session.TF10s && update.Bar.BucketMs == bucket.UnixMilli() {
+				return update.Bar
+			}
+		}
+		t.Fatal("missing 10-second bar update")
+		return Bar{}
+	}
+
+	applyTick(1, bucket.Add(-time.Second), 3.9498, 100, feed.TradeConditionExtendedHours)
+	quoteAt := bucket.Add(-100 * time.Millisecond)
+	c.apply(eventMsg{at: quoteAt, ev: feed.QuoteEvent{Quote: feed.Quote{
+		Symbol: symbol, TsMs: quoteAt.UnixMilli(), Last: 1.16, PrevClose: 1.16,
+	}}})
+	applyTick(2, bucket.Add(time.Millisecond), 3.95, 6, feed.TradeConditionOddLot)
+	volumeOnly := readBucket()
+	if !volumeOnly.InProgress || !volumeOnly.VolumeOnly || volumeOnly.V != 6 ||
+		volumeOnly.O != 3.9498 || volumeOnly.H != 3.9498 || volumeOnly.L != 3.9498 || volumeOnly.C != 3.9498 {
+		t.Errorf("volume-only bar = %+v, want flat at last eligible close 3.9498", volumeOnly)
+	}
+
+	applyTick(3, bucket.Add(4*time.Second), 3.9409, 219, feed.TradeConditionExtendedHours)
+	formed := readBucket()
+	if !formed.InProgress || formed.VolumeOnly || formed.V != 225 ||
+		formed.O != 3.9409 || formed.H != 3.9409 || formed.L != 3.9409 || formed.C != 3.9409 {
+		t.Fatalf("formed bar = %+v, want first eligible print at 3.9409 with accumulated volume", formed)
+	}
+}
+
 func TestRangeOnlyPrintExtendsRangeWithoutChangingLast(t *testing.T) {
 	c, drain := runCore(t)
 	c.Feed(feed.QuoteEvent{Quote: feed.Quote{Symbol: "US.AAPL", Last: 100}})

@@ -55,6 +55,24 @@ func TestTickAggSkipsEmptyBucketsAndDropsLate(t *testing.T) {
 	}
 }
 
+func TestTickAggQuoteUsesEstablishedCloseForPendingBucket(t *testing.T) {
+	a := newTickAgg("US.AAPL", session.TF10s)
+	odd := tick(1, 1_000, 3.95, 6, feed.Buy)
+	odd.RangeEligible, odd.LastEligible = false, false
+	if got := a.addTick(odd, false); len(got) != 0 {
+		t.Fatalf("unanchored bucket emitted %+v", got)
+	}
+	a.addTick(tick(2, 11_000, 3.9498, 100, feed.Buy), false)
+	a.seedOrigin = quoteAnchorOrigin
+	a.seedAnchorAt(1.16, 0, t0Ms+12_000)
+
+	got := a.addTick(tick(3, 21_000, 3.94, 100, feed.Buy), false)
+	if len(got) != 3 || got[0].BucketMs != t0Ms || got[0].InProgress ||
+		!got[0].VolumeOnly || got[0].C != 3.9498 || got[0].V != 6 {
+		t.Fatalf("pending bucket = %+v, want finalized at the established close with its original volume", got)
+	}
+}
+
 // Seed/live equivalence: the same tick stream produces identical bars whether
 // it arrives as one seed burst or split across seed + live batches.
 func TestTickAggSeedLiveEquivalence(t *testing.T) {

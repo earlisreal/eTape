@@ -7,6 +7,8 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
+const quoteAnchorOrigin = "quote"
+
 // tickBucket keeps eligibility dimensions separate until the bar snapshot is
 // materialized. Ineligible Reported Prints never reach this state.
 type tickBucket struct {
@@ -79,21 +81,25 @@ func (a *tickAgg) seedAnchorAt(price, fallback float64, tsMs int64) {
 	if a.hasTrusted && a.trustedCloseTs > 0 && (tsMs == 0 || tsMs < a.trustedCloseTs) {
 		return
 	}
-	a.trustedClose = price
-	a.trustedSource = a.seedSource
-	a.trustedBar = a.seedBar
-	a.trustedOrigin = a.seedOrigin
-	a.hasTrusted = true
-	if tsMs > 0 {
-		a.trustedCloseTs = tsMs
+	// A basic quote can carry a prior-session price with a newer timestamp.
+	// Use it as a fallback until a trade or bar supplies the anchor.
+	if a.seedOrigin != quoteAnchorOrigin || !a.hasTrusted || a.trustedOrigin == quoteAnchorOrigin {
+		a.trustedClose = price
+		a.trustedSource = a.seedSource
+		a.trustedBar = a.seedBar
+		a.trustedOrigin = a.seedOrigin
+		a.hasTrusted = true
+		if tsMs > 0 {
+			a.trustedCloseTs = tsMs
+		}
 	}
 	for _, b := range a.open {
 		if !b.hasAnchor {
-			b.anchor, b.hasAnchor = price, true
-			b.anchorTime = tsMs
-			b.anchorSource = a.seedSource
-			b.anchorBar = a.seedBar
-			b.anchorOrigin = a.seedOrigin
+			b.anchor, b.hasAnchor = a.trustedClose, true
+			b.anchorTime = a.trustedCloseTs
+			b.anchorSource = a.trustedSource
+			b.anchorBar = a.trustedBar
+			b.anchorOrigin = a.trustedOrigin
 			a.recordSource = a.seedSource
 			a.recordBasis(b)
 		}

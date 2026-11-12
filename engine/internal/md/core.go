@@ -424,7 +424,7 @@ func (c *Core) applyEventAt(ev feed.Event, at time.Time) {
 	case feed.QuoteEvent:
 		quote := c.quotes.set(e.Quote)
 		c.bars.anchorSource = e.Quote.Source
-		c.bars.seedAnchor(quote.Symbol, quote.Last, quote.PrevClose, quote.TsMs, "quote")
+		c.bars.seedAnchor(quote.Symbol, quote.Last, quote.PrevClose, quote.TsMs, quoteAnchorOrigin)
 		c.emit(QuoteUpdate{Quote: quote})
 		c.luldFor(quote.Symbol).onQuote(quote, at)
 		c.publishLULD(quote.Symbol, at)
