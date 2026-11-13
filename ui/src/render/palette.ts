@@ -34,6 +34,7 @@ export interface Palette {
   flashSellStrong: string;
   flashNeutralStrong: string;
   orderMark: string;    // display-only working-order marks on the ladder
+  heldOrderMark: string; // stop and planned limit prices for an engine-held order
   // ET session shading (rgba, low alpha — drawn behind bars)
   sessionPre: string;
   sessionRth: string;  // usually transparent
@@ -74,6 +75,7 @@ export const LIGHT: Palette = {
   flashBuy: "rgba(23,122,88,0.20)", flashSell: "rgba(194,51,77,0.20)", flashNeutral: "rgba(106,114,128,0.16)",
   flashBuyStrong: "rgba(23,122,88,0.34)", flashSellStrong: "rgba(194,51,77,0.34)", flashNeutralStrong: "rgba(106,114,128,0.28)",
   orderMark: "#9A6A1B",
+  heldOrderMark: "#00657D",
   sessionPre: "rgba(154,106,27,0.05)", sessionRth: "rgba(0,0,0,0)",
   sessionPost: "rgba(106,114,128,0.06)", sessionClosed: "rgba(106,114,128,0.10)",
   indVwap: "#9A6A1B", indEma: "#3E7CB1", indSma: "#7A5CA6",
@@ -94,6 +96,7 @@ export const DARK: Palette = {
   flashBuy: "rgba(53,184,136,0.24)", flashSell: "rgba(229,99,122,0.24)", flashNeutral: "rgba(154,147,133,0.18)",
   flashBuyStrong: "rgba(53,184,136,0.38)", flashSellStrong: "rgba(229,99,122,0.38)", flashNeutralStrong: "rgba(154,147,133,0.30)",
   orderMark: "#C79A4B",
+  heldOrderMark: "#5CDCF0",
   sessionPre: "rgba(199,154,75,0.07)", sessionRth: "rgba(0,0,0,0)",
   sessionPost: "rgba(154,147,133,0.07)", sessionClosed: "rgba(154,147,133,0.12)",
   indVwap: "#C79A4B", indEma: "#6BA6D8", indSma: "#A98BD0",

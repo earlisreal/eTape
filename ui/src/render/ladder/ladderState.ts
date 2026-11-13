@@ -3,7 +3,7 @@
 import type { Book, BookLevel, EstimatedLULD, TickDirection, Order } from "../../wire/contract";
 import type { Palette } from "../palette";
 import { formatPrice, quoteDecimals } from "../format";
-import { isWorking, sideIsSell } from "../../wire/orderStatus";
+import { isWorking } from "../../wire/orderStatus";
 
 export const MIN_LADDER_LEVELS = 1;
 export const DEFAULT_LADDER_LEVELS = 10;
@@ -34,10 +34,10 @@ export function isLULDBoundaryRow(row: LadderEntry): row is LULDBoundaryRow {
   return "kind" in row && row.kind === "luld";
 }
 
-export interface OrderMark {
-  price: number;
-  side: "buy" | "sell";
-  qty: number;
+interface PriceOrderMarks {
+  working?: true;
+  stop?: "active" | "paused";
+  limit?: "active" | "paused";
 }
 
 export interface TradeFlash {
@@ -46,20 +46,23 @@ export interface TradeFlash {
   atMs: number;
 }
 
-export interface LadderPaintState {
-  symbol: string;
-  entitled: boolean;
+interface LadderSides {
   /** Real rows are best-first; virtual LULD rows may sit beside them. */
   asks: LadderEntry[];
   bids: LadderEntry[];
   askFallback: LULDBoundaryRow | null;
   bidFallback: LULDBoundaryRow | null;
+}
+
+export interface LadderPaintState extends LadderSides {
+  symbol: string;
+  entitled: boolean;
   spread: number | null;
   luld: EstimatedLULD | null;
   averageEntryPrice: number | null;
   averageEntryRowVisible: boolean;
   flash: TradeFlash | null;
-  orders: OrderMark[];
+  orderMarks: ReadonlyMap<number, PriceOrderMarks>;
   nowMs: number;
   width: number;
   height: number;
@@ -126,12 +129,7 @@ function projectBoundary(
 
 /** Book sides (best-first, as delivered) → ladder rows, each bar length proportional to
  *  that row's own size, normalized against the largest single level across BOTH sides. */
-export function buildLadderSides(book: Book | undefined, levels: unknown = DEFAULT_LADDER_LEVELS): {
-  asks: LadderEntry[];
-  bids: LadderEntry[];
-  askFallback: LULDBoundaryRow | null;
-  bidFallback: LULDBoundaryRow | null;
-} {
+export function buildLadderSides(book: Book | undefined, levels: unknown = DEFAULT_LADDER_LEVELS): LadderSides {
   const count = normalizeLadderLevels(levels);
   const asks = accumulate(book?.asks ?? [], count);
   const bids = accumulate(book?.bids ?? [], count);
@@ -167,36 +165,53 @@ export function clampLadderOffset(offset: number, maxOffset: number): number {
   return Math.min(max, normalizeRowOffset(offset));
 }
 
-function hasVisibleAverageEntryRow(
-  rows: LadderEntry[],
-  fallback: LULDBoundaryRow | null,
+function hasVisiblePrice(
+  sides: LadderSides,
   price: number | null,
   rowOffset: number,
   visibleRows: number,
 ): boolean {
   if (price === null || visibleRows <= 0) return false;
-  const logicalRows = Math.max(0, visibleRows - (fallback ? 1 : 0));
-  return rows.some((row, index) =>
-    index >= rowOffset && index - rowOffset < logicalRows && !isLULDBoundaryRow(row) && row.price === price,
-  );
+  const matches = (rows: LadderEntry[], fallback: LULDBoundaryRow | null) => {
+    const end = rowOffset + visibleRows - (fallback ? 1 : 0);
+    return rows.some((row, index) => index >= rowOffset && index < end && !isLULDBoundaryRow(row) && row.price === price);
+  };
+  return matches(sides.bids, sides.bidFallback) || matches(sides.asks, sides.askFallback);
 }
 
-/**
- * Display-only projection of working orders onto the ladder: an order marks the
- * ladder iff it names this symbol, is in a working state, and carries a positive
- * price at its relevant level (limit price for limit/stop-limit, stop price for
- * stop) and remaining quantity. Sell/Short → sell.
- */
-export function workingOrderMarks(orders: Order[], symbol: string): OrderMark[] {
-  const marks: OrderMark[] = [];
+function addOrderMark(marks: Map<number, PriceOrderMarks>, price: number, kind: keyof PriceOrderMarks, paused = false): void {
+  if (!Number.isFinite(price) || price <= 0) return;
+  const row = marks.get(price) ?? {};
+  if (kind === "working") row.working = true;
+  else if (row[kind] !== "active") row[kind] = paused ? "paused" : "active";
+  marks.set(price, row);
+}
+
+/** Display-only marks for a symbol's working orders and fixed held Stop-Limit prices. */
+export function workingOrderMarks(orders: Order[], symbol: string): ReadonlyMap<number, PriceOrderMarks> {
+  const marks = new Map<number, PriceOrderMarks>();
   for (const o of orders) {
     if (o.symbol !== symbol || !isWorking(o.status)) continue;
+    const qty = o.leavesQty > 0 ? o.leavesQty : o.qty;
+    const hasQty = Number.isFinite(qty) && qty > 0;
+    const held = o.held;
+    if (o.type === "STOP_LIMIT" && held && !held.trail) {
+      const { phase, cancelRequested } = held;
+      const cancelPending = o.action?.kind === "CANCEL" && (o.action.phase === "REQUESTED" || o.action.phase === "UNKNOWN");
+      if (cancelRequested || cancelPending) continue;
+      if (phase !== "WORKING") {
+        if (phase !== "WAITING" && phase !== "ARMED" && phase !== "PAUSED") continue;
+        const deferredPct = o.deferredPositionPct ?? 0;
+        if (!hasQty && !(qty === 0 && deferredPct > 0 && deferredPct <= 100)) continue;
+        addOrderMark(marks, o.stopPrice, "stop", phase === "PAUSED");
+        addOrderMark(marks, o.limitPrice, "limit", phase === "PAUSED");
+        continue;
+      }
+    }
+    if (!hasQty) continue;
     const hasChild = !!o.held?.childClientId || o.held?.phase === "WORKING" || o.held?.phase === "ACTIVATING";
     const price = o.type === "STOP" || o.type === "LIMIT_IF_TOUCHED" && !hasChild ? o.stopPrice : o.limitPrice;
-    if (!Number.isFinite(price) || price <= 0) continue;
-    const qty = o.leavesQty > 0 ? o.leavesQty : o.qty;
-    if (!Number.isFinite(qty) || qty <= 0) continue;
-    marks.push({ price, side: sideIsSell(o.side) ? "sell" : "buy", qty });
+    addOrderMark(marks, price, "working");
   }
   return marks;
 }
@@ -238,6 +253,19 @@ export function luldAccessibleText(
   return `DOM ladder ${symbol}; Estimated LULD state ${luld.state}${values}; tier ${luld.tier}${registry}${reason}${averageEntry}`;
 }
 
+export function ladderAccessibleText(state: LadderPaintState): string {
+  const label = luldAccessibleText(state.symbol, state.luld, state.averageEntryRowVisible);
+  const visibleRows = visibleLadderRows(state.height);
+  const heldPrices: string[] = [];
+  for (const [price, { stop, limit }] of state.orderMarks) {
+    if ((!stop && !limit) || !hasVisiblePrice(state, price, state.rowOffset, visibleRows)) continue;
+    const value = formatPrice(price, quoteDecimals(price));
+    if (stop) heldPrices.push(`stop ${value}${stop === "paused" ? " (paused)" : ""}`);
+    if (limit) heldPrices.push(`planned limit ${value}${limit === "paused" ? " (paused)" : ""}`);
+  }
+  return heldPrices.length ? `${label}. Engine-Held Stop-Limit ${heldPrices.join(", ")}` : label;
+}
+
 export function buildLadderState(args: {
   symbol: string;
   book: Book | undefined;
@@ -262,17 +290,13 @@ export function buildLadderState(args: {
   return {
     symbol: args.symbol,
     entitled,
-    asks: sides.asks,
-    bids: sides.bids,
-    askFallback: sides.askFallback,
-    bidFallback: sides.bidFallback,
+    ...sides,
     spread,
     luld: args.book?.estimatedLuld ?? null,
     averageEntryPrice,
-    averageEntryRowVisible: hasVisibleAverageEntryRow(sides.bids, sides.bidFallback, averageEntryPrice, rowOffset, visibleRows)
-      || hasVisibleAverageEntryRow(sides.asks, sides.askFallback, averageEntryPrice, rowOffset, visibleRows),
+    averageEntryRowVisible: hasVisiblePrice(sides, averageEntryPrice, rowOffset, visibleRows),
     flash: args.flash,
-    orders: workingOrderMarks(args.orders, args.symbol),
+    orderMarks: workingOrderMarks(args.orders, args.symbol),
     nowMs: args.nowMs,
     width: args.width,
     height: args.height,

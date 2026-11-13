@@ -14,6 +14,18 @@ Boundary Rows, bottom fallbacks, and accessible LULD values follow the same
 rule without requiring a latest trade. Spread uses four places for nonzero
 sub-dollar magnitudes, preserving its sign; zero remains `0.000`.
 
+Fixed Engine-Held Stop-Limits in Waiting or Armed phase have a segmented
+cyan stripe at the stop price and an outlined cyan stripe at the planned
+limit. The prices show the Limit Cushion when both levels are visible. Both
+stripes dim while Paused. Once the child order is Working, a solid bronze
+stripe marks its limit price. The canvas accessible name identifies visible
+held prices and their paused state.
+
+Order stripes use exact visible book prices for the symbol across venues.
+When both held prices match a row, the stop occupies the top half of the
+cyan stripe and the planned limit occupies the bottom half. A bronze stripe
+at the same price sits between the divider and the cyan stripe.
+
 When a Link Group has a selected Execution Venue, a non-flat Open Position for
 the ladder symbol with a finite positive Average Entry Price can project an
 Average-Entry Row cue. The cue uses exact numeric equality against ordinary
@@ -39,4 +51,4 @@ render directly from store snapshots, coalesced per frame. The Average-Entry Row
 cue follows the same logical scroll window: the canvas accessible name includes
 `Average-Entry Row visible` only while an exact matching real row is visible;
 offscreen and nonmatching bases add no accessibility text. Test:
-`npm test -- ladder`.
+`npx vitest run src/render/ladder/ladderState.test.ts src/chrome/panels/LadderPanel.test.tsx`.

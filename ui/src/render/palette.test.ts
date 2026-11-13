@@ -33,7 +33,7 @@ describe("palette", () => {
 
   it("defines the ladder/tape tokens (Plan 3) in both variants", () => {
     for (const p of [LIGHT, DARK]) {
-      for (const k of ["neutral", "depthBid", "depthAsk", "flashBuy", "flashSell", "flashNeutral", "orderMark"] as const) {
+      for (const k of ["neutral", "depthBid", "depthAsk", "flashBuy", "flashSell", "flashNeutral", "orderMark", "heldOrderMark"] as const) {
         expect(p[k]).toBeTruthy();
       }
       // depth bars and flashes are translucent fills layered under text — must be rgba()

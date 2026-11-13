@@ -7,7 +7,7 @@ import { makeStores } from "../../data/registry";
 import { Scheduler } from "../../render/Scheduler";
 import { browserRaf, type Surface } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus, type LinkGroup } from "../linkGroups";
-import type { AckMsg, PositionRow } from "../../wire/contract";
+import type { AckMsg, Order, PositionRow } from "../../wire/contract";
 
 const paintedLadders = vi.hoisted(() => ({ states: [] as unknown[] }));
 vi.mock("../../render/ladder/paintLadder", () => ({
@@ -206,6 +206,41 @@ describe("LadderPanel", () => {
     } });
     surface().paint();
     expect(container.querySelector("canvas")?.getAttribute("aria-label")).toContain("values 0.9998–1.250");
+  });
+
+  it("repaints and labels both held prices as the engine updates the order", () => {
+    const { stores, surface, linkGroups } = renderLadder();
+    linkGroups.focusVenue("green", "alpaca-paper");
+    applyEntryBook(stores);
+    const order: Order = {
+      venue: "sim", id: "held", symbol: "US.AAPL", side: "BUY", type: "STOP_LIMIT", tif: "DAY", session: "EXTENDED",
+      qty: 100, stopPrice: 3.49, limitPrice: 3.51, status: "SUBMITTED", executedQty: 0, leavesQty: 100,
+      avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1,
+      held: { phase: "WAITING", deadlineMs: 2 },
+    };
+    const accessibleName = () => screen.getByRole("img").getAttribute("aria-label");
+    surface().isDirty();
+    stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [order] });
+    expect(surface().isDirty()).toBe(true);
+    surface().paint();
+    expect(accessibleName()).toContain("Engine-Held Stop-Limit stop 3.490, planned limit 3.510");
+
+    for (const [phase, label] of [
+      ["PAUSED", "stop 3.490 (paused), planned limit 3.510 (paused)"],
+      ["ARMED", "stop 3.490, planned limit 3.510"],
+    ]) {
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...order, held: { phase, deadlineMs: 2 } } });
+      expect(surface().isDirty()).toBe(true);
+      surface().paint();
+      expect(accessibleName()).toContain(label);
+    }
+
+    const child: Order = { ...order, status: "ACCEPTED", held: { phase: "WORKING", deadlineMs: 2, childClientId: order.id } };
+    stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: child });
+    expect(surface().isDirty()).toBe(true);
+    surface().paint();
+    expect(accessibleName()).toBe("DOM ladder US.AAPL");
+    expect(paintedLadders.states.at(-1)).toMatchObject({ orderMarks: new Map([[3.51, { working: true }]]) });
   });
 
   it("publishes the selected venue's Average-Entry Row state and accessible name", () => {

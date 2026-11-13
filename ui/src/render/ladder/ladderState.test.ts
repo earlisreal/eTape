@@ -6,27 +6,35 @@ import {
   buildLadderSides, buildLadderState, clampLadderOffset, DEFAULT_LADDER_LEVELS,
   depthFraction, entitledForDepth, flashAlpha, maxLadderOffset, normalizeLadderLevels,
   workingOrderMarks, FLASH_MS, MAX_LADDER_LEVELS, MIN_LADDER_LEVELS,
-  isLULDBoundaryRow, luldAccessibleText, visibleLadderRows,
+  isLULDBoundaryRow, ladderAccessibleText, luldAccessibleText, visibleLadderRows,
 } from "./ladderState";
 import { paintLadder } from "./paintLadder";
 
-type RectStroke = { x: number; y: number; width: number; height: number; strokeStyle: string; lineWidth: number };
+type Rect = { x: number; y: number; width: number; height: number; alpha: number };
+type RectStroke = Rect & { strokeStyle: string; lineWidth: number };
 
 function recordingContext(): {
   ctx: CanvasRenderingContext2D;
   draws: Array<{ text: string; font: string }>;
+  rectFills: Array<Rect & { fillStyle: string }>;
   rectStrokes: RectStroke[];
 } {
   const draws: Array<{ text: string; font: string }> = [];
+  const rectFills: Array<Rect & { fillStyle: string }> = [];
   const rectStrokes: RectStroke[] = [];
   let font = "";
   let strokeStyle = "";
   let lineWidth = 1;
+  let fillStyle = "";
+  let alpha = 1;
   const ctx = {
-    clearRect() {}, fillRect() {},
+    clearRect() {},
+    fillRect(x: number, y: number, width: number, height: number) {
+      rectFills.push({ x, y, width, height, alpha, fillStyle });
+    },
     fillText(text: string) { draws.push({ text, font }); },
     strokeRect(x: number, y: number, width: number, height: number) {
-      rectStrokes.push({ x, y, width, height, strokeStyle, lineWidth });
+      rectStrokes.push({ x, y, width, height, alpha, strokeStyle, lineWidth });
     },
     beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, setLineDash() {},
     get font() { return font; },
@@ -35,8 +43,12 @@ function recordingContext(): {
     set strokeStyle(value: string) { strokeStyle = value; },
     get lineWidth() { return lineWidth; },
     set lineWidth(value: number) { lineWidth = value; },
+    get fillStyle() { return fillStyle; },
+    set fillStyle(value: string) { fillStyle = value; },
+    get globalAlpha() { return alpha; },
+    set globalAlpha(value: number) { alpha = value; },
   } as unknown as CanvasRenderingContext2D;
-  return { ctx, draws, rectStrokes };
+  return { ctx, draws, rectFills, rectStrokes };
 }
 
 function book(overrides: Partial<Book> = {}): Book {
@@ -161,30 +173,78 @@ const ord = (over: Partial<Order>): Order => ({
   avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, ...over,
 });
 
-describe("workingOrderMarks (typed Order, Plan 5)", () => {
-  it("marks working limit orders for this symbol; sell/short → sell", () => {
+const heldStop = (phase: string, overrides: Partial<Order> = {}): Order => ord({
+  type: "STOP_LIMIT", stopPrice: 3.51, limitPrice: 3.52, status: "SUBMITTED",
+  held: { phase, deadlineMs: 2 }, ...overrides,
+});
+
+describe("workingOrderMarks", () => {
+  it("marks working limits and native Stop-Limits at their limit prices", () => {
     const marks = workingOrderMarks(
       [ord({ id: "1", side: "BUY", limitPrice: 3.5 }),
        ord({ id: "2", side: "SELL", limitPrice: 3.6 }),
-       ord({ id: "3", side: "SHORT", limitPrice: 3.7 })],
+       ord({ id: "3", side: "SHORT", type: "STOP_LIMIT", stopPrice: 3.8, limitPrice: 3.7 })],
       "US.AAPL");
-    expect(marks).toEqual([
-      { price: 3.5, side: "buy", qty: 100 },
-      { price: 3.6, side: "sell", qty: 100 },
-      { price: 3.7, side: "sell", qty: 100 },
+    expect([...marks]).toEqual([
+      [3.5, { working: true }],
+      [3.6, { working: true }],
+      [3.7, { working: true }],
     ]);
   });
-  it("excludes filled/terminal, other symbols, and uses stop price for STOP", () => {
-    expect(workingOrderMarks([ord({ status: "FILLED" })], "US.AAPL")).toEqual([]);
-    expect(workingOrderMarks([ord({ symbol: "US.NVDA" })], "US.AAPL")).toEqual([]);
-    expect(workingOrderMarks([ord({ type: "STOP", stopPrice: 3.0, limitPrice: 0, leavesQty: 50 })], "US.AAPL"))
-      .toEqual([{ price: 3.0, side: "buy", qty: 50 }]);
+  it("excludes terminal orders and other symbols and uses stop price for STOP", () => {
+    const marks = workingOrderMarks([
+      heldStop("WORKING", { status: "FILLED" }),
+      heldStop("WAITING", { symbol: "US.NVDA" }),
+      ord({ type: "STOP", stopPrice: 3.0, limitPrice: 0, leavesQty: 50 }),
+    ], "US.AAPL");
+    expect([...marks]).toEqual([[3.0, { working: true }]]);
   });
   it("projects held LIT trigger before activation and limit after", () => {
     const waiting = ord({ type: "LIMIT_IF_TOUCHED", stopPrice: 3.4, limitPrice: 3.6, held: { phase: "WAITING", deadlineMs: 2 } });
     const workingChild = { ...waiting, held: { phase: "WORKING" as const, deadlineMs: 2, childClientId: "child" } };
-    expect(workingOrderMarks([waiting], "US.AAPL")).toEqual([{ price: 3.4, side: "buy", qty: 100 }]);
-    expect(workingOrderMarks([workingChild], "US.AAPL")).toEqual([{ price: 3.6, side: "buy", qty: 100 }]);
+    expect([...workingOrderMarks([waiting], "US.AAPL")]).toEqual([[3.4, { working: true }]]);
+    expect([...workingOrderMarks([workingChild], "US.AAPL")]).toEqual([[3.6, { working: true }]]);
+  });
+
+  it.each([
+    ["WAITING", "active"], ["ARMED", "active"], ["PAUSED", "paused"],
+  ])("uses both engine prices in %s", (phase, intensity) => {
+    const order = heldStop(phase);
+    expect([...workingOrderMarks([order], order.symbol)]).toEqual([
+      [order.stopPrice, { stop: intensity }], [order.limitPrice, { limit: intensity }],
+    ]);
+  });
+
+  it.each(["ACTIVATING", "UNKNOWN", "CANCEL_REQUESTED", "WAITING_QUOTE"])("hides held marks in %s", (phase) => {
+    const order = heldStop(phase, { status: "ACCEPTED", held: { phase, deadlineMs: 2, childClientId: "child" } });
+    expect(workingOrderMarks([order], order.symbol).size).toBe(0);
+  });
+
+  it("uses the confirmed child limit through partial fills and a pending replace", () => {
+    const order = heldStop("WORKING", {
+      status: "PARTIALLY_FILLED", executedQty: 60, leavesQty: 40,
+      action: { kind: "REPLACE", phase: "REQUESTED", requestedLimitPrice: 3.53 },
+    });
+    expect([...workingOrderMarks([order], order.symbol)]).toEqual([[3.52, { working: true }]]);
+    const canceling = { ...order, action: { kind: "CANCEL", phase: "REQUESTED" } };
+    expect(workingOrderMarks([canceling], order.symbol).size).toBe(0);
+  });
+
+  it("marks deferred sizing but waits for a linked protective stop to have shares", () => {
+    const linked = heldStop("WAITING", { side: "SELL", stopPrice: 3.49, limitPrice: 3.48, qty: 0, leavesQty: 0, riskEntryId: "entry" });
+    expect(workingOrderMarks([linked], linked.symbol).size).toBe(0);
+    const expected = [[3.49, { stop: "active" }], [3.48, { limit: "active" }]];
+    const funded = { ...linked, qty: 20, leavesQty: 20 };
+    expect([...workingOrderMarks([funded], funded.symbol)]).toEqual(expected);
+    const deferred = heldStop("WAITING", { side: "SELL", stopPrice: 3.49, limitPrice: 3.48, qty: 0, leavesQty: 0, deferredPositionPct: 100 });
+    expect([...workingOrderMarks([deferred], deferred.symbol)]).toEqual(expected);
+  });
+
+  it("uses full intensity if any matching held mark is waiting or armed", () => {
+    const orders = [heldStop("WAITING", { venue: "sim" }), heldStop("PAUSED", { venue: "alpaca-paper" })];
+    const expected = [[3.51, { stop: "active" }], [3.52, { limit: "active" }]];
+    expect([...workingOrderMarks(orders, "US.AAPL")]).toEqual(expected);
+    expect([...workingOrderMarks(orders.reverse(), "US.AAPL")]).toEqual(expected);
   });
 });
 
@@ -375,7 +435,7 @@ describe("Average-Entry Row", () => {
     paintLadder(ctx, state);
     expect(draws.filter(({ font }) => font.startsWith("700 11px")).map(({ text }) => text)).toEqual(["300", "3.490"]);
     expect(rectStrokes).toEqual([{
-      x: 0.5, y: 36.5, width: 149, height: 21, strokeStyle: palette.text, lineWidth: 1,
+      x: 0.5, y: 36.5, width: 149, height: 21, alpha: 1, strokeStyle: palette.text, lineWidth: 1,
     }]);
   });
 
@@ -385,7 +445,7 @@ describe("Average-Entry Row", () => {
     paintLadder(ctx, state);
     expect(draws.filter(({ font }) => font.startsWith("700 11px")).map(({ text }) => text)).toEqual(["3.510", "400"]);
     expect(rectStrokes).toEqual([{
-      x: 151.5, y: 36.5, width: 148, height: 21, strokeStyle: palette.text, lineWidth: 1,
+      x: 151.5, y: 36.5, width: 148, height: 21, alpha: 1, strokeStyle: palette.text, lineWidth: 1,
     }]);
   });
 
@@ -461,5 +521,66 @@ describe("Average-Entry Row", () => {
     const visibleRecording = recordingContext();
     paintLadder(visibleRecording.ctx, visible);
     expect(visibleRecording.rectStrokes).toHaveLength(1);
+  });
+});
+
+describe("Engine-Held Stop-Limit stripes", () => {
+  const base = { symbol: "US.AAPL", book: book(), flash: null, nowMs: 0, width: 300, height: 80, palette: getPalette("light") };
+
+  it.each(["light", "dark"] as const)("draws distinct stripes at the two ask prices in %s", (mode) => {
+    const palette = getPalette(mode);
+    const state = buildLadderState({ ...base, palette, orders: [heldStop("WAITING")] });
+    const { ctx, rectFills, rectStrokes } = recordingContext();
+    paintLadder(ctx, state);
+    expect(rectFills.filter(({ fillStyle }) => fillStyle === palette.heldOrderMark)).toEqual(
+      [37, 42, 47, 52].map((y) => ({ x: 150, y, width: 3, height: 3, fillStyle: palette.heldOrderMark, alpha: 1 })),
+    );
+    expect(rectFills.some(({ fillStyle }) => fillStyle === palette.orderMark)).toBe(false);
+    expect(rectStrokes).toEqual([{
+      x: 150.5, y: 58.5, width: 2, height: 21, alpha: 1, strokeStyle: palette.heldOrderMark, lineWidth: 1,
+    }]);
+  });
+
+  it("splits a zero-cushion bid row beside bronze and restores opacity after pause", () => {
+    const { palette } = base;
+    const orders = [
+      heldStop("PAUSED", { side: "SELL", stopPrice: 3.49, limitPrice: 3.49 }),
+      ord({ limitPrice: 3.49 }),
+    ];
+    const state = buildLadderState({ ...base, orders });
+    const { ctx, rectFills, rectStrokes } = recordingContext();
+    paintLadder(ctx, state);
+    expect(rectFills.filter(({ fillStyle }) => fillStyle === palette.orderMark)).toEqual([
+      { x: 147, y: 36, width: 3, height: 22, fillStyle: palette.orderMark, alpha: 1 },
+    ]);
+    const segments = rectFills.filter(({ fillStyle }) => fillStyle === palette.heldOrderMark);
+    expect(segments.map(({ x, y, width, height }) => [x, y, width, height])).toEqual([[144, 37, 3, 3], [144, 42, 3, 3]]);
+    expect(segments.every(({ alpha }) => alpha > 0 && alpha < 1)).toBe(true);
+    expect(rectStrokes).toEqual([{
+      x: 144.5, y: 47.5, width: 2, height: 10, alpha: segments[0].alpha, strokeStyle: palette.heldOrderMark, lineWidth: 1,
+    }]);
+    expect(ctx.globalAlpha).toBe(1);
+  });
+
+  it("matches a visible stop independently of a limit on a LULD row", () => {
+    const state = buildLadderState({ ...base, height: 102, orders: [heldStop("WAITING")], book: book({
+      asks: [{ price: 3.51, size: 400 }], estimatedLuld: luld({ upper: 3.52 }),
+    }) });
+    const { ctx, rectFills, rectStrokes } = recordingContext();
+    paintLadder(ctx, state);
+    expect(rectFills.some(({ fillStyle }) => fillStyle === base.palette.heldOrderMark)).toBe(true);
+    expect(rectStrokes).toHaveLength(0);
+    expect(ladderAccessibleText(state)).toContain("Engine-Held Stop-Limit stop 3.510");
+    expect(ladderAccessibleText(state)).not.toContain("planned limit");
+  });
+
+  it("reports and paints only the planned limit once the stop scrolls away", () => {
+    const state = buildLadderState({ ...base, height: 58, rowOffset: 1, orders: [heldStop("WAITING")] });
+    const { ctx, rectFills, rectStrokes } = recordingContext();
+    paintLadder(ctx, state);
+    expect(rectFills.some(({ fillStyle }) => fillStyle === base.palette.heldOrderMark)).toBe(false);
+    expect(rectStrokes).toHaveLength(1);
+    expect(ladderAccessibleText(state)).toContain("Engine-Held Stop-Limit planned limit 3.520");
+    expect(ladderAccessibleText(state)).not.toContain("stop 3.510");
   });
 });

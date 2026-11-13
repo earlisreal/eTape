@@ -12,7 +12,7 @@ import {
   buildLadderState,
   clampLadderOffset,
   flashAlpha,
-  luldAccessibleText,
+  ladderAccessibleText,
   LADDER_ROW_H,
   maxLadderOffset,
   normalizeLadderLevels,
@@ -177,7 +177,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
           levels: levelsRef.current,
           rowOffset: scrollOffsetRef.current,
         });
-        const accessibleText = luldAccessibleText(symbol, paintState.luld, paintState.averageEntryRowVisible);
+        const accessibleText = ladderAccessibleText(paintState);
         if (accessibleText !== lastAccessibleText) {
           canvas.setAttribute("aria-label", accessibleText);
           lastAccessibleText = accessibleText;

@@ -8,6 +8,7 @@ Approved, implementation pending:
 
 Implemented:
 
+- [DOM Ladder stripes for Engine-Held Stop-Limits](2026-11-13-dom-ladder-engine-held-stop-limit.md)
 - [Chart Risk Entry position adds](2026-11-05-chart-risk-position-adds.md)
 - [Volume Overlap](2026-11-03-volume-overlap.md)
 - [Alert and Watchlist symbol navigation](2026-10-21-alert-panel-symbol-navigation.md)

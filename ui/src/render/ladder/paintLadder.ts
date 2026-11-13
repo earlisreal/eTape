@@ -18,7 +18,8 @@ import {
 export { LADDER_ROW_H } from "./ladderState";
 
 const PAD = 8;
-const ORDER_EDGE = 3; // bronze inner-edge width for a working-order mark
+const ORDER_EDGE = 3;
+const PAUSED_ORDER_ALPHA = 0.7;
 
 export function paintLadder(ctx: CanvasRenderingContext2D, s: LadderPaintState): void {
   const p = s.palette;
@@ -160,13 +161,30 @@ function drawSide(
     if (borderWidth > 0) ctx.strokeRect(borderX, y + 0.5, borderWidth, LADDER_ROW_H - 1);
   }
 
-  // display-only working-order mark: bronze inner edge on the divider side
-  const hasOrder = s.orders.some((o) => o.price === row.price);
-  if (hasOrder) {
+  const marks = s.orderMarks.get(row.price);
+  if (!marks) return;
+  const innerX = side === "bid" ? mid - ORDER_EDGE : mid;
+  if (marks.working) {
     ctx.fillStyle = p.orderMark;
-    if (side === "bid") ctx.fillRect(mid - ORDER_EDGE, y, ORDER_EDGE, LADDER_ROW_H);
-    else ctx.fillRect(mid, y, ORDER_EDGE, LADDER_ROW_H);
+    ctx.fillRect(innerX, y, ORDER_EDGE, LADDER_ROW_H);
   }
+
+  if (!marks.stop && !marks.limit) return;
+  const x = marks.working ? innerX + (side === "bid" ? -ORDER_EDGE : ORDER_EDGE) : innerX;
+  const height = marks.stop && marks.limit ? LADDER_ROW_H / 2 : LADDER_ROW_H;
+  if (marks.stop) {
+    ctx.globalAlpha = marks.stop === "paused" ? PAUSED_ORDER_ALPHA : 1;
+    ctx.fillStyle = p.heldOrderMark;
+    for (let dy = 1; dy + 3 <= height; dy += 5) ctx.fillRect(x, y + dy, ORDER_EDGE, 3);
+  }
+  if (marks.limit) {
+    ctx.globalAlpha = marks.limit === "paused" ? PAUSED_ORDER_ALPHA : 1;
+    ctx.strokeStyle = p.heldOrderMark;
+    ctx.lineWidth = 1;
+    const top = marks.stop ? y + height : y;
+    ctx.strokeRect(x + 0.5, top + 0.5, ORDER_EDGE - 1, height - 1);
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawLULDBoundary(
