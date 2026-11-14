@@ -18,7 +18,16 @@ Go process owns external connections, normalized market state, persistence, scan
 
 Flow: OpenD/broker/history inputs enter `internal`; `cmd/etape` composes services; `uihub` emits JSON topics and accepts commands. Focused history warms OpenD K_1M then K_DAY first; optional Alpaca/Yahoo providers fill only persisted uncovered ranges before those seams. OpenD cache seeds enter the market-data core losslessly, ticker pushes wait behind an in-flight ticker seed per symbol, and finalized bars archive before the droppable UI update stream. The core preserves Reported Print evidence, stamps condition eligibility once after deduplication, protects bars/marks from ineligible prices, and safely trims finalized 10-second ranges to the authoritative K_1M envelope when the two OpenD streams disagree; execution recovery folds the existing event log into live orders plus a targeted 20:00 ET closed-order projection; the UI-hub mirror publishes both read-only order views. Inputs: TCP/HTTP/WebSocket, config, SQLite. Outputs: UI server, broker requests, durable state, logs.
 
-Invariants: one normalized domain boundary; high-rate paths avoid UI framework state; live orders pass execution gates. Children: [commands](cmd/README.md), [internal packages](internal/README.md), [scripts](scripts/README.md). Test: `go test ./...`; build: `go build ./cmd/etape`.
+From `engine/`, build with `go build ./cmd/etape`, run the suite with
+`go test ./...`, and check the generated WebSocket contract with
+`mingw32-make gen-ts-check` on Windows or `make gen-ts-check` elsewhere.
+
+| Area | Guides |
+| --- | --- |
+| Startup and diagnostics | [eTape command](cmd/etape/README.md), [OpenD tick probe](cmd/tick_sub/main.go), [engine scripts](scripts/README.md) |
+| Market data | [feed contracts](internal/feed/README.md), [history and backfill](internal/backfill/README.md), [market-data core](internal/md/README.md), [scanner](internal/scan/README.md), [storage](internal/store/README.md) |
+| Orders and brokers | [execution core](internal/exec/README.md), [external API contracts](../docs/external-apis.md), [moomoo adapter](internal/broker/moomoo/README.md), [broker network helpers](internal/broker/netx/README.md) |
+| Configuration and transport | [config](internal/config/README.md), [UI hub](internal/uihub/README.md) |
 
 Scanner Panels share one engine poller, discovery cache, enrichment workers,
 subscription warm pool and provider budgets. Each `(workspaceId, panelId)` owns

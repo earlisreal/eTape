@@ -1,3 +1,0 @@
-# OpenD Quota
-
-Tracks account-wide stock subscription/history usage from OpenD and publishes contention state. Live subscriptions count per symbol and subtype; historical K-lines count once per symbol across periods in a rolling seven-day window. OpenD counters are authoritative, while `feed.quota_slots` separately caps eTape admission, defaults to 300, and must stay at or below the account entitlement. Inputs: OpenD quota snapshots plus demand; outputs: admission/status. Centralize accounting; never infer availability from panel state. See [external API contracts](../../../docs/external-apis.md). Test: `go test ./internal/quota`.

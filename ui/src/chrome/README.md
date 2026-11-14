@@ -40,6 +40,10 @@ to broadcast the chosen symbol. Test: `chrome/alerts/navigation.test.ts` and
 
 Workspace shell, dock layout, settings, controls, and execution surfaces. Inputs: imperative stores plus user actions; outputs: wire commands and panel/controller lifecycle. Children: [execution UI](exec/README.md), [panels](panels/README.md), `controls`. React state stays low-frequency. Test: `npm test`.
 
+The OpenD feed banner follows `feed-up` and `feed-down` events. A non-empty
+live `md.tape` delta also confirms recovery. Periodic `sys.health` RTT checks
+feed the latency display.
+
 Dockview's component map changes only when panel identities change. Scanner
 refreshes, Scanner Sync symbol assignments, and panel settings edits preserve an
 active divider drag. Completed layout changes update the workspace snapshot so

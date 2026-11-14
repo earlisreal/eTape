@@ -1,13 +1,11 @@
 # Domain Docs
 
-How the engineering skills should consume this repo's domain documentation when exploring the codebase.
+Use this guidance when naming domain concepts or changing a design covered by a decision record.
 
 ## Before exploring, read these
 
-- **`CONTEXT.md`** at the repo root
-- **`docs/adr/`** — read ADRs that touch the area about to be changed
-
-If either location does not exist, proceed silently. The `/domain-modeling` skill creates domain documentation lazily when terms or decisions are resolved.
+- [Glossary](../../CONTEXT.md) for established terms.
+- [Architecture decision records](../adr/) that cover the behavior being changed.
 
 ## File structure
 
@@ -25,7 +23,7 @@ eTape uses a single-context layout:
 
 When output names a domain concept—in an issue title, refactor proposal, hypothesis, or test name—use the term defined in `CONTEXT.md`. Do not drift to synonyms the glossary explicitly avoids.
 
-If a needed concept is absent, reconsider whether the new language fits the project or note the gap for `/domain-modeling`.
+If a needed concept is absent, check whether existing terms fit and flag any terminology that needs a decision.
 
 ## Flag ADR conflicts
 

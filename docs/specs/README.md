@@ -4,6 +4,8 @@ Current durable domain decisions:
 
 - [Chart Risk Entry position adds](../../.scratch/chart-risk-position-adds/spec.md)
   share one keep-or-raise stop, retain per-add risk budgets and admit one pending BUY.
+- [Engine-Held Trailing Stops](../../.scratch/engine-trailing-stops/spec.md)
+  belong to one Position Cycle and engine run. Chart Risk Entry supports trailing presets.
 - Go engine owns feed normalization, market state, persistence, scanning, execution, and WebSocket snapshots.
 - UI keeps high-frequency data in imperative stores and canvas/chart controllers, outside React state.
 - Go WebSocket structs are source of truth; generated TypeScript is read-only.
@@ -16,11 +18,5 @@ Current durable domain decisions:
 - Orders use stable client IDs and normalized lifecycle events. Ambiguous submit outcomes require reconciliation, never blind duplicate submission.
 - Watchlist membership is authoritative engine state; row snapshots may lag membership and render placeholders.
 - Time & Sales Significant Prints are Go UI-hub annotations: separate RTH/Extended 2,000-print learning pools reset on the 20:00 ET cycle, emit low-rate `md.tape.status`, and carry `none`/`large`/`exceptional` on generated tick contracts. Minimum Trade Size is display-only.
-
-Approved feature designs awaiting implementation:
-
-- [Engine-Held Trailing Stops](../../.scratch/engine-trailing-stops/spec.md):
-  standalone SELL/COVER trails, Chart Risk Entry protection conversion and
-  trailing preset modes; confirmed 2026-10-20.
 
 Create focused approved specifications here as `YYYY-MM-DD-short-feature.md`. After implementation, keep durable decisions current and remove obsolete proposal detail.

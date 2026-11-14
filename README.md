@@ -524,8 +524,8 @@ terms. Test against the simulator or a paper account before arming a live venue.
 ## Contributing
 
 Issues, bug reports, and pull requests are welcome. If you're adding a broker
-adapter or panel, open an issue first and follow its subsystem README plus current
-specifications in `docs/specs/`.
+adapter or panel, open an issue first and consult the [subsystem guides](docs/README.md)
+and [current specifications](docs/specs/README.md).
 
 ## License
 

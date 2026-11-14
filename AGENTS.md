@@ -1,92 +1,50 @@
 # eTape Agent Guide
 
-Local-first US-stock trading platform: Go engine plus TypeScript/React/Vite UI. moomoo OpenD supplies primary market data; sim, Alpaca, TradeZero, and moomoo adapters execute orders.
+eTape is a local-first US-stock trading platform with a Go engine and a TypeScript/React/Vite UI. moomoo OpenD supplies primary market data. Simulator, Alpaca, TradeZero, and moomoo adapters handle execution.
 
 ## Guides
 
-- [Codebase and user guide](README.md)
-- [Engine](engine/README.md), [UI](ui/README.md), [external APIs](docs/external-apis.md)
-- [Documentation](docs/README.md), [plans](docs/plans/README.md), [prototypes](prototypes/README.md), [scripts](scripts/README.md)
+- For launch, configuration, or releases, see the [user guide](README.md).
+- For implementation and tests, start with the [engine](engine/README.md) or [UI](ui/README.md) guide. For providers and broker contracts, see [external APIs](docs/external-apis.md).
+- For tickets, use the [local tracker](docs/agents/issue-tracker.md) and its [triage statuses](docs/agents/triage-labels.md). For design work, see the [specifications](docs/specs/README.md), [plans](docs/plans/README.md), and [domain guidance](docs/agents/domain.md).
+- For an explicit skill path, check the named `SKILL.md` and read its required references even if the skill is absent from the catalog.
 
-## Agent skills
+## Workflow
 
-### Issue tracker
-
-Issues are tracked as local Markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
-`.scratch/` is versioned project history. Before handoff, commit every tracker file created or changed by the current task, subject to the spec/plan approval gate below; leave unrelated tracker files untouched.
-
-### Triage labels
-
-Issue status uses the five default canonical triage roles. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-This repository uses a single-context domain layout. See `docs/agents/domain.md`.
-
-### Skill resolution
-
-Explicit skill paths are authoritative: verify and read the referenced `SKILL.md` before deciding availability. Treat any skills it references as active dependencies and read them before proceeding; absence from the catalog alone is insufficient.
+- For intermittent bugs, use available recordings and logs to locate the symptom and its timing. Reproduce the failure with a focused check when feasible and state which causes remain unconfirmed.
+- For UI regressions involving streaming updates, browser layout, or multiple windows, verify the affected interaction with controlled demo data or fixtures when unit tests cannot exercise it.
+- For changes to saved or imported workspaces, check that layouts from before the change still load and retain unrelated panels and settings.
+- Update the guide, specification, or decision record that owns any changed flow, interface, dependency, invariant, or operation.
+- In handoffs, lead with what changed for Earl and include steps to verify it in the app when applicable.
 
 ## Invariants
 
-- High-frequency data never flows through React state. Stores/controllers mutate imperatively; canvas/chart rendering coalesces work.
-- Go types in `engine/internal/uihub/wsmsg` own WebSocket contract. `ui/src/gen/wsmsg.ts` is generated; never edit it.
-- TICKER ticks build exchange-time 10-second bars. One-minute K-lines feed larger intraday bars. Daily is fetched; weekly/monthly derive from daily.
-- OpenD uses raw TCP plus protobuf at configured address. Trade unlock occurs in OpenD GUI, not engine.
-- Credentials/config/database stay under `~/.eTape/`; never commit sensitive runtime data.
-- Every executed plan updates relevant READMEs when flow, interfaces, dependencies, invariants, or operations change.
-
-## Commands
-
-```bash
-cd engine && go build ./cmd/etape
-cd engine && go test ./...
-cd engine && mingw32-make gen-ts-check
-cd ui && npm test
-cd ui && npm run typecheck
-cd ui && npm run e2e
-```
+- Keep high-frequency data in imperative stores and controllers, outside React state. Coalesce canvas and chart rendering.
+- Change the WebSocket contract in `engine/internal/uihub/wsmsg` and regenerate `ui/src/gen/wsmsg.ts` from the Go types.
+- TICKER ticks build exchange-time 10-second bars. One-minute K-lines feed larger intraday bars. Weekly and monthly bars derive from fetched daily bars.
+- OpenD uses raw TCP plus protobuf at the configured address. Unlock trading in the OpenD GUI.
+- Keep credentials, config, and the database under `~/.eTape/`. Keep sensitive runtime data out of commits.
 
 ## Validation
 
-Use focused local validation for code and executable-input changes, including
-approved plans and substantial changes. Select tests and applicable lint,
-type, and build checks for the affected behavior and callers. Include race
-tests for concurrency/lifecycle changes, `gen-ts-check` for WebSocket contract
-changes, and relevant install/build checks for dependency or build changes.
-Broaden local checks when impact is unclear or failures reveal wider regressions.
-Run `git diff --check` for every task.
+Run `git diff --check` for every task. In the handoff, list checks run, their results, and the reason for each skipped required check.
 
-Full hosted CI continues to run on every push to `main` and every pull request.
-Before handing off code or executable-input changes, wait for a successful full
-run on the pushed `main` commit and resolve failures. Releases and tags do not
-replace this gate. [.github/workflows/ci.yml](.github/workflows/ci.yml) remains
-the executable source of truth for the full suite; the
-[Windows checklist](README.md#ci-equivalent-validation-on-windows) is available
-for broader local verification and CI failure diagnosis. Every handoff must
-list checks run and results, plus every skipped required check and its reason.
-
-For prose-only documentation changes, including approved plans, specs, and
-tracker files, validate Markdown links and run `git diff --check`. Skip
-engine/UI checks and hand off without waiting for hosted CI; report it as
-pending if it is still running. Changes to executable inputs, code, CI, build
-configuration, dependencies, or generated contracts follow normal validation
-regardless of file extension.
+- For prose-only changes, local validation consists of Markdown link and whitespace checks. Hand off after local validation and report hosted CI as pending if it is still running.
+- For code and executable inputs, run focused tests and applicable lint, type, install, and build checks for the changed behavior and its callers. Include race tests for concurrency or lifecycle changes and `gen-ts-check` for WebSocket contract changes. Broaden local checks when impact is unclear or failures reveal wider regressions.
+- Full hosted CI runs on pushes to `main` and pull requests. For code and executable inputs, resolve failures and verify a successful full run for the pushed `main` commit before handoff. Use [the CI workflow](.github/workflows/ci.yml) for the full suite and the [Windows checklist](README.md#ci-equivalent-validation-on-windows) for broader local verification or CI diagnosis.
 
 ## Live-order safety
 
-Never place, modify, or cancel real orders unless Earl explicitly authorizes current session and reconfirms live run. Read-only account checks allowed. Authorized live leg: RTH only, cheap liquid symbol, long only, one-share marketable limit, flatten immediately.
+Earl must explicitly authorize the current session and reconfirm the live run before any real order placement, modification, or cancellation. Read-only account checks are allowed. For an authorized live test, use a low-priced, liquid symbol during RTH. Go long one share with a marketable limit and flatten immediately.
 
 ## Git
 
-Keep commits scoped. Main hook escape only when task explicitly authorizes it. Preserve unrelated changes. Approved specs use `docs(specs):`; plans use `docs(plans):`.
+Keep commits scoped and preserve unrelated work. Include task-owned `.scratch/` tracker files in the task commit, subject to the draft rules below. Use `docs(specs):` for approved specs and `docs(plans):` for plans. Bypassing a `main` hook requires explicit authorization for the task.
 
-Keep specs and plans as uncommitted drafts while they are being grilled or revised. After a plan is implemented, commit it with the resulting changes unless Earl explicitly asks to keep it as a draft; no separate final-approval gate applies to an executed plan.
+Keep specs and plans uncommitted during drafting and revision. Publish standalone specs and plans once approved. After implementing a plan, commit it with the resulting changes unless Earl asks to keep it as a draft.
 
-After completing any task that changes repository files, including small tasks and review fixes, automatically:
+After validating any task that changes repository files, including small fixes, proceed under standing authorization unless Earl asks to defer a step.
 
-1. Run the required validation and commit only the task's changes in its branch or worktree.
+1. Commit the task's changes in its branch or worktree.
 2. Fetch `origin/main`, integrate upstream changes if needed, and merge the task branch or detached worktree HEAD into local `main`, preserving unrelated work.
 3. Push `main` to `origin` immediately after merging. Before handoff, verify that local and remote `main` contain the task commit and satisfy the hosted CI requirements in [Validation](#validation).
-
-This is standing authorization for commit, merge, and push; no further confirmation is needed. Explicit requests to keep work as a draft, leave changes uncommitted, or defer merging or pushing override this rule.

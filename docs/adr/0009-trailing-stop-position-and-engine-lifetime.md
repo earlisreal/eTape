@@ -1,6 +1,6 @@
 # Trailing Stops belong to one Position Cycle and engine run
 
-Status: accepted design 2026-10-20; implementation pending.
+Accepted on 2026-10-20 and implemented.
 
 Engine-Held Trailing Stops belong to one Position Cycle at their original
 Execution Venue and to one engine run: flat, reversal or engine termination

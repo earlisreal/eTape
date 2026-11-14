@@ -169,10 +169,15 @@ Built-in and newly added symbol-bearing panels start unassigned. General Layout 
 
 The 10-second chart renders missing weekday 04:00–20:00 ET buckets as client-only synthetic flat bars at the preceding real close, with empty volume. These marked display bars are not stored or included in engine-computed indicators. The local Volume Indicator reads the same display stream, so it omits synthetic bars while retaining real Volume-Only bars; generation pauses at the session close until another real bar arrives.
 
-Children: [application source](src/README.md), [mock engine](mock-engine/README.md), [E2E](e2e/README.md), [test support](test/README.md). Fixtures/assets/generated output excluded from guide leaves. Commands: `npm test`, `npm run typecheck`, `npm run lint`, `npm run e2e`.
+| Area | Guides |
+| --- | --- |
+| Workspace, settings, and panels | [Chrome](src/chrome/README.md), [Panels](src/chrome/panels/README.md) |
+| Market data and rendering | [WebSocket lifecycle](src/wire/README.md), [renderers](src/render/README.md), [sound](src/sound/README.md) |
+| Development and tests | [Development commands](../README.md#development), [browser tests](e2e/README.md), [test runner](test/README.md) |
 
 `npm test` discovers every Vitest file outside `e2e` and requires exactly one
 project per file. Unassigned tests join the `unit` project automatically; native
-canvas tests retain separate processes. See [test support](test/README.md).
+canvas tests retain separate processes. Run `npm run lint` and `npm run typecheck`
+for static checks, and `npm run e2e` for browser tests.
 
 Charts offer an opt-in visible-range Volume Profile on intraday timeframes. Add **Volume Profile** from Indicators; settings choose left/right placement (left by default), 1–200 rows (100 default), and 1–100% Value Area (70 default), with total-volume/Value Area colors and POC/VAH/VAL guides. The profile uses retained raw-price captured prints from all selected sessions, labels incomplete evidence Partial and never substitutes candles. A large/timed-out range asks you to zoom in; busy or failed same-range refreshes retain Stale data. Demo and daily/weekly/monthly charts show unavailable. See the [renderer guide](src/render/chart/README.md#volume-profile-indicator).
