@@ -41,6 +41,7 @@ type PerpetualSimulator struct {
 }
 
 type perpetualLedger struct {
+	Version    int
 	Wallet     float64
 	Realized   float64
 	Initial    float64
@@ -62,6 +63,8 @@ type perpetualPosition struct {
 
 var _ exec.PerpetualBroker = (*PerpetualSimulator)(nil)
 
+const perpetualLedgerVersion = 1
+
 func NewPerpetual(cfg PerpetualConfig) (*PerpetualSimulator, error) {
 	ledger := perpetualLedger{
 		Wallet: cfg.StartingUSDT, Initial: cfg.StartingUSDT,
@@ -75,13 +78,16 @@ func NewPerpetual(cfg PerpetualConfig) (*PerpetualSimulator, error) {
 			if err := json.Unmarshal(body, &ledger); err != nil {
 				return nil, fmt.Errorf("read perpetual simulator ledger: %w", err)
 			}
-			if ledger.Positions == nil || ledger.Orders == nil || !finite(ledger.Wallet) {
+			if ledger.Version < 0 || ledger.Version > perpetualLedgerVersion ||
+				ledger.Positions == nil || ledger.Orders == nil || !finite(ledger.Wallet) {
 				return nil, errors.New("invalid perpetual simulator ledger")
 			}
+			delete(ledger.Orders, "")
 		case !errors.Is(err, os.ErrNotExist):
 			return nil, err
 		}
 	}
+	ledger.Version = perpetualLedgerVersion
 	return &PerpetualSimulator{cfg: cfg, data: ledger, books: make(map[string]feed.Book),
 		fair: make(map[string]feed.Quote), out: make(chan exec.BrokerEvent, 4096)}, nil
 }
@@ -455,7 +461,7 @@ func (b *PerpetualSimulator) fill(next *perpetualLedger, o exec.Order, qty, pric
 				events = append(events, b.cancel(next, remaining)...)
 			}
 		}
-	} else if stop := next.Orders[p.ProtectionID]; stop.Working() && stop.ID != o.ID {
+	} else if stop := next.Orders[p.ProtectionID]; stop.ID != "" && stop.Working() && stop.ID != o.ID {
 		stop.LeavesQty = math.Abs(p.Position.Qty)
 		stop.Qty = stop.ExecutedQty + stop.LeavesQty
 		stop.UpdatedMs = now
@@ -515,7 +521,7 @@ func (b *PerpetualSimulator) CancelOrder(_ context.Context, id string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	o := b.data.Orders[id]
-	if !o.Working() {
+	if o.ID == "" || !o.Working() {
 		return errors.New("no working perpetual order")
 	}
 	next := b.copyLedger()

@@ -244,7 +244,8 @@ Enable the **MEXC Perpetual Simulator** under Settings → Venues & creds, save
 and restart eTape, then select its Execution Venue in the same Link Group.
 The Order Ticket accepts contracts or USDT position value and isolated
 leverage. It offers separate open and close actions for each direction. The
-simulator uses live MEXC depth and maintains a separate USDT ledger.
+simulator uses live MEXC depth and maintains a separate USDT ledger. The chart
+and ticket request depth automatically for the selected perpetual.
 
 In Orders & hotkeys, create a **Chart Risk Entry** preset and choose Perpetual
 long or Perpetual short. Set the leverage and USDT loss budget, focus the

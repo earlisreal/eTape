@@ -221,6 +221,7 @@ export function PanelFrame(
   }, [linkGroups, group]);
 
   const def = PANELS[config.panelId];
+  const demandProfile = config.panelId === "order-ticket" && rawSymbol?.startsWith("PERP.") ? "focused" : def?.demand;
   const Body = def?.component;
   const pinned = group === null;
   // Effective symbol shown in the header: this group's shared symbol if linked,
@@ -241,8 +242,8 @@ export function PanelFrame(
   // hysteresis window). DemandRegistry dedupes an unchanged symbol, so this
   // fires no redundant command when the pinned commit path already ensured.
   useEffect(() => {
-    if (!def?.demand || !rawSymbol) return;
-    demandRegistry.ensure(config.id, rawSymbol, def.demand).then(
+    if (!demandProfile || !rawSymbol) return;
+    demandRegistry.ensure(config.id, rawSymbol, demandProfile).then(
       (ack) => {
         if (ack.status !== "accepted") {
           toast.push({ level: "warn", text: `${bareSymbol(rawSymbol)} — ${ack.reason ?? "unavailable"}` });
@@ -252,13 +253,13 @@ export function PanelFrame(
         toast.push({ level: "danger", text: `${bareSymbol(rawSymbol)} failed — ${err instanceof Error ? err.message : "unexpected error"}` });
       },
     );
-  }, [def?.demand, rawSymbol, config.id, demandRegistry, toast]);
+  }, [demandProfile, rawSymbol, config.id, demandRegistry, toast]);
 
   // Release exactly once on unmount (not on symbol switch — switches upsert).
   useEffect(() => {
-    if (!def?.demand) return;
+    if (!demandProfile) return;
     return () => demandRegistry.release(config.id);
-  }, [def?.demand, config.id, demandRegistry]);
+  }, [demandProfile, config.id, demandRegistry]);
 
   // Task 13 fix (review finding, Minor but a literal brief requirement):
   // cancel an in-progress edit on focus loss even when the panel remains the

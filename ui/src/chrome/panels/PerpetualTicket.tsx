@@ -18,7 +18,8 @@ export function PerpetualTicket({ symbol, venue, routeReady, quote, positionQty,
   const [stop, setStop] = useState("");
   const [leverage, setLeverage] = useState(1);
   const contract = quote?.contract;
-  const usable = routeReady && contract && quote?.mark && venue;
+  const hasDepth = !!quote && quote.bid > 0 && quote.ask > 0;
+  const usable = routeReady && contract && quote?.mark && hasDepth && venue;
   const px = type === "LIMIT" ? Number(price) : quote?.mark ?? 0;
   const multiplier = Number(contract?.multiplier ?? 0);
   const step = contract?.quantityStep ?? 1;
@@ -41,6 +42,7 @@ export function PerpetualTicket({ symbol, venue, routeReady, quote, positionQty,
   return <div className="perpetual-ticket" style={{ display: "grid", gap: 6 }}>
     {!routeReady && <span>Select the MEXC paper Execution Venue.</span>}
     {routeReady && !contract && <span>Waiting for MEXC contract rules.</span>}
+    {routeReady && contract && !hasDepth && <span>Waiting for MEXC order book.</span>}
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
       <label>Type <select className="ctl" value={type} onChange={e => setType(e.target.value === "MARKET" ? "MARKET" : "LIMIT")}><option value="LIMIT">Limit</option><option value="MARKET">Market</option></select></label>
       <label>Limit price <input className="ctl" type="number" min={0} step={contract?.priceTick ?? "any"} disabled={type === "MARKET"} value={price} onChange={e => setPrice(e.target.value)} /></label>

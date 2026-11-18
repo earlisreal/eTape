@@ -33,7 +33,7 @@ it.each(["BUY", "SHORT"] as const)("submits a %s perpetual chart preset with con
     const preset: RiskEntryTemplate = { ...template, perpetual: { side, leverage: 5 }, value: 1 };
     const { host, sendCommand, sendQuery, stores } = mount(false, preset);
     const symbol = "PERP.MEXC.BTC_USDT";
-    stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: { symbol, mark: 10, contract: {
+    stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: { symbol, mark: 10, bid: 9.9, ask: 10.1, contract: {
         base: "BTC", settlement: "USDT", priceTick: "0.1", multiplier: "0.1", quantityStep: 1,
         minimum: 1, maximum: 1000, minLeverage: 1, maxLeverage: 10, takerFee: "0.001", tradingEnabled: true,
     } } });

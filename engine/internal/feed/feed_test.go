@@ -22,6 +22,10 @@ func TestDemandProfiles(t *testing.T) {
 	if !c.CachedDaily || !c.WantsHistory || len(c.Subs) != 3 || c.Subs[2] != SubKLDay {
 		t.Fatalf("chart profile = %+v, want watch subs plus SubKLDay", c)
 	}
+	perpetual := ChartDemand("chart-BTC", "PERP.MEXC.BTC_USDT")
+	if len(perpetual.Subs) != 4 || perpetual.Subs[3] != SubBook {
+		t.Fatalf("perpetual chart needs order depth for Chart Risk Entry, got %v", perpetual.Subs)
+	}
 }
 
 // Compile-time exhaustiveness: every event type is part of the union.

@@ -86,6 +86,15 @@ func TestPerpetualPartialIOCPersistsPositionAndProtection(t *testing.T) {
 			if err != nil || ack.Accepted {
 				t.Fatalf("flat close returned %+v, %v", ack, err)
 			}
+			ack, err = b.SubmitOrder(ctx, exec.OrderRequest{Venue: cfg.Venue, Symbol: symbol, ClientOrderID: "unprotected",
+				Side: side, Type: exec.TypeMarket, Qty: 1, Perpetual: &exec.PerpetualOrder{Leverage: 5, Multiplier: .0001}})
+			if err != nil || !ack.Accepted {
+				t.Fatalf("unprotected order returned %+v, %v", ack, err)
+			}
+			_, pos, orders, err = b.Snapshot(ctx)
+			if err != nil || len(pos) != 1 || len(orders) != 0 {
+				t.Fatalf("unprotected position=%+v, open orders=%+v, err=%v", pos, orders, err)
+			}
 		})
 	}
 }
