@@ -42,7 +42,7 @@ export type TickDeliverySource = "unknown" | "realtime" | "disconnectBackfill" |
 export type SignificanceLevel = "none" | "large" | "exceptional";
 export type SignificancePool = "RTH" | "EXTENDED";
 export type SignificanceState = "warming" | "active" | "closed";
-export type Broker = "tradezero" | "alpaca" | "moomoo" | "sim";
+export type Broker = "tradezero" | "alpaca" | "moomoo" | "sim" | "mexc-sim";
 export type AckStatus = "accepted" | "blocked";
 export type LinkName = "ui-engine" | "engine-moomoo" | "engine-tz" | "engine-alpaca";
 export type LinkStatus = "ok" | "degraded" | "down";
@@ -121,6 +121,21 @@ export interface Quote {
   mark?: number /* float64 */;
   index?: number /* float64 */;
   fundingRate?: number /* float64 */;
+  nextFundingMs?: number /* int64 */;
+  contract?: PerpetualContract;
+}
+export interface PerpetualContract {
+  base: string;
+  settlement: string;
+  multiplier: string;
+  priceTick: string;
+  quantityStep: number /* int64 */;
+  minimum: number /* int64 */;
+  maximum: number /* int64 */;
+  minLeverage: number /* int */;
+  maxLeverage: number /* int */;
+  takerFee: string;
+  tradingEnabled: boolean;
 }
 export interface BookLevel {
   price: number /* float64 */;
@@ -242,6 +257,18 @@ export interface SubmitRiskEntryArgs {
   maxQty: number /* float64 */;
   buyCushion: LimitCushion;
   sellCushion: LimitCushion;
+}
+export interface SubmitPerpetualRiskEntryArgs {
+  venue: string;
+  symbol: string;
+  side: Side;
+  trigger: number /* float64 */;
+  stop: number /* float64 */;
+  leverage: number /* int */;
+  cushion: LimitCushion;
+  budget: number /* float64 */;
+  maxQty: number /* float64 */;
+  collateralPct: boolean;
 }
 export interface HeldOrder {
   trail?: TrailState;
@@ -378,8 +405,14 @@ export interface PositionRow {
   unrealizedPnl: number /* float64 */;
   dayBasis: number /* float64 */;
   openedMs: number /* int64 */;
+  leverage?: number /* int */;
+  marginUsed?: number /* float64 */;
+  protectionPrice?: number /* float64 */;
 }
 export interface AccountRow {
+  currency?: string;
+  marginUsed?: number /* float64 */;
+  fundingPnl?: number /* float64 */;
   venue: string;
   equity: number /* float64 */;
   buyingPower: number /* float64 */;
@@ -688,6 +721,11 @@ export interface SubmitOrderArgs {
   stopPrice: number /* float64 */;
   routeExpected?: string;
   routeDeadlineMs?: number /* int64 */;
+  perpetual?: PerpetualTrade;
+}
+export interface PerpetualTrade {
+  leverage: number /* int */;
+  protectionPrice?: number /* float64 */;
 }
 export interface CancelOrderArgs {
   venue: string;

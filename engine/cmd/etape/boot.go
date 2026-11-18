@@ -115,13 +115,22 @@ type venueBroker struct {
 
 // buildBrokers constructs one exec.Broker per configured venue and dispatches
 // on Venue.Broker.
-func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock) ([]venueBroker, error) {
+func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, perpetual ...func(config.Venue) (exec.Broker, error)) ([]venueBroker, error) {
 	out := make([]venueBroker, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
 		id := exec.VenueID(v.ID)
 		switch v.Broker {
 		case "sim":
 			out = append(out, venueBroker{ID: id, Env: v.Env, Broker: sim.New(id, clk, v.EffectiveStartingBalance(), sim.Options{SlippageBps: v.SlippageBps, FillLatencyMs: v.FillLatencyMs})})
+		case "mexc-sim":
+			if v.Env != "paper" || len(perpetual) == 0 {
+				return nil, fmt.Errorf("venue %s: MEXC simulator requires a paper environment and public Futures feed", v.ID)
+			}
+			broker, err := perpetual[0](v)
+			if err != nil {
+				return nil, fmt.Errorf("venue %s: %w", v.ID, err)
+			}
+			out = append(out, venueBroker{ID: id, Env: v.Env, Broker: broker})
 		case "tradezero":
 			pair, err := cr.Get(v.Credentials)
 			if err != nil {

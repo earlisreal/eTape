@@ -296,12 +296,13 @@ func FillRowOf(ev Event) (*FillRow, bool) {
 		return nil, false
 	}
 	return &FillRow{
-		OrderID: f.F.OrderID,
-		Symbol:  f.F.Symbol,
-		Side:    f.F.Side.String(),
-		Qty:     f.F.Qty,
-		Price:   f.F.Price,
-		TsMs:    f.F.TsMs,
-		Venue:   string(f.F.Venue),
+		OrderID:    f.F.OrderID,
+		Symbol:     f.F.Symbol,
+		Side:       f.F.Side.String(),
+		Qty:        f.F.Qty,
+		Price:      f.F.Price,
+		TsMs:       f.F.TsMs,
+		Venue:      string(f.F.Venue),
+		Multiplier: f.F.Multiplier,
 	}, true
 }

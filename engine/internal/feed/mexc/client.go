@@ -44,13 +44,36 @@ type Contract struct {
 	APIAllowed   bool        `json:"apiAllowed"`
 }
 
+// Rules returns fresh terms from the public catalog. Callers load the catalog
+// on market demand, outside the execution writer.
+func (c *Client) Rules(symbol string) (instrument.ContractRules, bool) {
+	c.mu.Lock()
+	entry := c.cache[symbol]
+	c.mu.Unlock()
+	item := entry.value
+	step, _ := contracts(item.QuantityStep)
+	minimum, _ := contracts(item.Minimum)
+	maximum, _ := contracts(item.Maximum)
+	rules := instrument.ContractRules{Base: item.Base, Settlement: item.Settlement, Multiplier: item.Multiplier.String(),
+		PriceTick: item.PriceTick.String(), QuantityStep: step, Minimum: minimum, Maximum: maximum,
+		MinLeverage: item.MinLeverage, MaxLeverage: item.MaxLeverage, TakerFee: item.TakerFee.String(),
+		TradingEnabled: item.State == 0 && item.APIAllowed}
+	return rules, time.Now().Before(entry.until) && rules.Valid()
+}
+
 type Client struct {
 	http        *http.Client
 	base        string
 	stream      string
 	mu          sync.Mutex
 	cache       map[string]cachedContract
+	funding     map[string]fundingTime
 	nextRequest time.Time
+}
+
+type fundingTime struct {
+	At      int64 `json:"nextSettleTime"`
+	checked time.Time
 }
 
 type cachedContract struct {
@@ -61,8 +84,32 @@ type cachedContract struct {
 func NewClient() *Client {
 	return &Client{
 		http: &http.Client{Timeout: 8 * time.Second},
-		base: httpEndpoint, stream: wsEndpoint, cache: make(map[string]cachedContract),
+		base: httpEndpoint, stream: wsEndpoint, cache: make(map[string]cachedContract), funding: make(map[string]fundingTime),
 	}
+}
+
+func (c *Client) nextFunding(ctx context.Context, native string) int64 {
+	now := time.Now()
+	c.mu.Lock()
+	cached := c.funding[native]
+	if now.Before(cached.checked) {
+		c.mu.Unlock()
+		return cached.At
+	}
+	cached.checked = now.Add(10 * time.Second)
+	c.funding[native] = cached
+	c.mu.Unlock()
+	request, done := context.WithTimeout(ctx, 1200*time.Millisecond)
+	defer done()
+	var next fundingTime
+	if err := c.get(request, "/api/v1/contract/funding_rate/"+native, &next); err != nil || next.At <= now.UnixMilli() {
+		return cached.At
+	}
+	next.checked = time.UnixMilli(next.At)
+	c.mu.Lock()
+	c.funding[native] = next
+	c.mu.Unlock()
+	return next.At
 }
 
 func (c *Client) get(ctx context.Context, path string, value any) error {

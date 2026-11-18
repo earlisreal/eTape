@@ -268,10 +268,27 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			BuyCushion:  exec.LimitCushion{Value: a.BuyCushion.Value, Unit: a.BuyCushion.Unit},
 			SellCushion: exec.LimitCushion{Value: a.SellCushion.Value, Unit: a.SellCushion.Unit},
 		})), false
+	case "SubmitPerpetualRiskEntry":
+		var a wsmsg.SubmitPerpetualRiskEntryArgs
+		if json.Unmarshal(args, &a) != nil || a.Side != wsmsg.SideBuy && a.Side != wsmsg.SideShort {
+			return blocked("invalid perpetual risk entry"), false
+		}
+		return ackFromCmd(cd.ex.Do(exec.SubmitPerpetualRiskEntry{Venue: exec.VenueID(a.Venue), Symbol: a.Symbol,
+			Side: sideFromWire(a.Side), Trigger: a.Trigger, Stop: a.Stop, Leverage: a.Leverage,
+			Cushion: exec.LimitCushion{Value: a.Cushion.Value, Unit: a.Cushion.Unit}, Budget: a.Budget, MaxQty: a.MaxQty, CollateralPct: a.CollateralPct})), false
 	case "SubmitOrder":
 		var a wsmsg.SubmitOrderArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return blocked("bad args"), false
+		}
+		var perpetual *exec.PerpetualOrder
+		if a.Perpetual != nil {
+			switch a.Side {
+			case wsmsg.SideBuy, wsmsg.SideShort, wsmsg.SideSell, wsmsg.SideCover:
+			default:
+				return blocked("invalid perpetual direction"), false
+			}
+			perpetual = &exec.PerpetualOrder{Leverage: a.Perpetual.Leverage, ProtectionPrice: a.Perpetual.ProtectionPrice}
 		}
 		return ackFromCmd(cd.ex.Do(exec.SubmitOrder{
 			Venue: exec.VenueID(a.Venue), Symbol: a.Symbol,
@@ -279,6 +296,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			Session: sessionFromWire(a.Session),
 			Qty:     a.Qty, DeferredPositionPct: a.DeferredPositionPct, LimitPrice: a.LimitPrice, StopPrice: a.StopPrice,
 			RouteExpected: exec.HeldRoute(a.RouteExpected), RouteDeadlineMs: a.RouteDeadlineMs,
+			Perpetual: perpetual,
 		})), false
 	case "ResumeHeldOrder":
 		var a wsmsg.CancelOrderArgs

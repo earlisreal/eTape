@@ -240,8 +240,22 @@ Open a Chart, Time & Sales, or DOM Ladder and type `mexc.btc.usdt` followed by E
 Use the same Link Group to follow the contract in all three panels. MEXC USDT
 perpetuals use public Futures market data, UTC chart buckets and contract counts
 for volume and depth. They work during weekends and with OpenD disconnected.
-This milestone provides market data through the normal eTape launch. Perpetual
-paper trading, live execution and Chart Risk Entry require subsequent milestones.
+Enable the **MEXC Perpetual Simulator** under Settings → Venues & creds, save
+and restart eTape, then select its Execution Venue in the same Link Group.
+The Order Ticket accepts contracts or USDT position value and isolated
+leverage. It offers separate open and close actions for each direction. The
+simulator uses live MEXC depth and maintains a separate USDT ledger.
+
+In Orders & hotkeys, create a **Chart Risk Entry** preset and choose Perpetual
+long or Perpetual short. Set the leverage and USDT loss budget, focus the
+contract's linked chart, and select the entry trigger followed by the protective
+stop. eTape waits for the last trade to trigger a price-capped IOC entry. The
+simulator holds a fair-price stop for the filled contracts. Paper positions and
+stops are stored alongside the local eTape database for restart recovery.
+Simulated funding uses the last observed rate and the published settlement time.
+The MEXC Futures account check in Settings verifies USDT balance access, shows
+position mode, and counts open positions, working orders and active TP/SL orders.
+Exchange live execution and forced liquidation modeling remain pending.
 
 ## Connecting brokers
 

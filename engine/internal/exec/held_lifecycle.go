@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/instrument"
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
@@ -94,6 +95,17 @@ func (c *Core) freshEligiblePrint(p EligiblePrint) bool {
 }
 
 func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
+	if p.Gap && p.Symbol != "" && instrument.IsPerpetual(p.Symbol) {
+		delete(c.lastEligible, p.Symbol)
+		delete(c.lastPrintSeq, p.Symbol)
+		for _, id := range c.heldOrderIDs() {
+			o := c.order(id)
+			if o.Symbol == p.Symbol && o.Perpetual != nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
+				c.changeHeld(o, HeldPaused, "perpetual feed interrupted; resume manually", false)
+			}
+		}
+		return
+	}
 	if p.Gap {
 		clear(c.protectionPrices)
 		clear(c.protectionPending)
@@ -107,12 +119,16 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 			c.lastPrintGapMs = gapAt
 		}
 		c.printHealthy = false
-		clear(c.lastEligible)
-		clear(c.lastPrintSeq)
-		clear(c.lastPrintDay)
+		for symbol := range c.lastEligible {
+			if !instrument.IsPerpetual(symbol) {
+				delete(c.lastEligible, symbol)
+				delete(c.lastPrintSeq, symbol)
+				delete(c.lastPrintDay, symbol)
+			}
+		}
 		for _, id := range c.heldOrderIDs() {
 			o := c.order(id)
-			if o.Held != nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
+			if o.Held != nil && o.Perpetual == nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
 				c.changeHeld(o, HeldPaused, "eligible-print gap; resume manually", false)
 			}
 		}
@@ -121,10 +137,13 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 	if p.Symbol == "" || !finitePositive(p.Price) || p.Seq <= 0 || p.RecvTsMs <= 0 {
 		return
 	}
-	if p.RecvTsMs <= c.lastPrintGapMs {
+	if !instrument.IsPerpetual(p.Symbol) && p.RecvTsMs <= c.lastPrintGapMs {
 		return
 	}
 	day := session.DayMs(p.TsMs)
+	if instrument.IsPerpetual(p.Symbol) {
+		day = session.ContinuousBucketStartMs(p.TsMs, session.TFDay)
+	}
 	if day != c.lastPrintDay[p.Symbol] {
 		c.lastPrintDay[p.Symbol], c.lastPrintSeq[p.Symbol] = day, 0
 	}
@@ -136,7 +155,9 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 	if !c.freshEligiblePrint(p) {
 		return
 	}
-	c.printHealthy = true
+	if !instrument.IsPerpetual(p.Symbol) {
+		c.printHealthy = true
+	}
 	for _, id := range c.heldOrderIDs() {
 		if o := c.order(id); o.Symbol == p.Symbol && c.protectiveOrder(o) && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
 			c.requestProtectionBook(o)
@@ -158,7 +179,11 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 		if o.Held.Trail != nil {
 			c.advanceTrail(ctx, o, p, false)
 		} else if HeldOrderTriggered(o.Type, o.Side, p.Price, o.StopPrice) {
-			c.activateProtectedStop(ctx, o, p)
+			if o.Perpetual != nil {
+				c.activateHeld(ctx, o)
+			} else {
+				c.activateProtectedStop(ctx, o, p)
+			}
 		} else {
 			c.changeHeld(o, HeldArmed, "", false)
 		}
@@ -293,6 +318,14 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 	}
 	child := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: TypeLimit, TIF: o.TIF, Session: o.Session,
 		Qty: o.LeavesQty, LimitPrice: o.LimitPrice, ClientOrderID: o.ID}
+	if o.Perpetual != nil {
+		p := *o.Perpetual
+		child.Perpetual = &p
+		if err := c.validatePerpetual(&child, o.ID); err != nil {
+			c.changeHeld(o, HeldPaused, err.Error(), false)
+			return
+		}
+	}
 	if o.DeferredPositionPct > 0 && (o.Held.Trail == nil || o.Held.ResolvedQty == 0) {
 		if !c.state.PositionsReady(o.Venue) {
 			c.changeHeld(o, HeldPaused, "position data unavailable; reconcile and resume manually", false)
@@ -464,7 +497,7 @@ func (c *Core) pauseHeldReducingVenue(venue VenueID, reason string) {
 func (c *Core) disarmHeld(ctx context.Context, venue VenueID, cancelPretrigger bool) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
-		if !cancelPretrigger && (o.RiskEntryID != "" || o.RiskEntry != nil || o.Held != nil && o.Held.Trail != nil) {
+		if !cancelPretrigger && o.Perpetual == nil && (o.RiskEntryID != "" || o.RiskEntry != nil || o.Held != nil && o.Held.Trail != nil) {
 			continue
 		}
 		if venue != "" && o.Venue != venue {
@@ -475,7 +508,7 @@ func (c *Core) disarmHeld(ctx context.Context, venue VenueID, cancelPretrigger b
 		}
 		switch o.Held.Phase {
 		case HeldWaiting, HeldArmed, HeldPaused, HeldWaitingQuote:
-			if cancelPretrigger {
+			if cancelPretrigger || o.Perpetual != nil {
 				if o.Held.Trail != nil {
 					c.retireTrail(ctx, o, "protection canceled")
 					continue
@@ -512,7 +545,7 @@ func (c *Core) handleResumeHeld(ctx context.Context, cm ResumeHeldOrder) CmdAck 
 	if (o.Side == SideSell || o.Side == SideCover) && !c.state.PositionsReady(o.Venue) {
 		return CmdAck{Accepted: false, Reason: "position data unavailable; reconcile the venue before resuming", OrderID: o.ID}
 	}
-	if !c.printHealthy {
+	if p, ok := c.lastEligible[o.Symbol]; o.Perpetual != nil && (!ok || !c.freshEligiblePrint(p)) || o.Perpetual == nil && !c.printHealthy {
 		return CmdAck{Accepted: false, Reason: "waiting for a new eligible real-time print", OrderID: o.ID}
 	}
 	if o.Held.DeadlineMs <= c.now() {

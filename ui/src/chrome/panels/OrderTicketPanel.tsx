@@ -23,6 +23,7 @@ import { HotkeyDeck, resolveDeckRows } from "./HotkeyDeck";
 import { chartConditionalOrderWillTrigger, conditionalRouteLabel } from "../exec/resolveChartConditionalOrder";
 import {TrailEditor} from "../exec/TrailEditor";
 import {newTrailConfig} from "../exec/trailing";
+import { PerpetualTicket } from "./PerpetualTicket";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT", "LIMIT_IF_TOUCHED", "TRAILING_STOP"];
@@ -224,6 +225,14 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       </button>
     </div>
   );
+
+  if (symbol.startsWith("PERP.")) {
+    return <div style={{ display: "grid", gap: 6, padding: 6, color: palette.text, fontSize: 12 }}>
+      {actionsSlot === undefined ? headerActions : actionsSlot ? createPortal(headerActions, actionsSlot) : null}
+      <PerpetualTicket key={`${venue}/${symbol}`} symbol={symbol} venue={venue} routeReady={venueStatus?.broker === "mexc-sim"}
+        quote={quote} positionQty={positionQty} submit={(args, label) => { void oc.submit(args, label); }} />
+    </div>;
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: 6, height: "100%", background: palette.surface, color: palette.text, fontSize: 12, overflow: "auto" }}>

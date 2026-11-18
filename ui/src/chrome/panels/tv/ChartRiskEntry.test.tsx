@@ -13,7 +13,7 @@ import type { AckMsg, Order, StopLimitRoutePreview } from "../../../wire/contrac
 const template: RiskEntryTemplate = { kind: "risk", id: "r", label: "Risk", mode: "Dollar", value: 100, buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
 function mount(auto = false, preset = template) {
     const stores = makeStores();
-    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, venues: [{ venue: "sim", broker: "sim", connected: true, positionDataReady: true }] } });
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, venues: [{ venue: "sim", broker: preset.perpetual ? "mexc-sim" : "sim", connected: true, positionDataReady: true }] } });
     stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { venue: "sim", buyingPower: 100000, availableCash: 100000, tsMs: Date.now() } });
     const linkGroups = new LinkGroups({ post: () => { }, onMessage: () => () => { }, close: () => { } }, () => { });
     linkGroups.focusVenue("green", "sim");
@@ -24,11 +24,30 @@ function mount(auto = false, preset = template) {
     const sendCommand = vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { void name; void args; return { kind: "ack", corrId: "1", status: "accepted", orderId: "E1" }; });
     const sendQuery = vi.fn(async (): Promise<StopLimitRoutePreview> => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "RTH", deadlineMs: Date.now() + 100000, hasTrustedEligiblePrint: true, lastEligiblePrice: 9, lastEligibleTsMs: Date.now() }));
     const layoutRef = { current: () => {} };
-    const element = (symbol = "AAPL") => <ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol={symbol} contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [preset], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} layoutRef={layoutRef} sendCommand={sendCommand} sendQuery={sendQuery}/>;
+    const element = (symbol = preset.perpetual ? "PERP.MEXC.BTC_USDT" : "AAPL") => <ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol={symbol} contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [preset], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} layoutRef={layoutRef} sendCommand={sendCommand} sendQuery={sendQuery}/>;
     const result = render(element(), { container: host, wrapper: ({ children }) => <ThemeProvider><ToastProvider>{children}</ToastProvider></ThemeProvider> });
     sendCommand.mockClear();
     return { ...result, host, sendCommand, sendQuery, facadeRef, layoutRef, stores, changeSymbol: (symbol: string) => result.rerender(element(symbol)) };
 }
+it.each(["BUY", "SHORT"] as const)("submits a %s perpetual chart preset with contracts and leverage", async side => {
+    const preset: RiskEntryTemplate = { ...template, perpetual: { side, leverage: 5 }, value: 1 };
+    const { host, sendCommand, sendQuery, stores } = mount(false, preset);
+    const symbol = "PERP.MEXC.BTC_USDT";
+    stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: { symbol, mark: 10, contract: {
+        base: "BTC", settlement: "USDT", priceTick: "0.1", multiplier: "0.1", quantityStep: 1,
+        minimum: 1, maximum: 1000, minLeverage: 1, maxLeverage: 10, takerFee: "0.001", tradingEnabled: true,
+    } } });
+    initiateChartRiskEntry(preset);
+    fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 100, clientY: side === "BUY" ? 220 : 180 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(host.querySelector("[data-risk-readout]")?.textContent).toContain("contracts");
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.objectContaining({
+        symbol, side, trigger: 10, stop: side === "BUY" ? 9.8 : 10.2, leverage: 5, maxQty: 45,
+    })));
+    expect(sendQuery).not.toHaveBeenCalled();
+});
 let frames: Map<number, FrameRequestCallback>;
 function flushFrames() {
     const pending = [...frames.values()];

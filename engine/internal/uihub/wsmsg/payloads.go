@@ -5,14 +5,30 @@ import "encoding/json"
 // ---- market-data payloads (timestamps are ISO-8601 UTC strings) ----
 
 type Quote struct {
-	Symbol      string   `json:"symbol"`
-	Bid         float64  `json:"bid"`
-	Ask         float64  `json:"ask"`
-	Last        float64  `json:"last"`
-	Ts          string   `json:"ts"`
-	Mark        float64  `json:"mark,omitempty"`
-	Index       float64  `json:"index,omitempty"`
-	FundingRate *float64 `json:"fundingRate,omitempty"`
+	Symbol        string             `json:"symbol"`
+	Bid           float64            `json:"bid"`
+	Ask           float64            `json:"ask"`
+	Last          float64            `json:"last"`
+	Ts            string             `json:"ts"`
+	Mark          float64            `json:"mark,omitempty"`
+	Index         float64            `json:"index,omitempty"`
+	FundingRate   *float64           `json:"fundingRate,omitempty"`
+	NextFundingMs int64              `json:"nextFundingMs,omitempty"`
+	Contract      *PerpetualContract `json:"contract,omitempty"`
+}
+
+type PerpetualContract struct {
+	Base           string `json:"base"`
+	Settlement     string `json:"settlement"`
+	Multiplier     string `json:"multiplier"`
+	PriceTick      string `json:"priceTick"`
+	QuantityStep   int64  `json:"quantityStep"`
+	Minimum        int64  `json:"minimum"`
+	Maximum        int64  `json:"maximum"`
+	MinLeverage    int    `json:"minLeverage"`
+	MaxLeverage    int    `json:"maxLeverage"`
+	TakerFee       string `json:"takerFee"`
+	TradingEnabled bool   `json:"tradingEnabled"`
 }
 
 type BookLevel struct {
@@ -149,6 +165,19 @@ type SubmitRiskEntryArgs struct {
 	SellCushion   LimitCushion `json:"sellCushion"`
 }
 
+type SubmitPerpetualRiskEntryArgs struct {
+	Venue         string       `json:"venue"`
+	Symbol        string       `json:"symbol"`
+	Side          Side         `json:"side"`
+	Trigger       float64      `json:"trigger"`
+	Stop          float64      `json:"stop"`
+	Leverage      int          `json:"leverage"`
+	Cushion       LimitCushion `json:"cushion"`
+	Budget        float64      `json:"budget"`
+	MaxQty        float64      `json:"maxQty"`
+	CollateralPct bool         `json:"collateralPct"`
+}
+
 type HeldOrder struct {
 	Trail           *TrailState `json:"trail,omitempty"`
 	Phase           string      `json:"phase"`
@@ -277,16 +306,22 @@ type ClosedTradeRow struct {
 // PositionRow.Venue is a pointer so a cross-venue net row serializes venue:null.
 // tstype forces tygo to emit a literal `| null` union instead of `venue?:`.
 type PositionRow struct {
-	Venue         *string `json:"venue" tstype:"string | null,required"`
-	Symbol        string  `json:"symbol"`
-	Qty           float64 `json:"qty"`
-	AvgPrice      float64 `json:"avgPrice"`
-	UnrealizedPnl float64 `json:"unrealizedPnl"`
-	DayBasis      float64 `json:"dayBasis"`
-	OpenedMs      int64   `json:"openedMs"`
+	Venue           *string `json:"venue" tstype:"string | null,required"`
+	Symbol          string  `json:"symbol"`
+	Qty             float64 `json:"qty"`
+	AvgPrice        float64 `json:"avgPrice"`
+	UnrealizedPnl   float64 `json:"unrealizedPnl"`
+	DayBasis        float64 `json:"dayBasis"`
+	OpenedMs        int64   `json:"openedMs"`
+	Leverage        int     `json:"leverage,omitempty"`
+	MarginUsed      float64 `json:"marginUsed,omitempty"`
+	ProtectionPrice float64 `json:"protectionPrice,omitempty"`
 }
 
 type AccountRow struct {
+	Currency          string  `json:"currency,omitempty"`
+	MarginUsed        float64 `json:"marginUsed,omitempty"`
+	FundingPnl        float64 `json:"fundingPnl,omitempty"`
 	Venue             string  `json:"venue"`
 	Equity            float64 `json:"equity"`
 	BuyingPower       float64 `json:"buyingPower"`
@@ -603,18 +638,24 @@ type SysEvent struct {
 // generate them while wsmsg.go itself is excluded — see tygo.yaml) ----
 
 type SubmitOrderArgs struct {
-	Venue               string       `json:"venue"`
-	Symbol              string       `json:"symbol"`
-	Side                Side         `json:"side"`
-	Type                OrderType    `json:"type"`
-	TIF                 TIF          `json:"tif"`
-	Session             OrderSession `json:"session"`
-	Qty                 float64      `json:"qty"`
-	DeferredPositionPct float64      `json:"deferredPositionPct,omitempty"`
-	LimitPrice          float64      `json:"limitPrice"`
-	StopPrice           float64      `json:"stopPrice"`
-	RouteExpected       string       `json:"routeExpected,omitempty"`
-	RouteDeadlineMs     int64        `json:"routeDeadlineMs,omitempty"`
+	Venue               string          `json:"venue"`
+	Symbol              string          `json:"symbol"`
+	Side                Side            `json:"side"`
+	Type                OrderType       `json:"type"`
+	TIF                 TIF             `json:"tif"`
+	Session             OrderSession    `json:"session"`
+	Qty                 float64         `json:"qty"`
+	DeferredPositionPct float64         `json:"deferredPositionPct,omitempty"`
+	LimitPrice          float64         `json:"limitPrice"`
+	StopPrice           float64         `json:"stopPrice"`
+	RouteExpected       string          `json:"routeExpected,omitempty"`
+	RouteDeadlineMs     int64           `json:"routeDeadlineMs,omitempty"`
+	Perpetual           *PerpetualTrade `json:"perpetual,omitempty"`
+}
+
+type PerpetualTrade struct {
+	Leverage        int     `json:"leverage"`
+	ProtectionPrice float64 `json:"protectionPrice,omitempty"`
 }
 
 type CancelOrderArgs struct {

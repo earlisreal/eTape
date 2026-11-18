@@ -359,13 +359,25 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
 
       {t.kind === "risk" ? (
         <div style={fieldRow}>
-          <label style={fieldGroup}>Protection mode <select aria-label="Protection mode" className="field" value={t.protection?.mode??"FIXED"} onChange={e=>patch(t.id,{protection:e.target.value==="FIXED"?undefined:{...(t.protection??newTrailConfig()),mode:e.target.value,pricing:"CUSHION",cushion:t.sellCushion}})}>
-            <option value="FIXED">Fixed</option><option value="PRICE">Trail Price</option><option value="PERCENT">Trail Percent</option><option value="CANDLE">Candle Trail</option></select></label>
+          <label style={fieldGroup}>Instrument and direction
+            <select className="field" value={t.perpetual?.side ?? "stock"} onChange={e => {
+              const side = e.target.value;
+              if (side === "BUY" || side === "SHORT") patch(t.id, { perpetual: { side, leverage: t.perpetual?.leverage ?? 1 }, protection: undefined, ...(t.mode === "BuyingPowerPct" ? { mode: "CashPct" } : {}) });
+              else patch(t.id, { perpetual: undefined });
+            }}>
+              <option value="stock">Stock long</option><option value="BUY">Perpetual long</option><option value="SHORT">Perpetual short</option>
+            </select>
+          </label>
+          {t.perpetual && <label style={fieldGroup}>Isolated leverage
+            <input className="field" type="number" min={1} step={1} value={t.perpetual.leverage} onChange={e => patch(t.id, { perpetual: { side: t.perpetual!.side, leverage: Number(e.target.value) } })} />
+          </label>}
+          {!t.perpetual && <label style={fieldGroup}>Protection mode <select aria-label="Protection mode" className="field" value={t.protection?.mode??"FIXED"} onChange={e=>patch(t.id,{protection:e.target.value==="FIXED"?undefined:{...(t.protection??newTrailConfig()),mode:e.target.value,pricing:"CUSHION",cushion:t.sellCushion}})}>
+            <option value="FIXED">Fixed</option><option value="PRICE">Trail Price</option><option value="PERCENT">Trail Percent</option><option value="CANDLE">Candle Trail</option></select></label>}
           {t.protection && <TrailEditor value={t.protection} lockMode lockSessions cushionOnly onChange={c=>patch(t.id,{protection:c,sellCushion:c.cushion})}/>}
           <label style={fieldGroup}>Risk budget
             <select aria-label={`risk-mode-${t.id}`} className="field" value={t.mode}
               onChange={(e) => patch(t.id,{mode:e.target.value as RiskEntryTemplate["mode"]})}>
-              <option value="Dollar">Dollar risk</option><option value="CashPct">Risk Cash %</option><option value="BuyingPowerPct">Risk BP %</option>
+              <option value="Dollar">{t.perpetual ? "USDT risk" : "Dollar risk"}</option><option value="CashPct">{t.perpetual ? "USDT collateral %" : "Risk Cash %"}</option>{!t.perpetual && <option value="BuyingPowerPct">Risk BP %</option>}
             </select>
           </label>
           <label style={fieldGroup}>Risk value
@@ -373,16 +385,16 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
               value={rawEdits[`${t.id}:risk`] ?? t.value} onBlur={() => clearRawEdit(`${t.id}:risk`)}
               onChange={(e) => {setRawEdit(`${t.id}:risk`,e.target.value); patch(t.id,{value:Number(e.target.value)});}} />
           </label>
-          {(["buyCushion","sellCushion"] as const).map((key) => <label key={key} style={fieldGroup}>
-            {key === "buyCushion" ? "Buy" : "Sell"} Limit Cushion
+          {(["buyCushion","sellCushion"] as const).filter(key => !t.perpetual || key === "buyCushion").map((key) => <label key={key} style={fieldGroup}>
+            {t.perpetual ? "Entry" : key === "buyCushion" ? "Buy" : "Sell"} Limit Cushion
             <input className="field" aria-label={`${key}-${t.id}`} type="number" min="0" step="any"
               value={rawEdits[`${t.id}:${key}`] ?? t[key].value} onBlur={() => clearRawEdit(`${t.id}:${key}`)}
               onChange={(e) => {setRawEdit(`${t.id}:${key}`,e.target.value); patch(t.id,{[key]:{...t[key],value:Number(e.target.value)}});}} />
             <select className="field" aria-label={`${key}-unit-${t.id}`} value={t[key].unit} onChange={(e) => patch(t.id,{[key]:{...t[key],unit:e.target.value}})}>
-              <option>$</option><option>%</option>
+              <option value="$">{t.perpetual ? "USDT" : "$"}</option><option>%</option>
             </select>
           </label>)}
-          <small>Loss budget, excluding fees and execution risk. Whole shares; DAY until market data close. Both triggers are held by eTape.</small>
+          <small>{t.perpetual ? "24-hour entry. The simulator attaches a fair-price stop to the filled contracts." : "Loss budget, excluding fees and execution risk. Whole shares; DAY until market data close. Both triggers are held by eTape."}</small>
         </div>
       ) : t.kind === "place" && t.type==="TRAILING_STOP" ? (
         <div style={fieldRow}>

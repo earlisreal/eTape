@@ -1,5 +1,18 @@
 # Execution Core
 
+## MEXC perpetual paper execution
+
+The perpetual Simulator has its own durable USDT ledger. Quantities on the
+execution contract are native contracts. The venue validates the contract tick,
+quantity step, direction, margin and leverage, and caps reductions at current
+exposure. For Chart Risk Entry, the core persists the entry intent before
+listening for a perpetual trade, revalidates against fair price, and activates
+one price-capped IOC. The simulator records the filled exposure and native-style
+stop together. It evaluates stops against fair price, resizes coverage with
+manual reductions, and restores it on startup. Working orders and open positions
+retain their market-data demand independently of open panels. Equity Chart Risk
+Entry continues to use its session-based lifecycle.
+
 ## Trailing stops
 
 `SubmitTrail` admits one reducing SELL/COVER strategy per venue and symbol.

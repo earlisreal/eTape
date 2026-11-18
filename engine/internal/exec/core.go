@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
+	"github.com/earlisreal/eTape/engine/internal/instrument"
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
@@ -24,6 +25,7 @@ const defaultRecoverSnapshotTimeout = 5 * time.Second
 type Command interface{ isCommand() }
 
 type SubmitOrder struct {
+	Perpetual           *PerpetualOrder
 	Venue               VenueID
 	Symbol              string
 	Side                Side
@@ -643,7 +645,7 @@ func (c *Core) seedTrades(ctx context.Context) {
 			c.syslog("exec.recover", "seed trades: unparseable Side "+f.Side+" for "+f.Symbol+"@"+string(f.Venue))
 			continue
 		}
-		parsed = append(parsed, Fill{Venue: VenueID(f.Venue), OrderID: f.OrderID, Symbol: f.Symbol, Side: side, Qty: f.Qty, Price: f.Price, TsMs: f.TsMs})
+		parsed = append(parsed, Fill{Venue: VenueID(f.Venue), OrderID: f.OrderID, Symbol: f.Symbol, Side: side, Qty: f.Qty, Price: f.Price, TsMs: f.TsMs, Multiplier: f.Multiplier})
 	}
 	positions := make([]Position, 0)
 	for _, v := range c.venues {
@@ -653,7 +655,7 @@ func (c *Core) seedTrades(ctx context.Context) {
 	}
 	c.positionOpens.rebuildOpenPositions(positions, parsed)
 	for _, f := range parsed {
-		for _, t := range c.trades.Apply(f.Venue, f.Symbol, f.Side, f.Qty, f.Price, f.TsMs) {
+		for _, t := range c.trades.applyTradeFill(f) {
 			c.emit(TradeUpdate{Trade: t})
 		}
 	}
@@ -759,6 +761,9 @@ func (c *Core) emitProjectedAccount(v VenueID) {
 		return
 	}
 	start, open, realized, day := c.cycles.account(v)
+	if acct.Currency == "USDT" {
+		open, realized, day = acct.Realized, acct.Realized, acct.DayPnL
+	}
 	if b := c.brokers[v]; b != nil && (b.Capabilities().AuthoritativeDayPnL || b.Capabilities().CalculatedDayPnL) {
 		day = acct.DayPnL
 	}
@@ -905,7 +910,7 @@ func (c *Core) emitForEvent(ev Event) {
 		c.positionOpens.Apply(f.F.Venue, f.F.Symbol, f.F.Side, f.F.Qty, f.F.Price, f.F.TsMs)
 		c.cycles.applyFill(f.F)
 		c.emit(FillUpdate{Fill: f.F})
-		for _, t := range c.trades.Apply(f.F.Venue, f.F.Symbol, f.F.Side, f.F.Qty, f.F.Price, f.F.TsMs) {
+		for _, t := range c.trades.applyTradeFill(f.F) {
 			c.emit(TradeUpdate{Trade: t})
 		}
 		c.emitProjectedAccount(f.F.Venue)
@@ -925,6 +930,8 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 		return c.configureTrail(ctx, cm.Venue, cm.OrderID, cm.ExpectedHeldPhase, cm.ExpectedStop, cm.Config)
 	case SubmitRiskEntry:
 		return c.handleRiskEntry(ctx, cm)
+	case SubmitPerpetualRiskEntry:
+		return c.handlePerpetualRiskEntry(ctx, cm)
 	case SubmitOrder:
 		return c.handleSubmit(ctx, cm)
 	case CancelOrder:
@@ -978,6 +985,15 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 		Session: cm.Session,
 		Qty:     cm.Qty, LimitPrice: cm.LimitPrice, StopPrice: cm.StopPrice,
 		ClientOrderID: c.idgen.Next(),
+		Perpetual:     cm.Perpetual,
+	}
+	if instrument.IsPerpetual(req.Symbol) || req.Perpetual != nil {
+		if err := c.validatePerpetual(&req, ""); err != nil {
+			return CmdAck{Reason: err.Error(), OrderID: req.ClientOrderID}
+		}
+		if req.Perpetual.ProtectionPrice > 0 {
+			req.Perpetual.ProtectionID = c.idgen.Next()
+		}
 	}
 	deferred := cm.DeferredPositionPct != 0
 	if deferred {
@@ -1060,7 +1076,7 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 		}
 		return CmdAck{Accepted: false, Reason: reason, OrderID: req.ClientOrderID}
 	}
-	if c.requiresReductionGuard(req) && !deferred {
+	if c.requiresReductionGuard(req) && !deferred && req.Perpetual == nil {
 		if good, why := c.checkSellLeaves(req, req.Qty, ""); !good {
 			return CmdAck{Accepted: false, Reason: why, OrderID: req.ClientOrderID}
 		}
@@ -1135,7 +1151,7 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 func newOrderFromRequest(req OrderRequest, now int64) Order {
 	return Order{Venue: req.Venue, ID: req.ClientOrderID, Symbol: req.Symbol, Side: req.Side,
 		Type: req.Type, TIF: req.TIF, Session: req.Session, Qty: req.Qty, LimitPrice: req.LimitPrice,
-		StopPrice: req.StopPrice, Status: StatusSubmitted, LeavesQty: req.Qty, CreatedMs: now, UpdatedMs: now}
+		StopPrice: req.StopPrice, Status: StatusSubmitted, LeavesQty: req.Qty, CreatedMs: now, UpdatedMs: now, Perpetual: req.Perpetual}
 }
 
 const sellLeavesShortfall = "sell quantity exceeds uncommitted long position"
@@ -1274,6 +1290,9 @@ func (c *Core) handleReplaceSingle(ctx context.Context, cm ReplaceOrder) CmdAck 
 		return CmdAck{Accepted: false, Reason: "unknown order", OrderID: cm.OrderID}
 	}
 	o := c.state.Venue(v).Orders[cm.OrderID]
+	if instrument.IsPerpetual(o.Symbol) {
+		return CmdAck{Reason: "cancel and resubmit a perpetual order to change it", OrderID: o.ID}
+	}
 	if o.Action != nil && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
 		return CmdAck{Accepted: false, Reason: "order action outcome is still unresolved", OrderID: o.ID}
 	}

@@ -35,6 +35,7 @@ export const MANAGEMENT_ACTIONS = ["CancelLast", "CancelAllFocused", "CancelAllE
 export type ManagementAction = typeof MANAGEMENT_ACTIONS[number];
 export interface ManagementTemplate { kind: "manage"; id: string; label: string; action: ManagementAction; hotkey?: string; deck?: boolean; deckColor?: DeckColor }
 export interface RiskEntryTemplate {
+  perpetual?: { side: "BUY" | "SHORT"; leverage: number } | undefined;
 	protection?: TrailConfig | undefined;
   kind: "risk"; id: string; label: string; hotkey?: string; deck?: boolean; deckColor?: DeckColor;
   mode: "Dollar" | "CashPct" | "BuyingPowerPct"; value: number;

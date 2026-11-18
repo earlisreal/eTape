@@ -381,7 +381,11 @@ func (m *mirror) positionsPayload() []wsmsg.PositionRow {
 	rows := make([]wsmsg.PositionRow, 0, len(m.positions))
 	for _, k := range sortedKeysOf(m.positions) {
 		p := m.positions[k]
-		rows = append(rows, mapPosition(p, m.marks[p.Symbol]))
+		mark := m.marks[p.Symbol]
+		if p.Multiplier > 0 {
+			mark = m.quotes[p.Symbol].Mark
+		}
+		rows = append(rows, mapPosition(p, mark))
 	}
 	return rows
 }

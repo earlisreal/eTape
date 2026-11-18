@@ -137,6 +137,9 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
   // moomoo's own probe result, session-local (never persisted) — null until
   // "Check OpenD" is clicked, or after Enable materializes the venue.
   const [moomooProbe, setMoomooProbe] = useState<TestConnectionResult | null>(null);
+  const [mexcKey, setMexcKey] = useState("");
+  const [mexcSecret, setMexcSecret] = useState("");
+  const [mexcTest, setMexcTest] = useState<TestState>({ status: "idle" });
   const [moomooProbing, setMoomooProbing] = useState(false);
   const [moomooSelectedAccount, setMoomooSelectedAccount] = useState("");
 
@@ -248,13 +251,13 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
     setDirty(true);
   };
 
-  const addSimulator = () => {
+  const addSimulator = (broker: "sim" | "mexc-sim" = "sim") => {
     const key = crypto.randomUUID();
     setRowKeys((k) => [...k, key]);
     setCapsByRow((c) => ({ ...c, [key]: zeroCaps() }));
     setDraft((d) => ({
       ...d,
-      venues: [...d.venues, { id: "sim", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 100000, slippageBps: 0, fillLatencyMs: 0 }],
+      venues: [...d.venues, { id: broker === "sim" ? "sim" : "mexc-paper", broker, env: "paper", credentials: "", accountId: "", startingBalance: 100000, slippageBps: 0, fillLatencyMs: 0 }],
     }));
     setDirty(true);
   };
@@ -534,6 +537,7 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
   };
 
   const groupLabel = { marginBottom: 4 } as const;
+  const perpetualPaper = draft.venues.findIndex(v => v.broker === "mexc-sim");
   const fieldWrap = { display: "flex", flexDirection: "column", gap: 2, fontSize: 10.5, color: palette.textMuted } as const;
 
   return (
@@ -571,10 +575,35 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
         onToggleLimits={() => { const k = rowKeys[slots.sim]; setLimitsOpen((s) => ({ ...s, [k]: !(s[k] ?? false) })); }}
         onUpdateCap={(cap, value) => updateCap(rowKeys[slots.sim], cap, value)}
         onPatch={(over) => patchVenue(slots.sim, over)}
-        onAdd={addSimulator}
+        onAdd={() => addSimulator()}
         onReset={() => void resetBalance(draft.venues[slots.sim])}
         fieldWrap={fieldWrap} groupLabel={groupLabel}
       />
+      <div className={`broker-card ${stripeClass(perpetualPaper >= 0, false)}`}>
+        <CardHeader title="MEXC Perpetual Simulator" />
+        <div style={{ padding: 12 }}>
+          {perpetualPaper < 0 ? <Button data-testid="mexc-sim-add" onClick={() => addSimulator("mexc-sim")}>Add MEXC paper venue</Button> :
+            <label>Starting collateral (USDT) <input className="field" type="number" min={1} value={draft.venues[perpetualPaper].startingBalance ?? 100000} onChange={e => patchVenue(perpetualPaper, { startingBalance: Number(e.target.value) })} /></label>}
+        </div>
+      </div>
+      <div className="broker-card">
+        <CardHeader title="MEXC Futures API Check" />
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: 12 }}>
+          <label>API key <input className="field" autoComplete="off" value={mexcKey} onChange={e => setMexcKey(e.target.value)} /></label>
+          <label>API secret <input className="field" type="password" autoComplete="off" value={mexcSecret} onChange={e => setMexcSecret(e.target.value)} /></label>
+          <Button disabled={!mexcKey.trim() || !mexcSecret.trim() || mexcTest.status === "testing"} onClick={() => {
+            setMexcTest({ status: "testing" });
+            void commands.sendCommand("TestConnection", { broker: "mexc", env: "live", keyId: mexcKey.trim(), secretKey: mexcSecret.trim(), credentials: "", accountId: "" })
+              .then(ack => {
+                const result = ack.value as TestConnectionResult | undefined;
+                setMexcTest({ status: result?.ok ? "ok" : "fail", message: result?.message ?? ack.reason ?? "Account check failed." });
+              })
+              .catch(() => setMexcTest({ status: "fail", message: "Account check failed." }))
+              .finally(() => setMexcSecret(""));
+          }}>{mexcTest.status === "testing" ? "Checking…" : "Check read access"}</Button>
+          {mexcTest.message && <span role="status">{mexcTest.message}</span>}
+        </div>
+      </div>
 
       <MoomooCard
         palette={palette}

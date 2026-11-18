@@ -332,8 +332,20 @@ func (s *Stream) handle(ctx context.Context, active map[subscription]bool, books
 			return err
 		}
 		if qty, ok := contracts(t.Volume); ok && t.Time > 0 {
+			rules, current := s.client.Rules(symbol)
+			if !current {
+				load, cancel := context.WithTimeout(ctx, 1200*time.Millisecond)
+				_, _ = s.client.Contract(load, symbol)
+				cancel()
+				rules, current = s.client.Rules(symbol)
+			}
+			var contract *instrument.ContractRules
+			if current {
+				contract = &rules
+			}
 			s.emit(ctx, feed.QuoteEvent{Quote: feed.Quote{Symbol: symbol, TsMs: t.Time, Last: t.Last, High: t.High, Low: t.Low,
-				Volume: qty, Turnover: t.Turnover, Mark: t.Mark, Index: t.Index, FundingRate: t.Funding}})
+				Volume: qty, Turnover: t.Turnover, Mark: t.Mark, Index: t.Index, FundingRate: t.Funding,
+				NextFundingMs: s.client.nextFunding(ctx, m.Symbol), Contract: contract}})
 		}
 	case "push.depth":
 		if !active[subscription{m.Symbol, "depth"}] {

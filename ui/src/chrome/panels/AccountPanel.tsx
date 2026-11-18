@@ -73,6 +73,10 @@ function liveMark(quote: Quote | undefined, qty: number): number | null {
 
 // Compute display unrealized P&L from live mark. Works for long (qty>0) and short (qty<0).
 function displayUnrealized(quote: Quote | undefined, avgPrice: number, qty: number, fallbackPnl: number): number {
+  if (quote?.symbol.startsWith("PERP.")) {
+    if (quote.contract && quote.mark && quote.mark > 0) return (quote.mark - avgPrice) * qty * Number(quote.contract.multiplier);
+    return fallbackPnl;
+  }
   const mark = liveMark(quote, qty);
   if (mark !== null) return (mark - avgPrice) * qty;
   return fallbackPnl;
@@ -380,6 +384,8 @@ function StatsStrip({
   const held = heldRef.current.get(venue);
   const displayEquity = positionOpen ? held?.equity ?? equity : equity;
   const displayBp = positionOpen ? held?.bp ?? bp : bp;
+  const perpetual = account?.currency === "USDT";
+  const value = (amount: number | null) => perpetual && amount !== null ? `${amount.toFixed(2)} USDT` : money(amount);
 
   const cell = (label: string, testid: string, value: string, tone?: number) => (
     <div style={{ display: "flex", flexDirection: "column", padding: "2px 10px" }}>
@@ -390,12 +396,12 @@ function StatsStrip({
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
-      {cell("Equity", "acct-equity", money(displayEquity))}
-      {cell("Cash", "acct-cash", money(cash))}
-      {cell("Buying Power", "acct-bp", money(displayBp))}
-      {cell("Day P&L", "acct-daypnl", money(dayPnl), dayPnl ?? 0)}
-      {cell("Unrealized", "acct-unrealized", money(unrealized), unrealized)}
-      {cell("Realized", "acct-realized", money(realized), realized ?? 0)}
+      {cell("Equity", "acct-equity", value(perpetual ? equity : displayEquity))}
+      {cell(perpetual ? "Available margin" : "Cash", "acct-cash", value(cash))}
+      {cell(perpetual ? "Margin used" : "Buying Power", "acct-bp", value(perpetual ? account.marginUsed ?? 0 : displayBp))}
+      {cell(perpetual ? "Since-start P&L" : "Day P&L", "acct-daypnl", value(dayPnl), dayPnl ?? 0)}
+      {cell("Unrealized", "acct-unrealized", value(unrealized), unrealized)}
+      {cell("Realized", "acct-realized", value(realized), realized ?? 0)}
       {stale && account && <span data-testid="acct-stale" style={{ fontSize: 10, color: palette.warn }} title={`Last account update ${formatEtDateTime(account.tsMs)}`}>Stale · {formatEtDateTime(account.tsMs)}</span>}
       <div style={{ flex: 1 }} />
     </div>
@@ -446,6 +452,13 @@ function PositionsTable({
   const flatten = (row: PositionRow) => {
     if (row.venue === null) return; // net rows have no single venue to route to (button is hidden anyway)
     const venue = row.venue;        // narrowed to VenueID
+    if (row.symbol.startsWith("PERP.")) {
+      const side = row.qty > 0 ? "SELL" : "COVER";
+      void oc.submit({ venue, symbol: row.symbol, side, type: "MARKET", tif: "IOC", session: "AUTO",
+        qty: Math.abs(row.qty), limitPrice: 0, stopPrice: 0, perpetual: { leverage: row.leverage ?? 1 } },
+      `Close ${Math.abs(row.qty)} contracts`);
+      return;
+    }
     const quote = stores.quote.get(row.symbol);
     if (!quote) { toast.push({ level: "danger", text: `No quote to price the close for ${bareSymbol(row.symbol)}.` }); return; }
     const long = row.qty > 0;
@@ -497,8 +510,8 @@ function PositionsTable({
                   style={{ cursor: "pointer", textAlign: "center", userSelect: "none", borderTop: `1px solid ${palette.border}`, fontWeight: net ? 700 : 400,
                     background: selected ? "rgba(154,106,27,.16)" : hoveredPosition === positionKey ? "rgba(154,106,27,.06)" : "transparent",
                     boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : "none", transition: "background 120ms ease" }}>
-                  <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
-                  <td data-column="qty" style={{ color: r.qty >= 0 ? palette.up : palette.down }}>{formatSize(r.qty)}</td>
+                  <td data-column="symbol" style={{ padding: "2px 8px" }} title={r.leverage ? `${r.leverage}× isolated · ${r.marginUsed?.toFixed(2) ?? "—"} USDT margin · Stop ${r.protectionPrice ?? "—"}` : undefined}>{bareSymbol(r.symbol)}</td>
+                  <td data-column="qty" style={{ color: r.qty >= 0 ? palette.up : palette.down }}>{formatSize(r.qty)}{r.leverage ? ` cont · ${r.leverage}×` : ""}</td>
                   <td data-column="avgPrice">{formatPrice(r.avgPrice, quoteDecimals(r.avgPrice, 2))}</td>
                   {(() => {
                     const quote = stores.quote.get(r.symbol);

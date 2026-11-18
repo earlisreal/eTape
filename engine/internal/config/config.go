@@ -310,7 +310,7 @@ type VenueConfig struct {
 
 var venueIDRe = regexp.MustCompile(`^[a-z0-9-]+$`)
 
-var validBrokers = map[string]bool{"tradezero": true, "alpaca": true, "moomoo": true, "sim": true}
+var validBrokers = map[string]bool{"tradezero": true, "alpaca": true, "moomoo": true, "sim": true, "mexc-sim": true}
 
 // ReadVenueConfig parses the TOML file fresh and returns its venue+gate subset.
 // A missing file yields the defaults (not an error), matching boot semantics.
@@ -342,10 +342,13 @@ func ValidateVenueConfig(vc VenueConfig, credKeys []string) error {
 		seen[v.ID] = true
 		ids[v.ID] = true
 		if !validBrokers[v.Broker] {
-			return fmt.Errorf("venue %q: broker %q must be one of tradezero, alpaca, moomoo, sim", v.ID, v.Broker)
+			return fmt.Errorf("venue %q: broker %q must be one of tradezero, alpaca, moomoo, sim, mexc-sim", v.ID, v.Broker)
 		}
 		if v.Env != "paper" && v.Env != "live" {
 			return fmt.Errorf("venue %q: env %q must be paper or live", v.ID, v.Env)
+		}
+		if v.Broker == "mexc-sim" && v.Env != "paper" {
+			return fmt.Errorf("venue %q: mexc-sim requires the paper environment", v.ID)
 		}
 		if v.Broker == "tradezero" || v.Broker == "alpaca" {
 			if !keys[v.Credentials] {

@@ -274,6 +274,7 @@ type Order struct {
 	Action              *OrderAction
 	RiskEntry           *RiskEntry
 	RiskEntryID         string
+	Perpetual           *PerpetualOrder
 }
 
 // Working reports whether the order can still fill or be canceled.
@@ -282,28 +283,36 @@ func (o Order) Working() bool {
 }
 
 type Fill struct {
-	Venue   VenueID
-	OrderID string
-	Symbol  string
-	Side    Side
-	Qty     float64
-	Price   float64
-	TsMs    int64
+	Venue      VenueID
+	OrderID    string
+	Symbol     string
+	Side       Side
+	Qty        float64
+	Price      float64
+	TsMs       int64
+	Multiplier float64 `json:"multiplier,omitempty"`
 }
 
 // Position mirrors the broker's authoritative per-symbol position; Qty is signed
 // (positive long, negative short). OpenedMs is the exact opening fill time when
 // known; zero means the position predates observed fills or its history is unavailable.
 type Position struct {
-	Venue    VenueID
-	Symbol   string
-	Qty      float64
-	AvgPrice float64
-	DayBasis float64
-	OpenedMs int64
+	Venue           VenueID
+	Symbol          string
+	Qty             float64
+	AvgPrice        float64
+	DayBasis        float64
+	OpenedMs        int64
+	Multiplier      float64
+	Leverage        int
+	MarginUsed      float64
+	ProtectionPrice float64
 }
 
 type AccountSnapshot struct {
+	Currency      string
+	MarginUsed    float64
+	FundingPnL    float64
 	Venue         VenueID
 	Equity        float64
 	BuyingPower   float64
@@ -337,6 +346,7 @@ type OrderRequest struct {
 	LimitPrice    float64
 	StopPrice     float64
 	ClientOrderID string
+	Perpetual     *PerpetualOrder
 }
 
 // Validate enforces the "a request without a valid venue is malformed" rule and
@@ -459,13 +469,14 @@ type EventEnvelope struct {
 // FillRow is the fills-projection row written in the same transaction as an
 // OrderFilled event.
 type FillRow struct {
-	OrderID string
-	Symbol  string
-	Side    string
-	Qty     float64
-	Price   float64
-	TsMs    int64
-	Venue   string
+	OrderID    string
+	Symbol     string
+	Side       string
+	Qty        float64
+	Price      float64
+	TsMs       int64
+	Venue      string
+	Multiplier float64
 }
 
 // ExportFillRow is a fills row enriched with its table PK (fill_id), the

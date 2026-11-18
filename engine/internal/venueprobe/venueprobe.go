@@ -17,10 +17,12 @@ package venueprobe
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
+	"github.com/earlisreal/eTape/engine/internal/broker/mexc"
 	"github.com/earlisreal/eTape/engine/internal/broker/moomoo"
 	"github.com/earlisreal/eTape/engine/internal/broker/tradezero"
 	"github.com/earlisreal/eTape/engine/internal/clock"
@@ -116,6 +118,20 @@ func (p *Prober) TestConnection(ctx context.Context, broker, env, credName, keyI
 		return p.testTradeZero(ctx, cr)
 	case "moomoo":
 		return p.testMoomoo(ctx, env, accountID)
+	case "mexc":
+		cr, ok := p.resolveCreds(credName, keyID, secretKey)
+		if !ok {
+			return Result{Message: "MEXC Futures API key and secret are required"}
+		}
+		a, err := mexc.VerifyAccount(ctx, cr, p.clk)
+		if err != nil {
+			return Result{Message: err.Error()}
+		}
+		mode := "hedge mode"
+		if a.OneWay {
+			mode = "one-way mode"
+		}
+		return Result{OK: true, Env: "live", Message: fmt.Sprintf("Futures read verified · %s · %d open positions · %d working orders · %d active TP/SL", mode, a.OpenPositions, a.WorkingOrders, a.ActiveTPSL)}
 	default:
 		return Result{OK: false, Message: "connection testing is not supported for " + broker}
 	}

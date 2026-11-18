@@ -166,6 +166,20 @@ func TestQueryFillsSinceAllSymbolsOrderedSinceBoundary(t *testing.T) {
 	}
 }
 
+func TestQueryFillsSinceRestoresPerpetualMultiplier(t *testing.T) {
+	s := openTestStore(t)
+	event := exec.OrderFilled{F: exec.Fill{Venue: "mexc-paper", OrderID: "paper-fill", Symbol: "PERP.MEXC.BTC_USDT",
+		Side: exec.SideSell, Qty: 4, Price: 99000, TsMs: 5000, Multiplier: .0001}}
+	row, _ := exec.FillRowOf(event)
+	if _, err := s.AppendExecEvent(exec.EnvelopeOf(event, exec.SrcLocal, 0), row); err != nil {
+		t.Fatal(err)
+	}
+	fills, err := s.QueryFillsSince(context.Background(), 5000)
+	if err != nil || len(fills) != 1 || fills[0].Qty != 4 || fills[0].Multiplier != .0001 {
+		t.Fatalf("restored fills = %+v, %v", fills, err)
+	}
+}
+
 // TestExportFillsByVenueAndRange exercises ExportFills' two distinguishing
 // properties versus QueryFills/QueryFillsSince: it is scoped to ONE venue,
 // and it is a closed [fromMs, toMs) range (not "since"), and it carries

@@ -87,7 +87,8 @@ func markOr(req OrderRequest, marks MarkSource) float64 {
 // Evaluate runs the two-layer gate. Returns (true, "") to allow, or (false,
 // reason) at the first failing rule. Pure — the Core calls it in-loop.
 func Evaluate(s *State, cfg GateConfig, req OrderRequest, marks MarkSource) (bool, string) {
-	if instrument.IsPerpetual(req.Symbol) {
+	perpetual := instrument.IsPerpetual(req.Symbol)
+	if perpetual && (req.Perpetual == nil || !finitePositive(req.Perpetual.Multiplier)) {
 		return false, "perpetual execution is unavailable on this route"
 	}
 	// 1. master armed
@@ -124,16 +125,22 @@ func Evaluate(s *State, cfg GateConfig, req OrderRequest, marks MarkSource) (boo
 	if !ok {
 		return false, "no mark to value market order"
 	}
+	if perpetual {
+		val *= req.Perpetual.Multiplier
+	}
 	if vl.MaxOrderValue > 0 && val > vl.MaxOrderValue {
 		return false, "order value exceeds venue cap"
 	}
 
 	// 4b. per-venue max resulting position (shares + value)
 	mark := markOr(req, marks)
+	if perpetual {
+		mark *= req.Perpetual.Multiplier
+	}
 	venueResult := s.VenuePositionShares(req.Venue, req.Symbol) +
 		directional(s.VenueWorkingSameDir(req.Venue, req.Symbol, req.Side), req.Side) +
 		signedQty(req)
-	if vl.MaxPositionShares > 0 && math.Abs(venueResult) > vl.MaxPositionShares {
+	if !perpetual && vl.MaxPositionShares > 0 && math.Abs(venueResult) > vl.MaxPositionShares {
 		return false, "resulting venue position exceeds share cap"
 	}
 	if vl.MaxPositionValue > 0 && math.Abs(venueResult)*mark > vl.MaxPositionValue {
@@ -149,13 +156,33 @@ func Evaluate(s *State, cfg GateConfig, req OrderRequest, marks MarkSource) (boo
 	globalResult := s.SymbolNetShares(req.Symbol) +
 		directional(s.SymbolWorkingSameDir(req.Symbol, req.Side), req.Side) +
 		signedQty(req)
-	if cfg.Global.MaxSymbolPositionShares > 0 && math.Abs(globalResult) > cfg.Global.MaxSymbolPositionShares {
+	if !perpetual && cfg.Global.MaxSymbolPositionShares > 0 && math.Abs(globalResult) > cfg.Global.MaxSymbolPositionShares {
 		return false, "resulting symbol position exceeds global share cap"
 	}
-	if cfg.Global.MaxSymbolPositionValue > 0 && math.Abs(globalResult)*mark > cfg.Global.MaxSymbolPositionValue {
+	globalValue := math.Abs(globalResult) * mark
+	if perpetual {
+		globalValue = grossPerpetualValue(s, req, mark, venueResult)
+	}
+	if cfg.Global.MaxSymbolPositionValue > 0 && globalValue > cfg.Global.MaxSymbolPositionValue && (!perpetual || !reducesPosition(s, req)) {
 		return false, "resulting symbol position exceeds global value cap"
 	}
 	return true, ""
+}
+
+func grossPerpetualValue(s *State, req OrderRequest, mark, venueResult float64) float64 {
+	qty := math.Abs(venueResult)
+	for venue, state := range s.Venues {
+		if venue == req.Venue {
+			continue
+		}
+		qty += math.Abs(s.VenuePositionShares(venue, req.Symbol))
+		for _, o := range state.Orders {
+			if o.Symbol == req.Symbol && o.Perpetual != nil && o.Working() && (o.Side == SideBuy || o.Side == SideShort) {
+				qty += o.LeavesQty
+			}
+		}
+	}
+	return qty * mark
 }
 
 // EvaluateDeferredAdmission checks the controls that do not depend on a

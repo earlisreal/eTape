@@ -5,7 +5,7 @@ type VenueEnvironment = "LIVE" | "PAPER" | "SIM";
 export function venueEnvironment(venue: Pick<VenueStatus, "broker" | "env"> | undefined): VenueEnvironment | null {
   const env = venue?.env?.toLowerCase();
   if (env === "live") return "LIVE";
-  if (env === "paper") return venue?.broker === "sim" ? "SIM" : "PAPER";
+  if (env === "paper") return venue?.broker === "sim" || venue?.broker === "mexc-sim" ? "SIM" : "PAPER";
   return null;
 }
 

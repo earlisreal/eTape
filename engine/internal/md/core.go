@@ -461,6 +461,7 @@ func (c *Core) applyEventAt(ev feed.Event, at time.Time) {
 		c.eligiblePrints <- EligiblePrint{Gap: true, RecvTsMs: at.UnixMilli()}
 	case feed.SymbolGapEvent:
 		c.bars.sym(e.Symbol).gapPending = true
+		c.eligiblePrints <- EligiblePrint{Symbol: e.Symbol, Gap: true, RecvTsMs: at.UnixMilli()}
 	}
 }
 

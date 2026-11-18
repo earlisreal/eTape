@@ -169,6 +169,16 @@ func cashSign(side Side) float64 {
 	return -1
 }
 
+func (a *RoundTripAggregator) applyTradeFill(f Fill) []ClosedTrade {
+	trades := a.Apply(f.Venue, f.Symbol, f.Side, f.Qty, f.Price, f.TsMs)
+	if f.Multiplier > 0 {
+		for i := range trades {
+			trades[i].Realized *= f.Multiplier
+		}
+	}
+	return trades
+}
+
 // Apply folds one fill into the aggregator's per-(venue,symbol) accumulator
 // and returns any round trips the fill just closed. A fill closes at most one
 // trip: either it fully flattens the running position (one emit), flips it

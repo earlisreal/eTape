@@ -7,6 +7,7 @@ import { TV_FONT, type TvChrome } from "../../../render/chart/tvTheme";
 import type { Tool } from "../../../render/chart/drawings/interaction";
 import { CHART_RISK_ENTRY_EVENT, type OrderConfig, type RiskEntryTemplate } from "../../exec/actionTemplate";
 import { riskEntrySize, riskEntryProtection, riskEntryAddTemplate } from "../../exec/riskEntry";
+import { perpetualRiskSize, perpetualTick } from "../../exec/perpetual";
 import {trailError} from "../../exec/trailing";
 import type { LinkGroup, LinkGroups } from "../../linkGroups";
 import { modalTracker } from "../../modalTracker";
@@ -89,7 +90,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (!endpoint && host.dataset.orderEntryMode !== "risk") return;
             if (endpoint) host.dataset.orderEntryMode = "risk";
             else if (host.dataset.orderEntryMode === "risk") delete host.dataset.orderEntryMode;
-            const color = endpoint ? endpoint === "buy" ? latest.current.chrome.up : latest.current.chrome.down : null;
+            const color = endpoint ? (endpoint === "buy") !== (draft?.template.perpetual?.side === "SHORT") ? latest.current.chrome.up : latest.current.chrome.down : null;
             if (endpoint && hover) latest.current.facadeRef.current?.setOrderCrosshair?.(color, hover);
             else latest.current.facadeRef.current?.setOrderCrosshair?.(color);
             if (!endpoint) { host.title = ""; host.style.cursor = ""; }
@@ -102,13 +103,28 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (rootRef.current)
             rootRef.current.style.display = "none"; pillLayer.current?.clear(); pillLayer.current?.sync(); };
         const editable = () => !!document.activeElement?.closest("input,textarea,select,[contenteditable='true']");
+        const contract = () => latest.current.stores.quote.get(latest.current.symbol)?.contract;
+        const snap = (value: number) => {
+            const rules = draft?.template.perpetual ? contract() : undefined;
+            return rules ? perpetualTick(value, rules) : snapOrderMarkerPrice(value);
+        };
+        const short = () => draft?.template.perpetual?.side === "SHORT";
+        const leg = (endpoint: "buy" | "sell") => endpoint === "buy" ? short() ? "SHORT" : "BUY" : short() ? "COVER" : "SELL";
+        const pxText = (price: number) => draft?.template.perpetual ? String(price) : price.toFixed(price < 1 ? 4 : 2);
         const protection = () => {
             const p = latest.current;
             const qty = p.stores.exec.positions().find(pos => pos.venue === venue && pos.symbol === p.symbol)?.qty ?? 0;
+            if (p.symbol.startsWith("PERP.")) {
+                const working = p.stores.exec.orders().some(({order}) => order.venue === venue && order.symbol === p.symbol &&
+                    ["SUBMITTED","ACCEPTED","PARTIALLY_FILLED"].includes(order.status));
+                return { qty, owner: undefined, stop: undefined, error: qty || working ? "Start from flat with no working orders." : undefined };
+            }
             return { ...riskEntryProtection(p.stores.exec.orders().map(v => v.order), qty, venue, p.symbol), qty };
         };
         const size = () => {
             const a = latest.current.stores.exec.accounts().find(a => a.venue === venue);
+            if (draft?.template.perpetual)
+                return perpetualRiskSize(draft.template, contract(), draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0);
             const context = protection();
             return draft && riskEntrySize(riskEntryAddTemplate(draft.template, context.owner, context.stop), draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0);
         };
@@ -120,8 +136,10 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (!Number.isFinite(draft.template.value) || draft.template.value <= 0 || (draft.template.mode !== "Dollar" && draft.template.value > 100))
                 return "Positive risk value required (percentages at most 100).";
             if (draft.buy !== undefined && draft.sell !== undefined) {
-                if (draft.sell >= draft.buy) return "Sell trigger must be below buy trigger.";
-                if (!size()?.qty || (draft.complete && !draft.maxQty)) return "Risk or funding budget rounds to zero shares.";
+                if (short() ? draft.sell <= draft.buy : draft.sell >= draft.buy)
+                    return short() ? "Choose a stop above the short entry." : "Sell trigger must be below buy trigger.";
+                if (!size()?.qty || (draft.complete && !draft.maxQty))
+                    return draft.template.perpetual ? "Review the contract size, leverage and USDT risk." : "Risk or funding budget rounds to zero shares.";
             }
             return "";
         };
@@ -140,6 +158,11 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             const sizing = sizingError();
             if (sizing) return sizing;
             if (context.error) return context.error;
+            if (draft?.template.perpetual) {
+                if (v.broker !== "mexc-sim") return "Select the MEXC paper Execution Venue.";
+                if (!contract()?.tradingEnabled) return "Waiting for tradable contract rules.";
+                return "";
+            }
             if (draft && draft.sharedEntryId !== (context.owner?.id ?? "")) return "Shared protection changed; review a new chart risk entry.";
             if (context.stop && draft?.sell !== undefined && draft.sell + 1e-9 < context.stop.stopPrice)
                 return "Add stop must keep or raise the shared stop.";
@@ -191,8 +214,10 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 arrow.style.width = `${plotWidth}px`;
                 arrow.style.height = `${paneHeight}px`;
                 arrow.querySelector("path")?.setAttribute("d", `M ${x} ${buyY} V ${sellY} M ${x - 4} ${headY} L ${x} ${sellY} L ${x + 4} ${headY}`);
-                readout.textContent = sizingError() || !s ? "— shares · Est. risk —" :
-                    `${qty.toLocaleString("en-US")} shares · Est. risk ${(s.qty ? s.risk * qty / s.qty : 0).toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
+                const amount = s?.qty ? s.risk * qty / s.qty : 0;
+                const unit = draft.template.perpetual ? "contracts" : "shares";
+                readout.textContent = sizingError() || !s ? `— ${unit} · Est. risk —` :
+                    `${qty.toLocaleString("en-US")} ${unit} · Est. risk ${draft.template.perpetual ? `${amount.toFixed(2)} USDT · ${draft.template.perpetual.leverage}×` : amount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
                 const context = protection();
                 if (context.stop) readout.textContent += `\n${context.qty.toLocaleString("en-US")} existing + ${qty.toLocaleString("en-US")} added = ${(context.qty + qty).toLocaleString("en-US")} total\nShared stop ${context.stop.stopPrice.toFixed(context.stop.stopPrice < 1 ? 4 : 2)} → ${draft.sell!.toFixed(draft.sell! < 1 ? 4 : 2)} on first fill · ${context.stop.held?.trail ? "trailing mode retained" : "Fixed"}`;
                 readout.style.whiteSpace = "pre-line";
@@ -212,16 +237,20 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     line.style.display = lineY == null || lineY < 0 || lineY >= paneHeight ? "none" : "block";
                     line.style.top = `${lineY}px`;
                     line.style.right = `${facade?.priceScaleWidth() ?? 60}px`;
+                    line.style.borderColor = (side === "buy") !== short() ? latest.current.chrome.up : latest.current.chrome.down;
                 }
                 if (chip) {
                     chip.style.display = y == null ? "none" : "flex";
                     chip.style.top = `${chipYs[endpoints.indexOf(side)]}px`;
                     const button = chip.querySelector<HTMLButtonElement>("[data-risk-price]");
                     if (button && price !== undefined) {
-                        button.textContent = price.toFixed(price < 1 ? 4 : 2);
+                        button.textContent = pxText(price);
                         const limit = side === "buy" ? s?.buyLimit : s?.sellLimit;
                         button.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${side === "buy" ? "BUY" : "SELL"} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
-                        button.setAttribute("aria-label", `${side === "buy" ? "Buy" : "Sell"} trigger ${price.toFixed(price < 1 ? 4 : 2)}; drag or use arrow keys to adjust`);
+                        if (draft.template.perpetual)
+                            button.title = side === "buy" ? `${leg(side)} entry · IOC limit ${limit ?? "pending"} · Last trade · 24 hours` :
+                                `${leg(side)} protective stop · Fair price · Confirmed fills`;
+                        button.setAttribute("aria-label", `${draft.template.perpetual ? leg(side) : side === "buy" ? "Buy" : "Sell"} trigger ${pxText(price)}; drag or use arrow keys to adjust`);
                         button.disabled = draft.busy || draft.unknown;
                     }
                     const cancel = chip.querySelector<HTMLButtonElement>("[data-risk-cancel]");
@@ -232,20 +261,25 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (label) {
                 label.style.display = previewVisible ? "block" : "none";
                 if (previewVisible && candidate != null) {
-                    label.textContent = candidate.toFixed(candidate < 1 ? 4 : 2);
+                    label.textContent = pxText(candidate);
                     label.style.top = `${Math.max(10.5, Math.min(candidateY!, paneHeight - 10.5))}px`;
                     label.style.left = `calc(100% - ${facade?.priceScaleWidth() ?? 60}px)`;
-                    label.style.background = endpoint === "buy" ? latest.current.chrome.up : latest.current.chrome.down;
+                    label.style.background = (endpoint === "buy") !== short() ? latest.current.chrome.up : latest.current.chrome.down;
                     label.style.maxWidth = `${facade?.priceScaleWidth() ?? 60}px`;
                 }
             }
-            message(draft.buy === undefined ? "Click BUY, then SELL; or drag. Esc cancel." : !draft.complete ? "Choose SELL below BUY. Esc cancel." : "");
+            message(draft.template.perpetual ? (draft.buy === undefined ? `Click ${leg("buy")} entry, then stop; or drag. Esc cancel.` :
+                !draft.complete ? `Choose the stop ${short() ? "above" : "below"} the entry. Esc cancel.` : "") :
+                draft.buy === undefined ? "Click BUY, then SELL; or drag. Esc cancel." : !draft.complete ? "Choose SELL below BUY. Esc cancel." : "");
             cursor(previewVisible ? endpoint : null);
             if (previewVisible && endpoint && candidate != null) {
                 host.dataset.orderCursorPrice = String(candidate);
                 host.dataset.orderCursorY = String(candidateY);
                 const limit = endpoint === "buy" ? s?.buyLimit : s?.sellLimit;
                 host.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${endpoint === "buy" ? "BUY" : "SELL"} STOP-LIMIT · trigger ${candidate} · limit ${limit ?? "pending"}\nHeld by eTape · DAY ${deadline}\n${venue} · fees/execution risk excluded\nEsc cancel`;
+                if (draft.template.perpetual)
+                    host.title = endpoint === "buy" ? `${leg(endpoint)} entry · Last trade ${candidate} · IOC limit ${limit ?? "pending"}` :
+                        `${leg(endpoint)} protective stop · Fair price ${candidate}`;
             }
             const status = rootRef.current.querySelector<HTMLElement>("[data-risk-status]");
             if (status) {
@@ -274,7 +308,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             current.busy = true;
             paint();
             try {
-                current.route = await latest.current.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol, riskEntry: true }) as StopLimitRoutePreview;
+                if (!current.template.perpetual)
+                    current.route = await latest.current.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol, riskEntry: true }) as StopLimitRoutePreview;
             }
             catch {
                 notify("not sent: Engine preview unavailable.");
@@ -292,7 +327,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             const s = size();
             if (error || !s || !s.qty) {
                 current.busy = false;
-                current.error = error || "Zero shares.";
+                current.error = error || (current.template.perpetual ? "Zero contracts." : "Zero shares.");
                 notify(`not sent: ${current.error}`);
                 paint();
                 return;
@@ -303,7 +338,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 maxQty: Math.min(current.maxQty, s.qty), buyCushion: current.template.buyCushion, sellCushion: effective.sellCushion,
                 ...(effective.protection?{protection:effective.protection}:{}) };
             try {
-                const ack = await latest.current.sendCommand("SubmitRiskEntry", args);
+                const perp = current.template.perpetual;
+                const ack = perp ? await latest.current.sendCommand("SubmitPerpetualRiskEntry", {
+                    venue, symbol, side: perp.side, trigger: current.buy, stop: current.sell, leverage: perp.leverage,
+                    cushion: current.template.buyCushion, budget: current.template.value, maxQty: Math.min(current.maxQty, s.qty),
+                    collateralPct: current.template.mode !== "Dollar",
+                }) : await latest.current.sendCommand("SubmitRiskEntry", args);
                 if (ack.ambiguous) notify(ack.reason || "", true);
                 else if (ack.status !== "accepted") notify(`rejected: ${ack.reason || "Pair rejected."}`);
                 if (draft !== current)
@@ -340,6 +380,10 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             detail.handled = true;
             if (draft?.busy || draft?.unknown)
                 return;
+            if (p.symbol.startsWith("PERP.") !== !!detail.template.perpetual) {
+                push({ level: "warn", text: "Choose a Chart Risk Entry preset for the chart's instrument type." });
+                return;
+            }
             clear();
             hover = lastPoint;
             draft = { template: detail.template, sharedEntryId: protection().owner?.id ?? "", complete: false, busy: false, unknown: false, maxQty: 0 };
@@ -347,6 +391,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             p.facadeRef.current?.setPanZoomEnabled?.(false);
             paint();
             const current = draft;
+            if (current.template.perpetual)
+                return;
             void p.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol: p.symbol, riskEntry: true }).then(raw => {
                 if (draft !== current)
                     return;
@@ -362,7 +408,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (!facade || x < 0 || y < 0 || x >= rect.width - facade.priceScaleWidth() || y >= (facade.paneHeights()[0] ?? 0))
                 return null;
             const price = facade.coordinateToPrice(y);
-            return price != null && Number.isFinite(price) && price > 0 ? snapOrderMarkerPrice(price) : null;
+            return price != null && Number.isFinite(price) && price > 0 ? snap(price) : null;
         };
         const consume = (e: Event) => { e.preventDefault(); e.stopImmediatePropagation(); };
         const down = (e: PointerEvent) => {
@@ -425,7 +471,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (!pointer && (e.target as Element)?.closest?.("[data-drawing-ui],button,input,select,textarea")) { hover = null; cursor(null); schedule(); return; }
             const facade = latest.current.facadeRef.current;
             const raw = pointer?.axis ? facade?.coordinateToPrice((facade.priceToCoordinate(pointer.price) ?? pointer.y - host.getBoundingClientRect().top) + e.clientY - pointer.y) : priceAt(e);
-            const price = raw != null && Number.isFinite(raw) && raw > 0 ? snapOrderMarkerPrice(raw) : null;
+            const price = raw != null && Number.isFinite(raw) && raw > 0 ? snap(raw) : null;
             if (price == null) { cursor(null); schedule(); return; }
             if (pointer) {
                 consume(e);
@@ -475,7 +521,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 consume(e);
                 const endpoint = chip.dataset.riskPrice as "buy" | "sell", price = draft[endpoint];
                 if (price !== undefined) {
-                    const next = snapOrderMarkerPrice(price + (e.key === "ArrowUp" ? 1 : -1) * (price >= 1 ? 0.01 : 0.0001));
+                    const tick = draft.template.perpetual ? Number(contract()?.priceTick) : price >= 1 ? 0.01 : 0.0001;
+                    const next = snap(price + (e.key === "ArrowUp" ? 1 : -1) * tick);
                     if (next > 0) draft[endpoint] = next;
                     draft.maxQty = size()?.qty ?? 0;
                     paint();

@@ -244,8 +244,10 @@ func (s *Store) QueryFills(symbol string, fromMs, toMs int64) ([]exec.FillRow, e
 // QueryContext so a canceled boot doesn't hang on slow I/O.
 func (s *Store) QueryFillsSince(ctx context.Context, fromMs int64) ([]exec.FillRow, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT order_id, symbol, side, qty, price, ts, venue
-         FROM fills WHERE ts >= ? ORDER BY ts, seq`, fromMs)
+		`SELECT f.order_id, f.symbol, f.side, f.qty, f.price, f.ts, f.venue,
+                COALESCE(json_extract(e.payload, '$.F.multiplier'), 0)
+         FROM fills f JOIN exec_events e ON e.seq = f.seq
+         WHERE f.ts >= ? ORDER BY f.ts, f.seq`, fromMs)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +255,7 @@ func (s *Store) QueryFillsSince(ctx context.Context, fromMs int64) ([]exec.FillR
 	var out []exec.FillRow
 	for rows.Next() {
 		var f exec.FillRow
-		if err := rows.Scan(&f.OrderID, &f.Symbol, &f.Side, &f.Qty, &f.Price, &f.TsMs, &f.Venue); err != nil {
+		if err := rows.Scan(&f.OrderID, &f.Symbol, &f.Side, &f.Qty, &f.Price, &f.TsMs, &f.Venue, &f.Multiplier); err != nil {
 			return nil, err
 		}
 		out = append(out, f)

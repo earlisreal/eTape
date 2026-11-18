@@ -104,7 +104,7 @@ export function TradeHistoryTable({
                 <td data-column="entryPrice">{formatPrice(r.entryPrice, quoteDecimals(r.entryPrice, 2))}</td>
                 <td data-column="exitPrice">{formatPrice(r.exitPrice, quoteDecimals(r.exitPrice, 2))}</td>
                 <td data-column="diff">{formatPrice(r.exitPrice - r.entryPrice, quoteDecimals(Math.abs(r.exitPrice - r.entryPrice), 2))}</td>
-                <td data-column="realized" style={{ color: r.realized >= 0 ? palette.up : palette.down }}>{formatPrice(r.realized, 2)}</td>
+                <td data-column="realized" style={{ color: r.realized >= 0 ? palette.up : palette.down }}>{formatPrice(r.realized, 2)}{r.symbol.startsWith("PERP.") ? " USDT" : ""}</td>
                 <td data-column="openMs" style={{ color: palette.textMuted }}>{formatClock(r.openMs)}</td>
                 <td data-column="closeMs" style={{ color: palette.textMuted }}>{formatClock(r.closeMs)}</td>
                 <td data-column="duration" style={{ color: palette.textMuted }}>{formatDuration(r.closeMs - r.openMs)}</td>

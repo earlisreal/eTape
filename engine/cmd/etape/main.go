@@ -28,6 +28,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/backfill"
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/broker/netx"
+	"github.com/earlisreal/eTape/engine/internal/broker/sim"
 	"github.com/earlisreal/eTape/engine/internal/buildinfo"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
@@ -491,7 +492,14 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	if staleAckRemoved {
 		st.Flush()
 	}
-	vbs, err := buildBrokers(cfg, credsFile, execClk)
+	var mexcAPI *mexc.Client
+	if !*demo {
+		mexcAPI = mexc.NewClient()
+	}
+	vbs, err := buildBrokers(cfg, credsFile, execClk, func(v config.Venue) (exec.Broker, error) {
+		return sim.NewPerpetual(sim.PerpetualConfig{Venue: exec.VenueID(v.ID), Exchange: mexc.Exchange,
+			Clock: execClk, StartingUSDT: v.EffectiveStartingBalance(), Path: dbPath + "." + v.ID + ".perpetual.json", Rules: mexcAPI.Rules})
+	})
 	if err != nil {
 		log.Error("build brokers", "err", err)
 		_ = st.Close()
@@ -668,7 +676,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	// --- fan-in: md/exec Updates -> hub; mark bridge md -> exec ---
 	var forwardWG sync.WaitGroup
 	forwardWG.Add(1)
-	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, seeder) }()
+	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, seeder, vbs) }()
 	go forwardExec(ctx, execCore, hub)
 
 	// Forward marks + books into every configured sim broker so submitted orders
@@ -748,7 +756,6 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			Hysteresis:           time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
 			DisableExtendedTime:  !cfg.Feed.ExtendedTime,
 		})
-		execCore.Do(exec.ConfigureHeldDemand{Demand: engineHeldDemand{feed: fd, wait: fd.WaitTickerActive, waitExecution: fd.WaitExecutionActive, bookCoverage: fd.TrailBookCoverage}})
 		recordingProducers.Go(func() { _ = client.Run(ctx) })
 		recordingProducers.Go(func() { _ = fd.Run(ctx) })
 		pipeWG.Add(1)
@@ -785,14 +792,29 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			tail = fd // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
 		}
 	}
-	var mexcAPI *mexc.Client
 	if !*demo {
-		mexcAPI = mexc.NewClient()
 		stream := mexc.NewStream(mexcAPI)
 		recordingProducers.Go(func() { stream.Run(ctx) })
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, stream.Events(), core)
-		hub.SetFeed(perpetualFeedRouter{stocks: feedForHub, mexcAPI: mexcAPI, mexc: stream, archived: st.HasArchivedSymbol})
+		router := perpetualFeedRouter{stocks: feedForHub, mexcAPI: mexcAPI, mexc: stream, archived: st.HasArchivedSymbol}
+		hub.SetFeed(router)
+		if fd, ok := feedForHub.(*opend.OpenDFeed); ok {
+			execCore.Do(exec.ConfigureHeldDemand{Demand: engineHeldDemand{feed: router, wait: fd.WaitTickerActive,
+				waitExecution: fd.WaitExecutionActive, bookCoverage: fd.TrailBookCoverage}})
+		}
+		for _, vb := range vbs {
+			if paper, ok := vb.Broker.(*sim.PerpetualSimulator); ok {
+				paper.AttachDemand(func(symbol string, required bool) {
+					id := "perpetual-paper/" + string(vb.ID) + "/" + symbol
+					if required {
+						stream.Ensure(feed.Demand{ID: id, Symbol: symbol, Focused: true, Subs: []feed.SubType{feed.SubTicker, feed.SubBook}})
+					} else {
+						stream.Release(id)
+					}
+				})
+			}
+		}
 	} else {
 		hub.SetFeed(feedForHub)
 	}
@@ -1154,13 +1176,24 @@ func hz(rate float64) time.Duration {
 // the auto-config already ran this process) — see boot's own
 // venueseed.New call site for the exact gate; forwardMD only ever guards
 // against nil, it doesn't decide when a Seeder exists.
-func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, seeder *venueseed.Seeder) {
+func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, seeder *venueseed.Seeder, venues []venueBroker) {
+	var perpetual []*sim.PerpetualSimulator
+	for _, v := range venues {
+		if paper, ok := v.Broker.(*sim.PerpetualSimulator); ok {
+			perpetual = append(perpetual, paper)
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case u := <-core.Updates():
 			hub.PublishMD(u)
+			if q, ok := u.(md.QuoteUpdate); ok && instrument.IsPerpetual(q.Quote.Symbol) {
+				for _, paper := range perpetual {
+					paper.SetFairQuote(q.Quote)
+				}
+			}
 			if cu, ok := u.(md.ConnUpdate); ok && cu.Up && seeder != nil {
 				seeder.OnFeedUp(ctx)
 			}
@@ -1218,6 +1251,11 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 				s.SetMark(m.Symbol, m.Price)
 			}
 		case p := <-core.EligiblePrints():
+			if instrument.IsPerpetual(p.Symbol) {
+				execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs,
+					RecvTsMs: p.RecvTsMs, ReceiptMs: p.ReceiptMs, Seq: p.Seq, Gap: p.Gap})
+				continue
+			}
 			if core.ExecutionEvents() == nil {
 				execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, ReceiptMs: p.ReceiptMs, Seq: p.Seq, Gap: p.Gap})
 			}
@@ -1311,6 +1349,10 @@ func (d engineHeldDemand) AcquireTrail(ctx context.Context, orderID, symbol stri
 
 func (d engineHeldDemand) Acquire(ctx context.Context, orderID, symbol string) error {
 	id := "held-stop/" + orderID
+	if instrument.IsPerpetual(symbol) {
+		d.feed.Ensure(feed.Demand{ID: id, Symbol: symbol, Subs: []feed.SubType{feed.SubTicker, feed.SubBook}, Focused: true})
+		return nil
+	}
 	d.feed.Ensure(feed.Demand{ID: id, Symbol: symbol, Subs: []feed.SubType{feed.SubTicker}, Focused: true})
 	if d.wait == nil {
 		return nil

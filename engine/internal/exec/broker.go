@@ -1,6 +1,10 @@
 package exec
 
-import "context"
+import (
+	"context"
+
+	"github.com/earlisreal/eTape/engine/internal/instrument"
+)
 
 // Capabilities advertises what a venue's adapter supports natively so the Core
 // and gate can adapt (e.g. TZ emulates replace; only Alpaca flattens).
@@ -43,6 +47,12 @@ type Broker interface {
 	Events() <-chan BrokerEvent
 }
 
+type PerpetualBroker interface {
+	Broker
+	ContractRules(symbol string) (instrument.ContractRules, bool)
+	FairPrice(symbol string) (float64, bool)
+}
+
 // BrokerEvent is anything a Broker pushes: order-lifecycle events (which also
 // satisfy Event and are persisted), connection transitions, and account/position
 // reconcile snapshots (which are not persisted).
@@ -76,13 +86,14 @@ type HeldActivationOutcome struct {
 }
 
 // Order-lifecycle events are emitted by adapters AND persisted.
-func (OrderAccepted) isBrokerEvent() {}
-func (OrderRejected) isBrokerEvent() {}
-func (OrderFilled) isBrokerEvent()   {}
-func (OrderCanceled) isBrokerEvent() {}
-func (OrderExpired) isBrokerEvent()  {}
-func (OrderReplaced) isBrokerEvent() {}
-func (StreamGap) isBrokerEvent()     {}
+func (OrderAccepted) isBrokerEvent()  {}
+func (OrderSubmitted) isBrokerEvent() {}
+func (OrderRejected) isBrokerEvent()  {}
+func (OrderFilled) isBrokerEvent()    {}
+func (OrderCanceled) isBrokerEvent()  {}
+func (OrderExpired) isBrokerEvent()   {}
+func (OrderReplaced) isBrokerEvent()  {}
+func (StreamGap) isBrokerEvent()      {}
 
 type BrokerConnUp struct{ V VenueID }
 

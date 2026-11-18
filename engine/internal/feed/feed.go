@@ -7,6 +7,8 @@ package feed
 import (
 	"context"
 	"time"
+
+	"github.com/earlisreal/eTape/engine/internal/instrument"
 )
 
 // Direction is the aggressor side of a trade print.
@@ -178,6 +180,8 @@ type Quote struct {
 	Mark              float64
 	Index             float64
 	FundingRate       float64
+	NextFundingMs     int64
+	Contract          *instrument.ContractRules
 	Volume            int64
 	Turnover          float64
 	ProviderSuspended bool

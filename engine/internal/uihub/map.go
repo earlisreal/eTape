@@ -231,11 +231,15 @@ func mapPosition(p exec.Position, mark float64) wsmsg.PositionRow {
 	if mark != 0 {
 		upl = (mark - p.AvgPrice) * p.Qty
 	}
+	if p.Multiplier > 0 {
+		upl *= p.Multiplier
+	}
 	basis := p.DayBasis
 	if basis == 0 {
 		basis = p.AvgPrice
 	}
-	return wsmsg.PositionRow{Venue: &v, Symbol: p.Symbol, Qty: p.Qty, AvgPrice: p.AvgPrice, UnrealizedPnl: upl, DayBasis: basis, OpenedMs: p.OpenedMs}
+	return wsmsg.PositionRow{Venue: &v, Symbol: p.Symbol, Qty: p.Qty, AvgPrice: p.AvgPrice, UnrealizedPnl: upl, DayBasis: basis, OpenedMs: p.OpenedMs,
+		Leverage: p.Leverage, MarginUsed: p.MarginUsed, ProtectionPrice: p.ProtectionPrice}
 }
 
 func mapAccount(a exec.AccountSnapshot) wsmsg.AccountRow {
@@ -244,6 +248,7 @@ func mapAccount(a exec.AccountSnapshot) wsmsg.AccountRow {
 		AvailableCash: a.AvailableCash, SodEquity: a.SodEquity, Realized: a.Realized,
 		DayPnl: a.DayPnL, DayPnlSource: a.DayPnLSource, DayPnlProvisional: a.DayPnLProvisional,
 		Leverage: a.Leverage, TsMs: a.TsMs,
+		Currency: a.Currency, MarginUsed: a.MarginUsed, FundingPnl: a.FundingPnL,
 	}
 }
 
@@ -259,6 +264,11 @@ func mapQuote(q feed.Quote, bid, ask float64) wsmsg.Quote {
 	wire := wsmsg.Quote{Symbol: q.Symbol, Bid: bid, Ask: ask, Last: q.Last, Ts: isoMs(q.TsMs), Mark: q.Mark, Index: q.Index}
 	if instrument.IsPerpetual(q.Symbol) {
 		wire.FundingRate = &q.FundingRate
+		wire.NextFundingMs = q.NextFundingMs
+	}
+	if q.Contract != nil {
+		contract := wsmsg.PerpetualContract(*q.Contract)
+		wire.Contract = &contract
 	}
 	return wire
 }
