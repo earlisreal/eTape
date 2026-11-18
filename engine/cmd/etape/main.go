@@ -34,10 +34,12 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/creds"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/feed/mexc"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	"github.com/earlisreal/eTape/engine/internal/health"
 	histalpaca "github.com/earlisreal/eTape/engine/internal/hist/alpaca"
 	histyahoo "github.com/earlisreal/eTape/engine/internal/hist/yahoo"
+	"github.com/earlisreal/eTape/engine/internal/instrument"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/news"
 	"github.com/earlisreal/eTape/engine/internal/openbrowser"
@@ -783,7 +785,17 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			tail = fd // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
 		}
 	}
-	hub.SetFeed(feedForHub) // enables on-demand EnsureSymbol/ReleaseSymbol + FocusGroup probe
+	var mexcAPI *mexc.Client
+	if !*demo {
+		mexcAPI = mexc.NewClient()
+		stream := mexc.NewStream(mexcAPI)
+		recordingProducers.Go(func() { stream.Run(ctx) })
+		pipeWG.Add(1)
+		go pipe(ctx, &pipeWG, stream.Events(), core)
+		hub.SetFeed(perpetualFeedRouter{stocks: feedForHub, mexcAPI: mexcAPI, mexc: stream, archived: st.HasArchivedSymbol})
+	} else {
+		hub.SetFeed(feedForHub)
+	}
 	alerts.SetDemand(engineAlertDemand{feed: feedForHub})
 	hub.SetKnownSymbol(st.HasArchivedSymbol)
 
@@ -874,9 +886,15 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			runAfterCloseHistoryRefresh(ctx, &warmSeen, refreshDaily)
 		}()
 	}
+	if mexcAPI != nil {
+		prepareChart = perpetualHistory(ctx, mexcAPI, core, st, &backfillWG, prepareChart)
+	}
 	hub.SetHistoryWarm(prepareChart, warmArchive)
 	if fd, ok := feedForHub.(*opend.OpenDFeed); ok && st != nil && !cfg.Backfill.Enabled {
 		hub.SetCachedDaily(func(sym string) {
+			if instrument.IsPerpetual(sym) {
+				return
+			}
 			backfillWG.Add(1)
 			go func() {
 				defer backfillWG.Done()

@@ -459,6 +459,8 @@ func (c *Core) applyEventAt(ev feed.Event, at time.Time) {
 		c.executionGap(at)
 		c.bars.markGaps()
 		c.eligiblePrints <- EligiblePrint{Gap: true, RecvTsMs: at.UnixMilli()}
+	case feed.SymbolGapEvent:
+		c.bars.sym(e.Symbol).gapPending = true
 	}
 }
 
@@ -527,7 +529,7 @@ func (c *Core) dedupTicks(symbol string, ticks []feed.Tick) []feed.Tick {
 			c.processingOrdinal++
 			t.ProcessingOrdinal = c.processingOrdinal
 		}
-		day := session.DayMs(t.TsMs)
+		day := marketBucket(t.Symbol, t.TsMs, session.TFDay)
 		if day != c.lastDay[t.Symbol] {
 			c.lastDay[t.Symbol] = day
 			c.lastSeq[t.Symbol] = 0

@@ -8,6 +8,7 @@ export interface BarCloseTimerProps {
   now?: () => number;
   chrome: TvChrome;
   timeframe: string;
+  symbol?: string;
   price: string;
   lastPriceY: number;
   rightAxisWidth: number;
@@ -47,9 +48,9 @@ function useNowTick(nowFn: () => number): number {
 // TVLegend). It stays below LWC's top canvas (z-index 2), so the native
 // crosshair price label remains on top while the timer stays above the series
 // canvas. pointerEvents:none keeps it from stealing chart input.
-export function BarCloseTimer({ now: nowFn = Date.now, chrome, timeframe, price, lastPriceY, rightAxisWidth, paneBottom, up }: BarCloseTimerProps): JSX.Element {
+export function BarCloseTimer({ now: nowFn = Date.now, chrome, timeframe, symbol, price, lastPriceY, rightAxisWidth, paneBottom, up }: BarCloseTimerProps): JSX.Element {
   const now = useNowTick(nowFn);
-  const text = formatCountdown(remainingToBarCloseMs(timeframe as Timeframe, now));
+  const text = formatCountdown(remainingToBarCloseMs(timeframe as Timeframe, now, symbol));
   const tint = up ? chrome.up : chrome.down;
   const top = Math.min(lastPriceY - PAD_V - ROW_HEIGHT / 2, paneBottom - PILL_HEIGHT);
 

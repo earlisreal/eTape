@@ -50,11 +50,15 @@ type ConnDownEvent struct{}
 type ResyncedEvent struct{}
 type DataGapEvent struct{}
 
-func (TicksEvent) isEvent()    {}
-func (QuoteEvent) isEvent()    {}
-func (BookEvent) isEvent()     {}
-func (Bars1mEvent) isEvent()   {}
-func (ConnUpEvent) isEvent()   {}
-func (ConnDownEvent) isEvent() {}
-func (ResyncedEvent) isEvent() {}
-func (DataGapEvent) isEvent()  {}
+// SymbolGapEvent reports a discontinuity on one instrument's stream.
+type SymbolGapEvent struct{ Symbol string }
+
+func (TicksEvent) isEvent()     {}
+func (QuoteEvent) isEvent()     {}
+func (BookEvent) isEvent()      {}
+func (Bars1mEvent) isEvent()    {}
+func (ConnUpEvent) isEvent()    {}
+func (ConnDownEvent) isEvent()  {}
+func (ResyncedEvent) isEvent()  {}
+func (DataGapEvent) isEvent()   {}
+func (SymbolGapEvent) isEvent() {}

@@ -17,6 +17,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/instrument"
 	"github.com/earlisreal/eTape/engine/internal/locates"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/pricealert"
@@ -708,7 +709,7 @@ func completeDataSettingsArgs(raw json.RawMessage) bool {
 // probe validates a symbol exists; returns "" to accept, else a block reason.
 // Skipped when the feed is nil (demo/tests) so those paths accept.
 func (cd *commands) probe(ctx context.Context, symbol string) string {
-	if known := cd.knownSymbol.Load(); known != nil && known.fn(symbol) {
+	if known := cd.knownSymbol.Load(); known != nil && !instrument.IsPerpetual(symbol) && known.fn(symbol) {
 		return ""
 	}
 	f := cd.feed()
@@ -731,7 +732,8 @@ func (cd *commands) probe(ctx context.Context, symbol string) string {
 }
 
 func supportedMarket(sym string) bool {
-	return strings.HasPrefix(sym, "US.") || strings.HasPrefix(sym, "HK.")
+	_, perpetual := instrument.ParsePerpetual(sym)
+	return perpetual || strings.HasPrefix(sym, "US.") || strings.HasPrefix(sym, "HK.")
 }
 
 // demandForProfile builds the feed.Demand for a profile. focused adds SubBook
@@ -745,7 +747,7 @@ func demandForProfile(id, symbol, profile string) (feed.Demand, bool) {
 		return feed.WatchDemand(id, symbol), true
 	case "focused":
 		subs := []feed.SubType{feed.SubQuote, feed.SubTicker, feed.SubKL1m, feed.SubKLDay}
-		if strings.HasPrefix(symbol, "US.") {
+		if strings.HasPrefix(symbol, "US.") || instrument.IsPerpetual(symbol) {
 			subs = append(subs, feed.SubBook)
 		}
 		return feed.Demand{ID: id, Symbol: symbol, Subs: subs, Focused: true, WantsHistory: true, CachedDaily: true}, true

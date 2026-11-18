@@ -118,6 +118,9 @@ export interface Quote {
   ask: number /* float64 */;
   last: number /* float64 */;
   ts: string;
+  mark?: number /* float64 */;
+  index?: number /* float64 */;
+  fundingRate?: number /* float64 */;
 }
 export interface BookLevel {
   price: number /* float64 */;

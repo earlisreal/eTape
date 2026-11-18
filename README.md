@@ -233,7 +233,15 @@ Notes:
   official SIP band or trading-pause indicator. They warm from eligible prints,
   freeze on provider/transport interruptions, and never change order or risk
   behavior.
-- US stocks only for now — one market keeps sessions, timezones, and entitlements simple.
+
+### MEXC perpetual market data
+
+Open a Chart, Time & Sales, or DOM Ladder and type `mexc.btc.usdt` followed by Enter.
+Use the same Link Group to follow the contract in all three panels. MEXC USDT
+perpetuals use public Futures market data, UTC chart buckets and contract counts
+for volume and depth. They work during weekends and with OpenD disconnected.
+This milestone provides market data through the normal eTape launch. Perpetual
+paper trading, live execution and Chart Risk Entry require subsequent milestones.
 
 ## Connecting brokers
 

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/instrument"
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
@@ -66,6 +67,11 @@ type eligibilityState struct {
 }
 
 func (s *eligibilityState) stamp(t feed.Tick) feed.Tick {
+	if instrument.IsPerpetual(t.Symbol) {
+		valid := t.Price > 0 && t.Volume > 0
+		t.LastEligible, t.RangeEligible, t.VolumeEligible = valid, valid, valid
+		return t
+	}
 	day := session.DayMs(t.TsMs)
 	if day != s.day {
 		s.day = day

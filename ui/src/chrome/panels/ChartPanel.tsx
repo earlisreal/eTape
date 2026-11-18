@@ -25,7 +25,7 @@ import { timeframeToMs } from "../../render/chart/drawings/geometry";
 import { bucketStartMs, type Timeframe } from "../../render/chart/barBucket";
 import { aggregateFillMarkers } from "../../render/chart/fillAggregate";
 import { isIntradayTimeframe, latestEligibleCountdownBar } from "../../render/chart/barClose";
-import { formatPrice, quoteDecimals } from "../../render/format";
+import { formatPrice, marketPriceDecimals } from "../../render/format";
 import type { Palette } from "../../render/palette";
 import { useTheme } from "../ThemeProvider";
 import { useChartPreferences } from "../ChartPreferencesProvider";
@@ -871,7 +871,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       },
       paint: () => {
         const browserNowMs = Date.now();
-        const nowMs = stores.marketClock.nowMs();
+        const nowMs = currentSymbol.startsWith("PERP.") ? browserNowMs : stores.marketClock.nowMs();
         if (chartSnapshotLoaded) controller.sync(nowMs);
         refreshProfile();
         refreshExtremaRef.current?.();
@@ -897,12 +897,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         if (perf.enabled) perf.recordScan(`chart:${config.id}`, controller.lastSyncDaySegmentBuilds());
         if (chartSnapshotLoaded && usesBoundaryManagedFollow(tfRef.current)) {
           const timeframe = tfRef.current as Timeframe;
-          const marketBoundaryMs = bucketStartMs(nowMs, timeframe);
+          const marketBoundaryMs = bucketStartMs(nowMs, timeframe, currentSymbol);
           const traceKey = `${currentSymbol}|${timeframe}|${marketBoundaryMs}`;
           if (traceKey !== lastBoundaryTraceKey) {
             const rawTail = stores.bars.series(currentSymbol, timeframe).at(-1);
             const rawTailMs = rawTail ? Date.parse(rawTail.bucketStart) : NaN;
-            const browserBoundaryMs = bucketStartMs(browserNowMs, timeframe);
+            const browserBoundaryMs = bucketStartMs(browserNowMs, timeframe, currentSymbol);
             const clock = stores.marketClock.snapshot();
             uiLog.debug("chart market clock boundary", {
               symbol: currentSymbol,
@@ -1357,7 +1357,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           {/* Keep this last so React appends it after LWC's native DOM. At z-index 1,
               it must follow the base canvas while staying below the crosshair canvas (2). */}
           {showBarCloseTimer && lastPriceTag && (
-            <BarCloseTimer now={stores.marketClock.nowMs} chrome={chrome} timeframe={timeframe} price={formatPrice(lastPriceTag.price, quoteDecimals(lastPriceTag.price))} lastPriceY={lastPriceTag.y}
+            <BarCloseTimer now={chartSymbol.startsWith("PERP.") ? Date.now : stores.marketClock.nowMs}
+              symbol={chartSymbol} chrome={chrome} timeframe={timeframe} price={formatPrice(lastPriceTag.price, marketPriceDecimals(chartSymbol, lastPriceTag.price))} lastPriceY={lastPriceTag.y}
               rightAxisWidth={rightAxisWidth} paneBottom={paneOffsets[1] ?? height} up={lastPriceTag.up} />
           )}
         </> : (

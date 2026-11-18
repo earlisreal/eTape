@@ -25,7 +25,17 @@ export function isTenSecondTimerCandidateLive(candidateBucketStart: string, nowM
 // the active ET trading day, while malformed, closed-session, stale-day, and
 // excessively-future bars are ignored.
 export function latestEligibleCountdownBar(bars: readonly Bar[], tf: Timeframe, nowMs: number): Bar | null {
-  if (!isIntradayTimeframe(tf) || !Number.isFinite(nowMs) || sessionAt(nowMs) === "closed") return null;
+  if (!isIntradayTimeframe(tf) || !Number.isFinite(nowMs)) return null;
+  if (bars.at(-1)?.symbol.startsWith("PERP.")) {
+    const start = bucketStartMs(nowMs, tf, bars.at(-1)?.symbol);
+    for (let i = bars.length - 1; i >= 0; i--) {
+      const at = Date.parse(bars[i].bucketStart);
+      if (at === start) return bars[i];
+      if (at < start) break;
+    }
+    return null;
+  }
+  if (sessionAt(nowMs) === "closed") return null;
   const nowDay = etParts(nowMs);
   const currentBucketMs = tf === "10s" ? bucketStartMs(nowMs, "10s") : 0;
   const dayKey = (day: EtParts) => `${day.y}-${day.mo.toString().padStart(2, "0")}-${day.d.toString().padStart(2, "0")}`;
@@ -51,8 +61,8 @@ export function latestEligibleCountdownBar(bars: readonly Bar[], tf: Timeframe, 
 
 // Countdown target: ms until the current bar closes (wall-clock time, not tick arrival).
 // Bar close instant = bucketStartMs(now, tf) + timeframeToMs(tf); this returns close - now.
-export function remainingToBarCloseMs(tf: Timeframe, nowMs: number): number {
-  const bucketStart = bucketStartMs(nowMs, tf);
+export function remainingToBarCloseMs(tf: Timeframe, nowMs: number, symbol = ""): number {
+  const bucketStart = bucketStartMs(nowMs, tf, symbol);
   const timeframeMs = timeframeToMs(tf);
   return bucketStart + timeframeMs - nowMs;
 }

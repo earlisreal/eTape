@@ -175,6 +175,9 @@ type Quote struct {
 	High              float64
 	Low               float64
 	PrevClose         float64
+	Mark              float64
+	Index             float64
+	FundingRate       float64
 	Volume            int64
 	Turnover          float64
 	ProviderSuspended bool

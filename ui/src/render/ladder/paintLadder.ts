@@ -3,7 +3,7 @@
 // growing outward from the divider. Logical rows share one scroll offset;
 // beyond-depth LULD fallbacks occupy each side's bottom visible slot.
 import { FONTS } from "../palette";
-import { formatPrice, formatSize, quoteDecimals } from "../format";
+import { formatPrice, formatSize, marketPriceDecimals } from "../format";
 import {
   flashAlpha,
   LADDER_HEADER_H,
@@ -60,13 +60,14 @@ export function paintLadder(ctx: CanvasRenderingContext2D, s: LadderPaintState):
   ctx.font = `9.5px ${FONTS.mono}`;
   ctx.fillStyle = p.textMuted;
   ctx.textAlign = "left";
-  ctx.fillText("SIZE", PAD, headY);
+  const sizeLabel = s.symbol.startsWith("PERP.") ? "CONTRACTS" : "SIZE";
+  ctx.fillText(sizeLabel, PAD, headY);
   ctx.textAlign = "right";
   ctx.fillText("BID", mid - PAD, headY);
   ctx.textAlign = "left";
   ctx.fillText("ASK", mid + PAD, headY);
   ctx.textAlign = "right";
-  ctx.fillText("SIZE", w - PAD, headY);
+  ctx.fillText(sizeLabel, w - PAD, headY);
 
   // center divider — borderStrong per the palette's own field comment
   ctx.strokeStyle = p.borderStrong;
@@ -143,11 +144,11 @@ function drawSide(
     ctx.fillText(formatSize(row.size), PAD, midY);
     ctx.textAlign = "right";
     ctx.fillStyle = p.up;
-    ctx.fillText(formatPrice(row.price, quoteDecimals(row.price)), mid - PAD, midY);
+    ctx.fillText(formatPrice(row.price, marketPriceDecimals(s.symbol, row.price)), mid - PAD, midY);
   } else {
     ctx.textAlign = "left";
     ctx.fillStyle = p.down;
-    ctx.fillText(formatPrice(row.price, quoteDecimals(row.price)), mid + PAD, midY);
+    ctx.fillText(formatPrice(row.price, marketPriceDecimals(s.symbol, row.price)), mid + PAD, midY);
     ctx.textAlign = "right";
     ctx.fillStyle = p.text;
     ctx.fillText(formatSize(row.size), w - PAD, midY);
@@ -204,10 +205,10 @@ function drawLULDBoundary(
     ctx.textAlign = "left";
     ctx.fillText(label, PAD, midY);
     ctx.textAlign = "right";
-    ctx.fillText(formatPrice(row.price, quoteDecimals(row.price)), mid - PAD, midY);
+    ctx.fillText(formatPrice(row.price, marketPriceDecimals(s.symbol, row.price)), mid - PAD, midY);
   } else {
     ctx.textAlign = "left";
-    ctx.fillText(formatPrice(row.price, quoteDecimals(row.price)), mid + PAD, midY);
+    ctx.fillText(formatPrice(row.price, marketPriceDecimals(s.symbol, row.price)), mid + PAD, midY);
     ctx.textAlign = "right";
     ctx.fillText(label, s.width - PAD, midY);
   }
@@ -218,7 +219,7 @@ function spreadLabel(s: LadderPaintState): string {
   const bid = s.bids.find((row) => !isLULDBoundaryRow(row));
   const ask = s.asks.find((row) => !isLULDBoundaryRow(row));
   if (!bid || !ask || s.spread === null) return "";
-  return `${formatPrice(bid.price, quoteDecimals(bid.price))} × ${formatPrice(ask.price, quoteDecimals(ask.price))} · spread ${formatPrice(s.spread, quoteDecimals(Math.abs(s.spread)))}`;
+  return `${formatPrice(bid.price, marketPriceDecimals(s.symbol, bid.price))} × ${formatPrice(ask.price, marketPriceDecimals(s.symbol, ask.price))} · spread ${formatPrice(s.spread, marketPriceDecimals(s.symbol, Math.abs(s.spread)))}`;
 }
 
 function drawCentered(ctx: CanvasRenderingContext2D, s: LadderPaintState, title: string, sub?: string): void {

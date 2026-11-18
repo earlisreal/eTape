@@ -1,6 +1,10 @@
 package exec
 
-import "math"
+import (
+	"math"
+
+	"github.com/earlisreal/eTape/engine/internal/instrument"
+)
 
 // GlobalLimits caps aggregate risk across all venues. A zero value means "cap
 // not set — do not enforce".
@@ -83,6 +87,9 @@ func markOr(req OrderRequest, marks MarkSource) float64 {
 // Evaluate runs the two-layer gate. Returns (true, "") to allow, or (false,
 // reason) at the first failing rule. Pure — the Core calls it in-loop.
 func Evaluate(s *State, cfg GateConfig, req OrderRequest, marks MarkSource) (bool, string) {
+	if instrument.IsPerpetual(req.Symbol) {
+		return false, "perpetual execution is unavailable on this route"
+	}
 	// 1. master armed
 	if !s.MasterArmed {
 		return false, "master disarmed"
@@ -154,6 +161,9 @@ func Evaluate(s *State, cfg GateConfig, req OrderRequest, marks MarkSource) (boo
 // EvaluateDeferredAdmission checks the controls that do not depend on a
 // resolved share quantity. Value and resulting-position caps run at activation.
 func EvaluateDeferredAdmission(s *State, cfg GateConfig, req OrderRequest) (bool, string) {
+	if instrument.IsPerpetual(req.Symbol) {
+		return false, "perpetual execution is unavailable on this route"
+	}
 	if !s.MasterArmed {
 		return false, "master disarmed"
 	}

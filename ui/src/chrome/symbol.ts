@@ -7,11 +7,13 @@
 // dot as part of the ticker itself (BRK.B, BRK.A, BF.B, BF.A), and any
 // leading-letters-then-dot rule misclassifies them as already market-
 // qualified, leaving them unprefixed.
-const MARKET_PREFIXES = ["US.", "HK."];
+const MARKET_PREFIXES = ["US.", "HK.", "PERP."];
 
 /** Uppercase; prefix bare tickers with `US.` unless already market-qualified.
  * Allow-list (not a regex) so dotted US tickers like BRK.B aren't misread. */
 export function normalizeSymbol(raw: string): string {
   const upper = raw.toUpperCase();
+  const mexc = /^MEXC[:.]([A-Z0-9]+)[./_-]USDT$/.exec(upper);
+  if (mexc) return `PERP.MEXC.${mexc[1]}_USDT`;
   return MARKET_PREFIXES.some((p) => upper.startsWith(p)) ? upper : `US.${upper}`;
 }

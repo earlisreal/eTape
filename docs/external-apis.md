@@ -1,5 +1,13 @@
 # External API Dependencies
 
+MEXC Futures serves USDT perpetual market data through public REST and WebSocket
+endpoints. The engine qualifies contract IDs as `PERP.MEXC.<contract>`, shares
+subscriptions across panels, and uses integer native contract counts in bars
+and depth. It builds 10-second bars from individual matches, seeds intraday and
+daily history from MEXC, and resyncs depth with snapshots and contiguous depth
+commits. [MEXC Futures docs](https://www.mexc.com/api-docs/futures/integration-guide) ·
+[Depth synchronization](https://www.mexc.com/api-docs/futures/websocket-api/incremental-order-book-maintenance-mechanism)
+
 Protective-price corroboration carries OpenD's separate optional bid/ask
 server clocks and local frame receipt through execution independently of
 recording. It does not assume provider/local synchronization or NBBO coverage.

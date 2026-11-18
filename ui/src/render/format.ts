@@ -38,6 +38,13 @@ export function quoteDecimals(price: number | null | undefined, normalDecimals =
   return typeof price === "number" && Number.isFinite(price) && price > 0 && price < 1 ? 4 : normalDecimals;
 }
 
+export function marketPriceDecimals(symbol: string, price: number | undefined): number {
+  if (symbol.startsWith("PERP.") && price !== undefined && Number.isFinite(price)) {
+    return Math.max(2, axisDecimals(price));
+  }
+  return quoteDecimals(price);
+}
+
 // Module-level Intl formatter singletons. These surfaces (ladder, tape) call
 // their formatXxx helper on every visible row on every paint -- up to a few
 // hundred calls/sec during active trading -- and constructing an

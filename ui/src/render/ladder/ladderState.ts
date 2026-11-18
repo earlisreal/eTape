@@ -75,9 +75,9 @@ export function depthFraction(value: number, max: number): number {
   return max <= 0 ? 0 : value / max;
 }
 
-/** Depth rendering is currently enabled for U.S. symbols; every other market renders the no-depth state. */
+/** Depth rendering requires a market that supplies book updates. */
 export function entitledForDepth(symbol: string): boolean {
-  return symbol.startsWith("US.");
+  return symbol.startsWith("US.") || symbol.startsWith("PERP.MEXC.");
 }
 
 export function normalizeLadderLevels(value: unknown): number {

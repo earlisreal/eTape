@@ -5,6 +5,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/instrument"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
@@ -255,7 +256,11 @@ func mapAccountUpdate(u exec.AccountUpdate) wsmsg.AccountRow {
 }
 
 func mapQuote(q feed.Quote, bid, ask float64) wsmsg.Quote {
-	return wsmsg.Quote{Symbol: q.Symbol, Bid: bid, Ask: ask, Last: q.Last, Ts: isoMs(q.TsMs)}
+	wire := wsmsg.Quote{Symbol: q.Symbol, Bid: bid, Ask: ask, Last: q.Last, Ts: isoMs(q.TsMs), Mark: q.Mark, Index: q.Index}
+	if instrument.IsPerpetual(q.Symbol) {
+		wire.FundingRate = &q.FundingRate
+	}
+	return wire
 }
 
 func mapBook(b feed.Book) wsmsg.Book {

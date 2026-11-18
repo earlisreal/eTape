@@ -5,11 +5,14 @@ import "encoding/json"
 // ---- market-data payloads (timestamps are ISO-8601 UTC strings) ----
 
 type Quote struct {
-	Symbol string  `json:"symbol"`
-	Bid    float64 `json:"bid"`
-	Ask    float64 `json:"ask"`
-	Last   float64 `json:"last"`
-	Ts     string  `json:"ts"`
+	Symbol      string   `json:"symbol"`
+	Bid         float64  `json:"bid"`
+	Ask         float64  `json:"ask"`
+	Last        float64  `json:"last"`
+	Ts          string   `json:"ts"`
+	Mark        float64  `json:"mark,omitempty"`
+	Index       float64  `json:"index,omitempty"`
+	FundingRate *float64 `json:"fundingRate,omitempty"`
 }
 
 type BookLevel struct {

@@ -3,7 +3,7 @@ import type { AutoscaleInfo } from "lightweight-charts";
 import type { Palette } from "../palette";
 import { overlapVolumeColor } from "./volumeColor";
 import type { Bar } from "../../wire/contract";
-import { quoteDecimals, QUOTE_DECIMALS } from "../format";
+import { marketPriceDecimals, QUOTE_DECIMALS } from "../format";
 import {
   chartOptions, candleOptions, volumeOptions, mainSeriesOptions, CANDLE_SCALE_MARGINS,
   CANDLE_SCALE_MARGINS_WITHOUT_VOLUME, CANDLE_SCALE_MARGINS_WITH_OVERLAP, NO_VOLUME_SCALE_MARGINS, VOLUME_SCALE_MARGINS,
@@ -195,8 +195,9 @@ export class ChartController {
   sync(nowMs = Date.now()): void {
     this.daySegmentBuildsThisSync = 0;
     const bars = this.deps.bars.series(this.config.symbol, this.config.timeframe);
-    this.applyPriceFormat(quoteDecimals(latestValidClose(bars)));
-    const openDDown = this.deps.isOpenDDown?.() === true;
+    this.applyPriceFormat(marketPriceDecimals(this.config.symbol, latestValidClose(bars)));
+    const perpetual = this.config.symbol.startsWith("PERP.");
+    const openDDown = !perpetual && this.deps.isOpenDDown?.() === true;
     if (this.config.timeframe === "10s") {
       if (openDDown) {
         if (!this.noTradeSuspended) {
@@ -211,7 +212,7 @@ export class ChartController {
       }
     }
     const displayBars = this.config.timeframe === "10s"
-      ? fillEmptyTenSecondSlots(bars, nowMs, openDDown || this.noTradeSuspended)
+      ? fillEmptyTenSecondSlots(bars, nowMs, perpetual || openDDown || this.noTradeSuspended)
       : bars;
     this.applyBars(displayBars, bars, nowMs);
     this.syncPostMarketLine(nowMs, bars.length > 0);
@@ -223,7 +224,7 @@ export class ChartController {
   }
 
   private syncPostMarketLine(nowMs: number, hasDailyBars: boolean): void {
-    if (this.config.timeframe !== "D" || !hasDailyBars) {
+    if (this.config.timeframe !== "D" || !hasDailyBars || this.config.symbol.startsWith("PERP.")) {
       this.clearPostMarketLine();
       return;
     }
@@ -875,7 +876,10 @@ export class ChartController {
   // every edge a real bar time on every timeframe.
   private applySessions(bars: Bar[]): void {
     const intraday = !["D", "W", "M"].includes(this.config.timeframe);
-    if (!intraday || bars.length === 0 || !this.showSessions) { this.facade.setSessionBands([]); return; }
+    if (!intraday || bars.length === 0 || !this.showSessions || this.config.symbol.startsWith("PERP.")) {
+      this.facade.setSessionBands([]);
+      return;
+    }
     // bandsCache is refreshed (by refreshBarCaches, from sync()) to always match
     // what bandsFromBars(bars) would produce from scratch — see the equivalence
     // tests in ChartController.test.ts. bandsFromBars itself is kept below,
@@ -1326,6 +1330,12 @@ export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number, openDDown = 
   };
 
   const addDataGap = (base: Bar, fromMs: number, limitMs: number) => {
+    if (base.symbol.startsWith("PERP.")) {
+      if (fromMs + 10_000 < limitMs) {
+        out.push({ ...base, bucketStart: new Date(fromMs + 10_000).toISOString(), inProgress: false, dataGap: true });
+      }
+      return;
+    }
     const session = sessionAt(fromMs);
     if (session === "closed") return;
     for (let ms = fromMs + 10_000; ms < limitMs; ms += 10_000) {

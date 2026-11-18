@@ -52,7 +52,15 @@ function etMidnightForDate(guessMs: number, targetY: number, targetMo: number, t
 
 const ANCHOR_SECS = 9 * 3600 + 30 * 60; // 09:30 ET session anchor
 
-export function bucketStartMs(tsMs: number, tf: Timeframe): number {
+export function bucketStartMs(tsMs: number, tf: Timeframe, symbol = ""): number {
+  if (symbol.startsWith("PERP.")) {
+    const d = new Date(tsMs);
+    if (tf === "D") return Math.floor(tsMs / 86_400_000) * 86_400_000;
+    if (tf === "W") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - (d.getUTCDay() + 6) % 7);
+    if (tf === "M") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+    const span = tf.endsWith("s") ? Number.parseInt(tf, 10) * 1000 : Number.parseInt(tf, 10) * 60_000;
+    return Math.floor(tsMs / span) * span;
+  }
   const midnight = etMidnightMs(tsMs);
   const secsIntoDay = Math.floor((tsMs - midnight) / 1000);
 

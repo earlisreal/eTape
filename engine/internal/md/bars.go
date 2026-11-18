@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/instrument"
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
@@ -140,7 +141,9 @@ func (e *barEngine) sym(symbol string) *symbolBars {
 
 func (e *barEngine) markGaps() {
 	for _, sb := range e.symbols {
-		sb.gapPending = true
+		if !instrument.IsPerpetual(sb.symbol) {
+			sb.gapPending = true
+		}
 	}
 }
 
@@ -182,7 +185,7 @@ func (e *barEngine) applyTicks(c *Core, ticks []feed.Tick) {
 	sb := e.sym(ticks[0].Symbol)
 	for _, t := range ticks {
 		c.recordTick(t, true, sb.agg10.finalizedAfter >= 0 && sb.agg10.finalizedAfter >= session.BucketStartMs(t.TsMs, session.TF10s), sb.shadow.finalizedAfter >= 0 && sb.shadow.finalizedAfter >= session.BucketStartMs(t.TsMs, session.TF1m))
-		if day := session.DayMs(t.TsMs); day != sb.curDay {
+		if day := marketBucket(t.Symbol, t.TsMs, session.TFDay); day != sb.curDay {
 			sb.curDay = day
 			sb.shadowFinals = make(map[int64]Bar)
 			sb.compared = make(map[int64]bool)
@@ -517,6 +520,9 @@ func (e *barEngine) cascade(c *Core, sb *symbolBars, m int64) {
 		span, _ := session.IntradaySpanSecs(tf)
 		spanMs := span * 1000
 		hb := session.BucketStartMsAnchored(m, tf, e.anchorSecs)
+		if instrument.IsPerpetual(sb.symbol) {
+			hb = session.ContinuousBucketStartMs(m, tf)
+		}
 		members := oneM.rangeBars(hb, hb+spanMs)
 		if len(members) == 0 {
 			continue
@@ -532,7 +538,7 @@ func (e *barEngine) cascade(c *Core, sb *symbolBars, m int64) {
 // deriveDaily maintains the live derived daily bar (always in-progress —
 // official K_DAY bars are fetched, never aggregated, and replace it).
 func (e *barEngine) deriveDaily(c *Core, sb *symbolBars, m int64) {
-	day := session.BucketStartMs(m, session.TFDay)
+	day := marketBucket(sb.symbol, m, session.TFDay)
 	if sb.dailyOfficial[day] {
 		return
 	}
@@ -579,11 +585,11 @@ func (e *barEngine) deriveWM(c *Core, sb *symbolBars, day int64) {
 	daily := sb.series[session.TFDay]
 	newest := daily.maxBucket()
 	for _, tf := range []session.Timeframe{session.TFWeek, session.TFMonth} {
-		hb := session.BucketStartMs(day, tf)
+		hb := marketBucket(sb.symbol, day, tf)
 		var members []Bar
 		anyInProgress := false
 		for _, d := range daily.bars {
-			if session.BucketStartMs(d.BucketMs, tf) == hb {
+			if marketBucket(sb.symbol, d.BucketMs, tf) == hb {
 				members = append(members, d)
 				anyInProgress = anyInProgress || d.InProgress
 			}
@@ -592,7 +598,7 @@ func (e *barEngine) deriveWM(c *Core, sb *symbolBars, day int64) {
 			continue
 		}
 		nb := foldBars(sb.symbol, tf, hb, members)
-		nb.InProgress = anyInProgress || session.BucketStartMs(newest, tf) == hb
+		nb.InProgress = anyInProgress || marketBucket(sb.symbol, newest, tf) == hb
 		if sb.series[tf].upsert(nb) {
 			c.barOut(nb)
 		}
