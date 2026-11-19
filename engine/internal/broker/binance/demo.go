@@ -128,7 +128,7 @@ func (a *demoAPI) request(ctx context.Context, method, path string, params url.V
 		}
 	}
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("Binance Futures Demo HTTP %d", res.StatusCode)
+		return fmt.Errorf("unexpected HTTP %d from Binance Futures Demo", res.StatusCode)
 	}
 	if bytes.Equal(bytes.TrimSpace(body), []byte("null")) || json.Unmarshal(body, out) != nil {
 		return errors.New("invalid Binance Futures Demo response")

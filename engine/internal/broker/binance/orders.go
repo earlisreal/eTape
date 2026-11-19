@@ -110,7 +110,7 @@ func (a *demoAPI) Prepare(ctx context.Context, req exec.OrderRequest) (func(cont
 		values.Set("price", strconv.FormatFloat(req.LimitPrice, 'f', -1, 64))
 		values.Set("timeInForce", req.TIF.String())
 	default:
-		return nil, errors.New("Binance Futures Demo supports market and limit orders")
+		return nil, errors.New("use a market or limit order for Binance Futures Demo")
 	}
 	if err := a.checkPosition(ctx, req, terms, id.Native, buy, reduce); err != nil {
 		return nil, err
@@ -155,7 +155,7 @@ func (a *demoAPI) checkPosition(ctx context.Context, req exec.OrderRequest, term
 	}
 	if reduce {
 		if held == 0 || buy != (held < 0) || req.Qty > math.Abs(held) {
-			return errors.New("Binance Futures Demo close must reduce the confirmed position")
+			return errors.New("close quantity must reduce the confirmed Binance Futures Demo position")
 		}
 		return nil
 	}
@@ -269,7 +269,7 @@ func (a *demoAPI) Observe(ctx context.Context, req exec.OrderRequest) (exec.Perp
 		report.Fills = append(report.Fills, exec.PerpetualFill{ID: fillID, Qty: float64(qty), Price: price, TsMs: trade.Time})
 	}
 	if sum != filled {
-		return report, errors.New("Binance Futures Demo fills do not yet reconcile with the order")
+		return report, errors.New("waiting for Binance Futures Demo fills to reconcile with the order")
 	}
 	slices.SortFunc(report.Fills, func(a, b exec.PerpetualFill) int { return cmp.Compare(a.TsMs, b.TsMs) })
 	return report, nil
