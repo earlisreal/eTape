@@ -278,7 +278,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
       >
         <span style={{ position: "absolute", left: columnLayout.priceLeft, top: "50%", transform: "translateY(-50%)" }}>Price</span>
         <span style={{ position: "absolute", right: width - columnLayout.sizeRight, top: "50%", transform: "translateY(-50%)" }}>
-          {displaySymbol.startsWith("PERP.") ? "Contracts" : "Size"}
+          {displaySymbol.startsWith("PERP.MEXC.") ? "Contracts" : displaySymbol.startsWith("PERP.") ? "Base qty" : "Size"}
         </span>
         {columnLayout.showTime && (
           <span style={{ position: "absolute", right: width - columnLayout.timeRight!, top: "50%", transform: "translateY(-50%)" }}>Time</span>

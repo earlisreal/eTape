@@ -344,7 +344,7 @@ func (s *Stream) handle(ctx context.Context, active map[subscription]bool, books
 				contract = &rules
 			}
 			s.emit(ctx, feed.QuoteEvent{Quote: feed.Quote{Symbol: symbol, TsMs: t.Time, Last: t.Last, High: t.High, Low: t.Low,
-				Volume: qty, Turnover: t.Turnover, Mark: t.Mark, Index: t.Index, FundingRate: t.Funding,
+				Volume: qty, Turnover: t.Turnover, Mark: t.Mark, Index: t.Index, FundingRate: t.Funding, FundingKnown: true,
 				NextFundingMs: s.client.nextFunding(ctx, m.Symbol), Contract: contract}})
 		}
 	case "push.depth":

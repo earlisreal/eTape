@@ -138,9 +138,10 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
   // moomoo's own probe result, session-local (never persisted) — null until
   // "Check OpenD" is clicked, or after Enable materializes the venue.
   const [moomooProbe, setMoomooProbe] = useState<TestConnectionResult | null>(null);
-  const [mexcKey, setMexcKey] = useState("");
-  const [mexcSecret, setMexcSecret] = useState("");
-  const [mexcTest, setMexcTest] = useState<TestState>({ status: "idle" });
+  const [futuresKey, setFuturesKey] = useState("");
+  const [futuresSecret, setFuturesSecret] = useState("");
+  const [futuresTest, setFuturesTest] = useState<TestState>({ status: "idle" });
+  const [cryptoCheck, setCryptoCheck] = useState<"mexc" | "binance" | "bingx">("mexc");
   const [moomooProbing, setMoomooProbing] = useState(false);
   const [moomooSelectedAccount, setMoomooSelectedAccount] = useState("");
 
@@ -600,22 +601,31 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
           </>}
         </div>
       </div>
-      <div className="broker-card">
-        <CardHeader title="MEXC Futures API Check" />
+      <div className="broker-card" data-testid="futures-api-check">
+        <CardHeader title="Futures API Check" />
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: 12 }}>
-          <label>API key <input className="field" autoComplete="off" value={mexcKey} onChange={e => setMexcKey(e.target.value)} /></label>
-          <label>API secret <input className="field" type="password" autoComplete="off" value={mexcSecret} onChange={e => setMexcSecret(e.target.value)} /></label>
-          <Button disabled={!mexcKey.trim() || !mexcSecret.trim() || mexcTest.status === "testing"} onClick={() => {
-            setMexcTest({ status: "testing" });
-            void commands.sendCommand("TestConnection", { broker: "mexc", env: "live", keyId: mexcKey.trim(), secretKey: mexcSecret.trim(), credentials: "", accountId: "" })
+          <label>Exchange <select className="field" value={cryptoCheck} disabled={futuresTest.status === "testing"} onChange={e => {
+            const value = e.target.value;
+            setCryptoCheck(value === "binance" || value === "bingx" ? value : "mexc");
+            setFuturesKey("");
+            setFuturesSecret("");
+            setFuturesTest({ status: "idle" });
+          }}>
+            <option value="mexc">MEXC</option><option value="binance">Binance</option><option value="bingx">BingX</option>
+          </select></label>
+          <label>API key <input className="field" autoComplete="off" value={futuresKey} onChange={e => setFuturesKey(e.target.value)} /></label>
+          <label>API secret <input className="field" type="password" autoComplete="off" value={futuresSecret} onChange={e => setFuturesSecret(e.target.value)} /></label>
+          <Button disabled={!futuresKey.trim() || !futuresSecret.trim() || futuresTest.status === "testing"} onClick={() => {
+            setFuturesTest({ status: "testing" });
+            void commands.sendCommand("TestConnection", { broker: cryptoCheck, env: "live", keyId: futuresKey.trim(), secretKey: futuresSecret.trim(), credentials: "", accountId: "" })
               .then(ack => {
                 const result = ack.value as TestConnectionResult | undefined;
-                setMexcTest({ status: result?.ok ? "ok" : "fail", message: result?.message ?? ack.reason ?? "Account check failed." });
+                setFuturesTest({ status: result?.ok ? "ok" : "fail", message: result?.message ?? ack.reason ?? "Account check failed." });
               })
-              .catch(() => setMexcTest({ status: "fail", message: "Account check failed." }))
-              .finally(() => setMexcSecret(""));
-          }}>{mexcTest.status === "testing" ? "Checking…" : "Check read access"}</Button>
-          {mexcTest.message && <span role="status">{mexcTest.message}</span>}
+              .catch(() => setFuturesTest({ status: "fail", message: "Account check failed." }))
+              .finally(() => setFuturesSecret(""));
+          }}>{futuresTest.status === "testing" ? "Checking…" : "Check read access"}</Button>
+          {futuresTest.message && <span role="status">{futuresTest.message}</span>}
         </div>
       </div>
 

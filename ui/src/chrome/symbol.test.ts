@@ -8,6 +8,8 @@ describe("normalizeSymbol", () => {
     expect(normalizeSymbol("mexc:btc/usdt")).toBe("PERP.MEXC.BTC_USDT");
     expect(normalizeSymbol("mexc.btc.usdt")).toBe("PERP.MEXC.BTC_USDT");
     expect(normalizeSymbol("perp.mexc.eth_usdt")).toBe("PERP.MEXC.ETH_USDT");
+    expect(normalizeSymbol("binance:btc/usdt")).toBe("PERP.BINANCE.BTCUSDT");
+    expect(normalizeSymbol("bingx.btc.usdt")).toBe("PERP.BINGX.BTC-USDT");
     expect(normalizeSymbol("btcusdt")).toBe("US.BTCUSDT");
   });
   it("US-prefixes a dotted ticker rather than treating the dot as a market", () =>

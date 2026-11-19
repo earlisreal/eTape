@@ -120,6 +120,30 @@ and there is no runtime fetch or name-based Tier 2 fallback. Moomoo's
 and [security status values](https://openapi.moomoo.com/moomoo-api-doc/en/quote/quote.html)
 are provider signals only.
 
+## USDT perpetual exchanges
+
+The perpetual router sends history and subscriptions to each instrument's
+exchange and preserves its native symbol in stored observations. Binance uses
+USDⓈ-M exchange information and candles, market streams for aggregate trades,
+mark and one-minute candles, and public partial-depth snapshots. BingX uses
+the swap catalog, trading-schedule exclusions, candles, and the public swap
+socket's trade, mark, one-minute candle and depth snapshots. Binance and BingX
+archive fractional base quantities as integers at a fixed 10⁻⁸ scale. eTape
+decodes them for display at the WebSocket boundary. MEXC sizes remain native
+contracts. Depth snapshots replace the board, and reconnects mark gaps in tape.
+[Binance USDⓈ-M market data](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/market-data)
+· [BingX swap market reference](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-market/api-reference.md)
+
+The MEXC Futures REST write and reconciliation code is covered by HTTP fixtures.
+It signs the exact POST body, checks one-way isolated terms, sends reduce-only
+closes, and reconciles ambiguous entries by external ID. Protection evidence
+requires a matching active fair-price market stop on the filled position. The
+Settings probe uses the read-only account snapshot. Binance and BingX Settings
+checks sign their USDT balance and position-mode reads. Live routing and exchange
+verification remain pending. [MEXC signing](https://www.mexc.com/api-docs/futures/integration-guide)
+· [Order placement](https://www.mexc.com/api-docs/futures/account-and-trading-endpoints/place-order)
+· [Active TP/SL records](https://www.mexc.com/api-docs/futures/account-and-trading-endpoints/get-current-take-profitstop-loss-order-list)
+
 ## Research-only alternatives
 
 Tiger, Polygon, Finnhub, Alpha Vantage, FMP, Benzinga-class feeds, and direct EDGAR/press-wire ingestion were evaluated only. No production runtime depends on them. Historical research remains at `41aa9993777cab4ea59e711775094c516032ebf2^:docs/`.

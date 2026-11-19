@@ -35,6 +35,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/creds"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/feed/linearperp"
 	"github.com/earlisreal/eTape/engine/internal/feed/mexc"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	"github.com/earlisreal/eTape/engine/internal/health"
@@ -792,12 +793,20 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			tail = fd // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
 		}
 	}
+	var router perpetualFeedRouter
 	if !*demo {
 		stream := mexc.NewStream(mexcAPI)
-		recordingProducers.Go(func() { stream.Run(ctx) })
-		pipeWG.Add(1)
-		go pipe(ctx, &pipeWG, stream.Events(), core)
-		router := perpetualFeedRouter{stocks: feedForHub, mexcAPI: mexcAPI, mexc: stream, archived: st.HasArchivedSymbol}
+		binance, bingx := linearperp.NewBinance(), linearperp.NewBingX()
+		router = perpetualFeedRouter{stocks: feedForHub, archived: st.HasArchivedSymbol, sources: []perpetualSource{
+			{exchange: mexc.Exchange, api: mexcAPI, stream: stream},
+			{exchange: linearperp.Binance, api: binance, stream: linearperp.NewStream(binance)},
+			{exchange: linearperp.BingX, api: bingx, stream: linearperp.NewStream(bingx)},
+		}}
+		for _, source := range router.sources {
+			recordingProducers.Go(func() { source.stream.Run(ctx) })
+			pipeWG.Add(1)
+			go pipe(ctx, &pipeWG, source.stream.Events(), core)
+		}
 		hub.SetFeed(router)
 		if fd, ok := feedForHub.(*opend.OpenDFeed); ok {
 			execCore.Do(exec.ConfigureHeldDemand{Demand: engineHeldDemand{feed: router, wait: fd.WaitTickerActive,
@@ -909,7 +918,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		}()
 	}
 	if mexcAPI != nil {
-		prepareChart = perpetualHistory(ctx, mexcAPI, core, st, &backfillWG, prepareChart)
+		prepareChart = perpetualHistory(ctx, router, core, st, &backfillWG, prepareChart)
 	}
 	hub.SetHistoryWarm(prepareChart, warmArchive)
 	if fd, ok := feedForHub.(*opend.OpenDFeed); ok && st != nil && !cfg.Backfill.Enabled {

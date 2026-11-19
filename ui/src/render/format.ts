@@ -57,6 +57,7 @@ export function marketPriceDecimals(symbol: string, price: number | undefined): 
 // refresh rate. Options must exactly match the toLocaleString*/toLocaleTimeString
 // calls they replace so output is byte-identical.
 const SIZE_FMT = new Intl.NumberFormat("en-US");
+const ASSET_SIZE_FMT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
 // toLocaleTimeString implicitly defaults to hour/minute/second fields; a bare
 // Intl.DateTimeFormat with no date-or-time fields specified defaults to a
 // date-only format instead (verified: {hour12:false, timeZone} alone formats
@@ -73,6 +74,11 @@ const ET_DATE_TIME_FMT = new Intl.DateTimeFormat("en-US", {
 /** Integer share sizes with thousands separators: 12345 → "12,345". */
 export function formatSize(size: number): string {
   return SIZE_FMT.format(Math.round(size));
+}
+
+export function formatMarketSize(size: number, symbol: string): string {
+  return (symbol.startsWith("PERP.BINANCE.") || symbol.startsWith("PERP.BINGX.")) ?
+    ASSET_SIZE_FMT.format(size) : formatSize(size);
 }
 
 // date.toLocaleTimeString() on an invalid Date returns the string "Invalid

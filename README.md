@@ -234,11 +234,13 @@ Notes:
   freeze on provider/transport interruptions, and never change order or risk
   behavior.
 
-### MEXC perpetual market data
+### USDT perpetuals
 
 Open a Chart, Time & Sales, DOM Ladder, or Order Ticket. Use **Browse USDT perpetuals**
-next to the panel's symbol to search the MEXC market list, or type `mexc.btc.usdt`
-followed by Enter.
+next to the symbol to search MEXC, Binance USDⓈ-M, or BingX. You can also type
+`mexc.btc.usdt`, `binance.btc.usdt`, or `bingx.btc.usdt` followed by Enter.
+Binance and BingX supply candles, tape and depth. Binance tape displays the
+venue's aggregate trades. Binance and BingX display fractional base-asset sizes.
 Use the same Link Group to follow the contract in all three panels. MEXC USDT
 perpetuals use public Futures market data, UTC chart buckets and contract counts
 for volume and depth. They work during weekends and with OpenD disconnected.
@@ -257,9 +259,11 @@ stop. eTape waits for the last trade to trigger a price-capped IOC entry. The
 simulator holds a fair-price stop for the filled contracts. Paper positions and
 stops are stored alongside the local eTape database for restart recovery.
 Simulated funding uses the last observed rate and the published settlement time.
-The MEXC Futures account check in Settings verifies USDT balance access, shows
-position mode, and counts open positions, working orders and active TP/SL orders.
-Exchange live execution and forced liquidation modeling remain pending.
+**Futures API Check** in Settings verifies USDT balance access and position mode
+for MEXC, Binance and BingX. MEXC also reports counts for open positions, working
+orders and active TP/SL orders.
+eTape routes crypto orders to the MEXC paper venue. Live execution and forced
+liquidation modeling remain pending.
 
 ## Connecting brokers
 

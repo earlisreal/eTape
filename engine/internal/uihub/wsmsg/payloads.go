@@ -33,7 +33,7 @@ type PerpetualContract struct {
 
 type BookLevel struct {
 	Price float64 `json:"price"`
-	Size  int64   `json:"size"`
+	Size  float64 `json:"size"`
 }
 
 type EstimatedLULD struct {
@@ -57,7 +57,7 @@ type Book struct {
 type Tick struct {
 	Symbol          string                   `json:"symbol"`
 	Price           float64                  `json:"price"`
-	Size            int64                    `json:"size"`
+	Size            float64                  `json:"size"`
 	Direction       TickDirection            `json:"direction"`
 	TransactionType TickTransactionType      `json:"transactionType"`
 	Significance    SignificanceLevel        `json:"significance"`
@@ -92,7 +92,7 @@ type Bar struct {
 	H           float64 `json:"h"`
 	L           float64 `json:"l"`
 	C           float64 `json:"c"`
-	V           int64   `json:"v"`
+	V           float64 `json:"v"`
 	InProgress  bool    `json:"inProgress"`
 	Gap         bool    `json:"gap,omitempty"`
 	VolumeOnly  bool    `json:"volumeOnly,omitempty"`

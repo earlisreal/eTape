@@ -180,6 +180,7 @@ type Quote struct {
 	Mark              float64
 	Index             float64
 	FundingRate       float64
+	FundingKnown      bool
 	NextFundingMs     int64
 	Contract          *instrument.ContractRules
 	Volume            int64

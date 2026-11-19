@@ -118,6 +118,27 @@ func (p *Prober) TestConnection(ctx context.Context, broker, env, credName, keyI
 		return p.testTradeZero(ctx, cr)
 	case "moomoo":
 		return p.testMoomoo(ctx, env, accountID)
+	case "binance", "bingx":
+		if env != "" && env != "live" {
+			return Result{Message: "Select the Futures production account check."}
+		}
+		cr, ok := p.resolveCreds(credName, keyID, secretKey)
+		if !ok {
+			return Result{Message: "Futures API key and secret are required."}
+		}
+		probe := binanceProbe
+		if broker == "bingx" {
+			probe = bingXProbe
+		}
+		oneWay, err := probe.inspect(ctx, p.clk, cr)
+		if err != nil {
+			return Result{Message: err.Error()}
+		}
+		mode := "hedge mode"
+		if oneWay {
+			mode = "one-way mode"
+		}
+		return Result{OK: true, Env: "live", Message: "USDT Futures balance read verified · " + mode}
 	case "mexc":
 		cr, ok := p.resolveCreds(credName, keyID, secretKey)
 		if !ok {

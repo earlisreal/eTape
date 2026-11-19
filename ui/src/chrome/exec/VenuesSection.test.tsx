@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
 import { VenuesSection } from "./VenuesSection";
@@ -74,6 +74,25 @@ function execStatusFor(venues: ExecStatus["venues"]): ExecStatus {
 }
 
 describe("VenuesSection — Simulator card", () => {
+  it("checks Binance and BingX Futures reads under their own exchange credentials", async () => {
+    const commands = makeCommands([baseSetup()], { TestConnection: testAck(okResult({ env: "live", message: "Futures read verified" })) });
+    wrap(commands);
+    const card = within(await screen.findByTestId("futures-api-check"));
+    const picker = card.getByLabelText("Exchange");
+    const field = (name: string) => card.getByLabelText(name, { exact: true });
+    for (const exchange of ["binance", "bingx"]) {
+      fireEvent.change(picker, { target: { value: exchange } });
+      fireEvent.change(field("API key"), { target: { value: `${exchange}-key` } });
+      fireEvent.change(field("API secret"), { target: { value: `${exchange}-secret` } });
+      fireEvent.click(card.getByRole("button", { name: "Check read access" }));
+      await waitFor(() => expect(commands.sent).toContainEqual({
+        name: "TestConnection",
+        args: { broker: exchange, env: "live", keyId: `${exchange}-key`, secretKey: `${exchange}-secret`, credentials: "", accountId: "" },
+      }));
+      await card.findByText("Futures read verified");
+    }
+  });
+
   it("saves the MEXC paper venue with a USDT risk gate", async () => {
     const commands = makeCommands([baseSetup()]);
     wrap(commands);

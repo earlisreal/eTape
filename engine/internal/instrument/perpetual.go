@@ -5,6 +5,17 @@ import "strings"
 
 const PerpetualPrefix = "PERP."
 
+// The Binance and BingX feeds archive integer units of 10⁻⁸ base assets.
+// The fixed scale keeps older recordings readable after venue rule changes.
+const BaseQuantityScale = 100_000_000
+
+func DisplayQuantity(symbol string, raw int64) float64 {
+	if strings.HasPrefix(symbol, "PERP.BINANCE.") || strings.HasPrefix(symbol, "PERP.BINGX.") {
+		return float64(raw) / BaseQuantityScale
+	}
+	return float64(raw)
+}
+
 func IsPerpetual(symbol string) bool {
 	return strings.HasPrefix(symbol, PerpetualPrefix)
 }

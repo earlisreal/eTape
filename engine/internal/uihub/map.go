@@ -262,7 +262,7 @@ func mapAccountUpdate(u exec.AccountUpdate) wsmsg.AccountRow {
 
 func mapQuote(q feed.Quote, bid, ask float64) wsmsg.Quote {
 	wire := wsmsg.Quote{Symbol: q.Symbol, Bid: bid, Ask: ask, Last: q.Last, Ts: isoMs(q.TsMs), Mark: q.Mark, Index: q.Index}
-	if instrument.IsPerpetual(q.Symbol) {
+	if q.FundingKnown || q.NextFundingMs > 0 {
 		wire.FundingRate = &q.FundingRate
 		wire.NextFundingMs = q.NextFundingMs
 	}
@@ -276,11 +276,11 @@ func mapQuote(q feed.Quote, bid, ask float64) wsmsg.Quote {
 func mapBook(b feed.Book) wsmsg.Book {
 	bids := make([]wsmsg.BookLevel, len(b.Bids))
 	for i, l := range b.Bids {
-		bids[i] = wsmsg.BookLevel{Price: l.Price, Size: l.Volume}
+		bids[i] = wsmsg.BookLevel{Price: l.Price, Size: instrument.DisplayQuantity(b.Symbol, l.Volume)}
 	}
 	asks := make([]wsmsg.BookLevel, len(b.Asks))
 	for i, l := range b.Asks {
-		asks[i] = wsmsg.BookLevel{Price: l.Price, Size: l.Volume}
+		asks[i] = wsmsg.BookLevel{Price: l.Price, Size: instrument.DisplayQuantity(b.Symbol, l.Volume)}
 	}
 	return wsmsg.Book{Symbol: b.Symbol, Bids: bids, Asks: asks, Ts: isoMs(b.TsMs)}
 }
@@ -294,7 +294,7 @@ func mapEstimatedLULD(v md.EstimatedLULD) wsmsg.EstimatedLULD {
 
 func mapTick(t feed.Tick, level wsmsg.SignificanceLevel) wsmsg.Tick {
 	return wsmsg.Tick{
-		Symbol: t.Symbol, Price: t.Price, Size: t.Volume, Direction: dirToWire(t.Dir),
+		Symbol: t.Symbol, Price: t.Price, Size: instrument.DisplayQuantity(t.Symbol, t.Volume), Direction: dirToWire(t.Dir),
 		TransactionType: transactionTypeToWire(t.Type), Significance: level,
 		Condition: conditionToWire(t.Condition), RawType: t.RawType, RawTypeSign: t.TypeSign,
 		DeliverySource: deliverySourceToWire(t.Delivery), RangeEligible: t.RangeEligible,
@@ -305,7 +305,7 @@ func mapTick(t feed.Tick, level wsmsg.SignificanceLevel) wsmsg.Tick {
 func mapBar(b md.Bar) wsmsg.Bar {
 	return wsmsg.Bar{
 		Symbol: b.Symbol, Timeframe: string(b.TF), BucketStart: isoMs(b.BucketMs),
-		O: b.O, H: b.H, L: b.L, C: b.C, V: b.V, InProgress: b.InProgress, Gap: b.Gap,
+		O: b.O, H: b.H, L: b.L, C: b.C, V: instrument.DisplayQuantity(b.Symbol, b.V), InProgress: b.InProgress, Gap: b.Gap,
 		VolumeOnly: b.VolumeOnly,
 	}
 }

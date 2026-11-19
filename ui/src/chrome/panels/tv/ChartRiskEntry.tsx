@@ -386,6 +386,10 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 push({ level: "warn", text: "Choose a Chart Risk Entry preset for the chart's instrument type." });
                 return;
             }
+            if (detail.template.perpetual && !p.symbol.startsWith("PERP.MEXC.")) {
+                push({ level: "warn", text: "Chart Risk Entry is available for MEXC paper perpetuals." });
+                return;
+            }
             clear();
             hover = lastPoint;
             draft = { template: detail.template, sharedEntryId: protection().owner?.id ?? "", complete: false, busy: false, unknown: false, maxQty: 0 };

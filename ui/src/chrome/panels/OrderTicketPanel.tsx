@@ -229,8 +229,10 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   if (symbol.startsWith("PERP.")) {
     return <div style={{ display: "grid", gap: 6, padding: 6, color: palette.text, fontSize: 12 }}>
       {actionsSlot === undefined ? headerActions : actionsSlot ? createPortal(headerActions, actionsSlot) : null}
-      <PerpetualTicket key={`${venue}/${symbol}`} symbol={symbol} venue={venue} routeReady={venueStatus?.broker === "mexc-sim"}
-        quote={quote} positionQty={positionQty} submit={(args, label) => { void oc.submit(args, label); }} />
+      {symbol.startsWith("PERP.MEXC.") ?
+        <PerpetualTicket key={`${venue}/${symbol}`} symbol={symbol} venue={venue} routeReady={venueStatus?.broker === "mexc-sim"}
+          quote={quote} positionQty={positionQty} submit={(args, label) => { void oc.submit(args, label); }} /> :
+        <span>{symbol.split(".")[1]} perpetuals are available for market data.</span>}
     </div>;
   }
 

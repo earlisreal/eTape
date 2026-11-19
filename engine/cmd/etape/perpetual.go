@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
-	"github.com/earlisreal/eTape/engine/internal/feed/mexc"
 	"github.com/earlisreal/eTape/engine/internal/instrument"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/session"
@@ -16,20 +16,64 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 )
 
+type perpetualAPI interface {
+	Validate(context.Context, string) error
+	PerpetualMarkets(context.Context) ([]instrument.PerpetualMarket, error)
+	History(context.Context, string, feed.Resolution) ([]feed.Bar, error)
+}
+
+type perpetualStream interface {
+	Ensure(feed.Demand)
+	Release(string)
+	Run(context.Context)
+	Events() <-chan feed.Event
+}
+
+type perpetualSource struct {
+	exchange string
+	api      perpetualAPI
+	stream   perpetualStream
+}
+
 type perpetualFeedRouter struct {
 	stocks   uihub.Feed
-	mexcAPI  *mexc.Client
-	mexc     *mexc.Stream
+	sources  []perpetualSource
 	archived func(string) bool
 }
 
+func (r perpetualFeedRouter) source(symbol string) int {
+	id, ok := instrument.ParsePerpetual(symbol)
+	if !ok {
+		return -1
+	}
+	return slices.IndexFunc(r.sources, func(source perpetualSource) bool { return source.exchange == id.Exchange })
+}
+
 func (r perpetualFeedRouter) PerpetualMarkets(ctx context.Context) ([]instrument.PerpetualMarket, error) {
-	return r.mexcAPI.PerpetualMarkets(ctx)
+	var group sync.WaitGroup
+	result := make([][]instrument.PerpetualMarket, len(r.sources))
+	failures := make([]error, len(r.sources))
+	for i, source := range r.sources {
+		group.Go(func() { result[i], failures[i] = source.api.PerpetualMarkets(ctx) })
+	}
+	group.Wait()
+	var markets []instrument.PerpetualMarket
+	for _, rows := range result {
+		markets = append(markets, rows...)
+	}
+	if len(markets) == 0 {
+		return nil, errors.Join(failures...)
+	}
+	return markets, nil
 }
 
 func (r perpetualFeedRouter) Validate(ctx context.Context, symbol string) error {
 	if instrument.IsPerpetual(symbol) {
-		err := r.mexcAPI.Validate(ctx, symbol)
+		i := r.source(symbol)
+		if i < 0 {
+			return feed.ErrUnknownSymbol
+		}
+		err := r.sources[i].api.Validate(ctx, symbol)
 		if errors.Is(err, feed.ErrFeedUnavailable) && r.archived(symbol) {
 			return nil
 		}
@@ -39,23 +83,31 @@ func (r perpetualFeedRouter) Validate(ctx context.Context, symbol string) error 
 }
 
 func (r perpetualFeedRouter) Ensure(d feed.Demand) {
-	if instrument.IsPerpetual(d.Symbol) {
+	selected := r.source(d.Symbol)
+	for i, source := range r.sources {
+		if i != selected {
+			source.stream.Release(d.ID)
+		}
+	}
+	switch {
+	case selected >= 0:
 		r.stocks.Release(d.ID)
-		r.mexc.Ensure(d)
-	} else {
-		r.mexc.Release(d.ID)
+		r.sources[selected].stream.Ensure(d)
+	case !instrument.IsPerpetual(d.Symbol):
 		r.stocks.Ensure(d)
 	}
 }
 
 func (r perpetualFeedRouter) Release(id string) {
 	r.stocks.Release(id)
-	r.mexc.Release(id)
+	for _, source := range r.sources {
+		source.stream.Release(id)
+	}
 }
 
 type historyWorker func(string, func(bool))
 
-func perpetualHistory(ctx context.Context, api *mexc.Client, core *md.Core, st *store.Store, wg *sync.WaitGroup, stock historyWorker) historyWorker {
+func perpetualHistory(ctx context.Context, router perpetualFeedRouter, core *md.Core, st *store.Store, wg *sync.WaitGroup, stock historyWorker) historyWorker {
 	return func(symbol string, done func(bool)) {
 		if !instrument.IsPerpetual(symbol) {
 			if stock != nil {
@@ -65,13 +117,21 @@ func perpetualHistory(ctx context.Context, api *mexc.Client, core *md.Core, st *
 			}
 			return
 		}
+		i := router.source(symbol)
+		if i < 0 {
+			if done != nil {
+				done(false)
+			}
+			return
+		}
+		api := router.sources[i].api
 		wg.Go(func() {
 			seed := func() bool {
 				minute, readErr := st.ReadRecentBars1m(symbol, 2000)
 				daily, dayReadErr := st.ReadRecentDailyBars(symbol, 2000)
 				ten, tickReadErr := st.ReadRecentBars10s(symbol, 10000)
 				if err := errors.Join(readErr, dayReadErr, tickReadErr); err != nil {
-					slog.Warn("MEXC perpetual chart archive", "symbol", symbol, "err", err)
+					slog.Warn("perpetual chart archive", "symbol", symbol, "err", err)
 				}
 				if len(minute)+len(daily)+len(ten) == 0 {
 					return false
@@ -100,7 +160,7 @@ func perpetualHistory(ctx context.Context, api *mexc.Client, core *md.Core, st *
 				}
 			}
 			if err := errors.Join(minuteErr, dailyErr); err != nil {
-				slog.Warn("MEXC perpetual chart history", "symbol", symbol, "err", err)
+				slog.Warn("perpetual chart history", "symbol", symbol, "err", err)
 			}
 			if len(minute)+len(daily) > 0 {
 				st.Flush()

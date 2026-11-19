@@ -7,7 +7,7 @@ import type {
   SignificanceLevel, Tick, TickDeliverySource, TickDirection, TickTradeReportCondition,
 } from "../../wire/contract";
 import type { Palette } from "../palette";
-import { formatPrice, formatSize, formatTapeTime, marketPriceDecimals } from "../format";
+import { formatMarketSize, formatPrice, formatTapeTime, marketPriceDecimals } from "../format";
 
 export const TAPE_ROW_H = 18;
 
@@ -147,7 +147,7 @@ export function buildTapeRows(
       seq: seqs[i],
       time: formatTapeTime(t.ts),
       price: formatPrice(t.price, marketPriceDecimals(t.symbol, t.price)),
-      size: formatSize(t.size),
+      size: formatMarketSize(t.size, t.symbol),
       direction: t.direction,
       significance: t.significance ?? "none",
       condition,

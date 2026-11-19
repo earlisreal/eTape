@@ -139,7 +139,7 @@ export interface PerpetualContract {
 }
 export interface BookLevel {
   price: number /* float64 */;
-  size: number /* int64 */;
+  size: number /* float64 */;
 }
 export interface EstimatedLULD {
   lower: number /* float64 */;
@@ -160,7 +160,7 @@ export interface Book {
 export interface Tick {
   symbol: string;
   price: number /* float64 */;
-  size: number /* int64 */;
+  size: number /* float64 */;
   direction: TickDirection;
   transactionType: TickTransactionType;
   significance: SignificanceLevel;
@@ -193,7 +193,7 @@ export interface Bar {
   h: number /* float64 */;
   l: number /* float64 */;
   c: number /* float64 */;
-  v: number /* int64 */;
+  v: number /* float64 */;
   inProgress: boolean;
   gap?: boolean;
   volumeOnly?: boolean;

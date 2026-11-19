@@ -3,7 +3,7 @@
 // growing outward from the divider. Logical rows share one scroll offset;
 // beyond-depth LULD fallbacks occupy each side's bottom visible slot.
 import { FONTS } from "../palette";
-import { formatPrice, formatSize, marketPriceDecimals } from "../format";
+import { formatMarketSize, formatPrice, marketPriceDecimals } from "../format";
 import {
   flashAlpha,
   LADDER_HEADER_H,
@@ -141,7 +141,7 @@ function drawSide(
   if (side === "bid") {
     ctx.textAlign = "left";
     ctx.fillStyle = p.text;
-    ctx.fillText(formatSize(row.size), PAD, midY);
+    ctx.fillText(formatMarketSize(row.size, s.symbol), PAD, midY);
     ctx.textAlign = "right";
     ctx.fillStyle = p.up;
     ctx.fillText(formatPrice(row.price, marketPriceDecimals(s.symbol, row.price)), mid - PAD, midY);
@@ -151,7 +151,7 @@ function drawSide(
     ctx.fillText(formatPrice(row.price, marketPriceDecimals(s.symbol, row.price)), mid + PAD, midY);
     ctx.textAlign = "right";
     ctx.fillStyle = p.text;
-    ctx.fillText(formatSize(row.size), w - PAD, midY);
+    ctx.fillText(formatMarketSize(row.size, s.symbol), w - PAD, midY);
   }
 
   if (isAverageEntry) {
