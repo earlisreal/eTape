@@ -236,7 +236,9 @@ Notes:
 
 ### MEXC perpetual market data
 
-Open a Chart, Time & Sales, or DOM Ladder and type `mexc.btc.usdt` followed by Enter.
+Open a Chart, Time & Sales, DOM Ladder, or Order Ticket. Use **Browse USDT perpetuals**
+next to the panel's symbol to search the MEXC market list, or type `mexc.btc.usdt`
+followed by Enter.
 Use the same Link Group to follow the contract in all three panels. MEXC USDT
 perpetuals use public Futures market data, UTC chart buckets and contract counts
 for volume and depth. They work during weekends and with OpenD disconnected.

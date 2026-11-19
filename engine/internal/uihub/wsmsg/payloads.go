@@ -165,6 +165,14 @@ type SubmitRiskEntryArgs struct {
 	SellCushion   LimitCushion `json:"sellCushion"`
 }
 
+type PerpetualMarket struct {
+	Symbol         string `json:"symbol"`
+	Exchange       string `json:"exchange"`
+	Base           string `json:"base"`
+	Settlement     string `json:"settlement"`
+	TradingEnabled bool   `json:"tradingEnabled"`
+}
+
 type SubmitPerpetualRiskEntryArgs struct {
 	Venue         string       `json:"venue"`
 	Symbol        string       `json:"symbol"`

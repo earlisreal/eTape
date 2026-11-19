@@ -14,6 +14,13 @@ type Perpetual struct {
 	Native   string
 }
 
+type PerpetualMarket struct {
+	ID             Perpetual
+	Base           string
+	Settlement     string
+	TradingEnabled bool
+}
+
 func (p Perpetual) String() string {
 	return PerpetualPrefix + p.Exchange + "." + p.Native
 }

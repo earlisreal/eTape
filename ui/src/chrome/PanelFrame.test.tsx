@@ -121,7 +121,7 @@ function fakePanelApi(initial = false) {
 // "stock-info" is symbol-bearing but renders no <canvas> (unlike chart/ladder/tape), so this
 // test stays in vitest's default (threads) pool per vitest.config.ts's poolMatchGlobs
 // comment about node-canvas being unsafe to load into more than one worker.
-function renderFrame(opts: { panelId?: string; group?: PanelConfig["group"]; settings?: Record<string, unknown>; onConfigChange?: (s: Record<string, unknown>) => void; onGroupChange?: (g: PanelConfig["group"]) => void; onClose?: () => void; api?: ReturnType<typeof fakePanelApi>; linkGroups?: LinkGroups; demandRegistry?: import("../wire/DemandRegistry").DemandRegistry } = {}) {
+function renderFrame(opts: { panelId?: string; group?: PanelConfig["group"]; settings?: Record<string, unknown>; onConfigChange?: (s: Record<string, unknown>) => void; onGroupChange?: (g: PanelConfig["group"]) => void; onClose?: () => void; api?: ReturnType<typeof fakePanelApi>; linkGroups?: LinkGroups; demandRegistry?: import("../wire/DemandRegistry").DemandRegistry; commandAdapter?: typeof commands } = {}) {
   const stores = makeStores();
   const linkGroups = opts.linkGroups ?? new LinkGroups(fakeBus() as never, () => {});
   // inside renderFrame(opts): default a no-op registry so existing tests keep passing.
@@ -142,7 +142,7 @@ function renderFrame(opts: { panelId?: string; group?: PanelConfig["group"]; set
     <ThemeProvider>
       <ToastProvider>
         <PanelFrame config={config} stores={stores} scheduler={{} as never} linkGroups={linkGroups}
-          demandRegistry={demandRegistry} commands={commands} onConfigChange={onConfigChange} onGroupChange={onGroupChange}
+          demandRegistry={demandRegistry} commands={opts.commandAdapter ?? commands} onConfigChange={onConfigChange} onGroupChange={onGroupChange}
           onClose={onClose} api={api as never} />
       </ToastProvider>
     </ThemeProvider>,
@@ -150,12 +150,35 @@ function renderFrame(opts: { panelId?: string; group?: PanelConfig["group"]; set
   return { container, unmount, onConfigChange, onGroupChange, onClose, api, linkGroups, demandRegistry, stores };
 }
 
-function renderTapeFrame() {
+function renderTapeFrame(commandAdapter?: typeof commands) {
   const realTapeDef = PANELS.tape;
   PANELS.tape = { ...realTapeDef, component: () => null };
-  const frame = renderFrame({ panelId: "tape", group: null, settings: { symbol: "US.AAPL" } });
+  const frame = renderFrame({ panelId: "tape", group: null, settings: { symbol: "US.AAPL" }, ...(commandAdapter && { commandAdapter }) });
   return { ...frame, restore: () => { PANELS.tape = realTapeDef; } };
 }
+
+it("searches and loads the chosen USDT perpetual from a panel header", async () => {
+  const sendCommand = vi.fn(async (): Promise<AckMsg> => ({
+    kind: "ack", corrId: "markets", status: "accepted", value: [
+      { symbol: "PERP.MEXC.BTC_USDT", exchange: "MEXC", base: "BTC", settlement: "USDT", tradingEnabled: true },
+      { symbol: "PERP.MEXC.ETH_USDT", exchange: "MEXC", base: "ETH", settlement: "USDT", tradingEnabled: true },
+    ],
+  }));
+  const frame = renderTapeFrame({ ...commands, sendCommand });
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Browse USDT perpetuals" }));
+    const dialog = within(screen.getByRole("dialog", { name: "USDT perpetuals" }));
+    await dialog.findByText("BTC/USDT");
+    expect(sendCommand).toHaveBeenCalledWith("ListPerpetualMarkets", {});
+    fireEvent.change(dialog.getByRole("searchbox"), { target: { value: "mexc:eth/usdt" } });
+    expect(dialog.queryByText("BTC/USDT")).toBeNull();
+    fireEvent.click(dialog.getByRole("button", { name: "ETH/USDT MEXC" }));
+    await waitFor(() => expect(frame.onConfigChange).toHaveBeenCalledWith({ symbol: "PERP.MEXC.ETH_USDT" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  } finally {
+    frame.restore();
+  }
+});
 
 function setTitleGeometry(container: HTMLElement, slotWidth: number, fullTitleWidth: number): void {
   const slot = within(container).getByTestId("panel-title-slot");

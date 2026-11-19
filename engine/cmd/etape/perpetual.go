@@ -23,6 +23,10 @@ type perpetualFeedRouter struct {
 	archived func(string) bool
 }
 
+func (r perpetualFeedRouter) PerpetualMarkets(ctx context.Context) ([]instrument.PerpetualMarket, error) {
+	return r.mexcAPI.PerpetualMarkets(ctx)
+}
+
 func (r perpetualFeedRouter) Validate(ctx context.Context, symbol string) error {
 	if instrument.IsPerpetual(symbol) {
 		err := r.mexcAPI.Validate(ctx, symbol)

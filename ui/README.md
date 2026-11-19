@@ -18,6 +18,11 @@ close first. General preferences save as you go. Orders & hotkeys requires Save
 before closing or switching sections. See the [chrome guide](src/chrome/README.md)
 for the interaction conventions.
 
+The search icon next to a Chart, Time & Sales, DOM Ladder, or Order Ticket
+symbol opens the USDT perpetual market list. Search a coin or pair and select a
+market to load it in the panel or its Link Group. Add the MEXC Perpetual Simulator
+in Settings → Venues & creds, then select it as the Link Group's Execution Venue.
+
 The Windows title-bar favicon stays transparent and uses the original small-icon
 grid so all five bar rows stay separate at 16–40 px. The engine gives its owned
 Chrome windows an explicit taskbar identity and icon resource matching the

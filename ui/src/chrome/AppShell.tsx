@@ -1108,7 +1108,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   };
 
   return (
-    <OpenSettingsProvider value={{ openOrderSettings: () => setSettings({ open: true, section: "orders" }) }}>
+    <OpenSettingsProvider value={{
+      openOrderSettings: () => setSettings({ open: true, section: "orders" }),
+      openVenueSettings: () => setSettings({ open: true, section: "venues" }),
+    }}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
         <div style={{ position: "relative" }}>
           <TopBar workspaceName={workspaceLabel} health={stores.health} armed={armed}

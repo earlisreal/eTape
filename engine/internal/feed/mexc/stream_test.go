@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +16,38 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
 )
+
+func TestPerpetualMarketsFiltersAndCachesCatalog(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.RequestURI() != "/api/v1/contract/detail/country" {
+			t.Errorf("unexpected contract request %s", r.URL.RequestURI())
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		fmt.Fprint(w, `{"success":true,"data":[
+			{"symbol":"ETH_USDT","baseCoin":"ETH","quoteCoin":"USDT","settleCoin":"USDT","futureType":1,"state":0},
+			{"symbol":"BTC_USDT","baseCoin":"BTC","quoteCoin":"USDT","settleCoin":"USDT","futureType":1,"state":0,"apiAllowed":true},
+			{"symbol":"BTC_USDC","baseCoin":"BTC","quoteCoin":"USDC","settleCoin":"USDC","futureType":1,"state":0},
+			{"symbol":"DELISTED_USDT","baseCoin":"DELISTED","quoteCoin":"USDT","settleCoin":"USDT","futureType":1,"state":3}
+		]}`)
+	}))
+	defer server.Close()
+	client := NewClient()
+	client.base = server.URL
+	ctx := context.Background()
+	for range 2 {
+		markets, err := client.PerpetualMarkets(ctx)
+		if err != nil || len(markets) != 2 || markets[0].ID.String() != "PERP.MEXC.BTC_USDT" ||
+			!markets[0].TradingEnabled || markets[1].ID.String() != "PERP.MEXC.ETH_USDT" || markets[1].TradingEnabled {
+			t.Fatalf("catalog: %+v, %v", markets, err)
+		}
+	}
+	if err := client.Validate(ctx, "PERP.MEXC.ETH_USDT"); err != nil || calls.Load() != 1 {
+		t.Fatalf("catalog validation: %d requests, %v", calls.Load(), err)
+	}
+}
 
 func TestPublicDemandSharesSubscriptionAndRecoversBook(t *testing.T) {
 	const native = "BTC_USDT"

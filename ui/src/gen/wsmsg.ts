@@ -258,6 +258,13 @@ export interface SubmitRiskEntryArgs {
   buyCushion: LimitCushion;
   sellCushion: LimitCushion;
 }
+export interface PerpetualMarket {
+  symbol: string;
+  exchange: string;
+  base: string;
+  settlement: string;
+  tradingEnabled: boolean;
+}
 export interface SubmitPerpetualRiskEntryArgs {
   venue: string;
   symbol: string;

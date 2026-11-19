@@ -13,6 +13,9 @@ import type { DemandRegistry } from "../wire/DemandRegistry";
 import { useTheme } from "./ThemeProvider";
 import type { Palette } from "../render/palette";
 import { GroupPicker } from "./GroupPicker";
+import { PerpetualMarketPicker } from "./PerpetualMarketPicker";
+import { useOpenSettings } from "./OpenSettingsContext";
+import { IconSearch } from "./panels/tv/tvIcons";
 import { bareSymbol } from "./exec/orderStatus";
 import { appendSsrMarker } from "./format";
 import { normalizeSymbol } from "./symbol";
@@ -139,6 +142,7 @@ export function PanelFrame(
     runtimeSymbol ?? linkGroups.symbolFor(group) ?? (config.settings.symbol as string | undefined));
   const { palette } = useTheme();
   const toast = useToasts();
+  const openSettings = useOpenSettings();
 
   // Canonical symbol state stays undecorated. SSR is a narrow per-symbol
   // subscription so unrelated Stock Info refreshes do not repaint every
@@ -158,6 +162,7 @@ export function PanelFrame(
   // doesn't need to be torn down/rebuilt on every keystroke (it only depends
   // on active/modalOpen/group, which change far less often than `draft`).
   const [tl, setTl] = useState<TypeToLoadState>({ editing: false });
+  const [showMarketPicker, setShowMarketPicker] = useState(false);
   const tlRef = useRef<TypeToLoadState>(tl);
   useEffect(() => { tlRef.current = tl; }, [tl]);
 
@@ -315,6 +320,57 @@ export function PanelFrame(
     return () => el.removeEventListener("pointerdown", onPointerDown);
   }, [def?.symbolBearing]);
 
+  const commitSymbol = useCallback(async (draft: string) => {
+    // No-op guard (review follow-up: generalizes a guard Order Ticket used
+    // to own before its symbol editing moved into this shared header).
+    // Compare the typed draft against the CURRENT symbol's BARE form —
+    // what the header actually displays — before re-normalizing. The
+    // header shows a symbol with its market prefix stripped (bareSymbol,
+    // above), so a non-US panel on "HK.00700" displays "00700". Retyping
+    // that same bare text is meant to be a true no-op, but normalizeSymbol
+    // defaults any bare ticker to "US." — comparing the NORMALIZED sym
+    // against the current symbol would not catch this ("US.00700" !=
+    // "HK.00700", so it would still look like a real edit). Comparing in
+    // bare space first catches it regardless of market.
+    const current = symbolRef.current;
+    if (current && draft.trim().toUpperCase() === bareSymbol(current).toUpperCase()) return;
+    const sym = normalizeSymbol(draft);
+    try {
+      if (group !== null) {
+        const r = await linkGroups.focusChecked(group, sym);
+        if (!r.ok) toast.push({ level: "danger", text: `${sym} rejected — ${r.reason}` });
+        // On reject the group is left completely untouched (LinkGroups.focusChecked's
+        // own guarantee) and the header already reverted to the live symbol below —
+        // never a half-switched group.
+        return;
+      }
+      const profile = config.panelId === "order-ticket" && sym.startsWith("PERP.") ? "focused" : def?.demand;
+      if (profile) {
+        const ack = await demandRegistry.ensure(config.id, sym, profile);
+        if (ack.status !== "accepted") {
+          toast.push({ level: "danger", text: `${sym} rejected — ${ack.reason ?? "unknown symbol"}` });
+          return; // leave the prior symbol untouched — no half-loaded pinned panel
+        }
+      }
+      // Patch, not a full-settings rewrite: `config.settings` here is frozen
+      // at panel creation (dockview never re-invokes the factory), so spreading
+      // it reverted every setting the panel persisted since mount — a symbol
+      // commit used to silently wipe a chart's indicators, timeframe, etc.
+      panelSymbols?.set(config.id, sym);
+      setSymbol(sym);
+      onConfigChange({ symbol: sym });
+    } catch (err) {
+      // Review finding (Important): `commit` is invoked fire-and-forget
+      // (`void commit(...)`) below. A thrown/rejected promise here — e.g. a
+      // transport-level failure in `linkGroups.focusChecked`'s underlying
+      // `sendCommand`, not just an engine-level "blocked" ack — would
+      // otherwise become a silent unhandled rejection: no toast, no
+      // feedback, and the user left unsure whether their symbol change
+      // went through. Surface it the same way a rejected ack is surfaced.
+      toast.push({ level: "danger", text: `${sym} failed — ${err instanceof Error ? err.message : "unexpected error"}` });
+    }
+  }, [group, linkGroups, config.id, config.panelId, def?.demand, demandRegistry, onConfigChange, panelSymbols, toast]);
+
   // Task 13: type-to-load keydown capture. Deliberately attached to `document`
   // in the CAPTURE phase, not the frame-root DOM node in the (default) bubble
   // phase as the task brief originally sketched — verified against the
@@ -339,59 +395,9 @@ export function PanelFrame(
   // that window listener, regardless of mount order; `preventDefault()` alone
   // would not be enough (see useHotkeys.ts / OrderSettingsModal.tsx, which
   // document this exact hazard for the same reason).
+
   useEffect(() => {
     if (!def?.symbolBearing) return;
-
-    const commit = async (draft: string) => {
-      // No-op guard (review follow-up: generalizes a guard Order Ticket used
-      // to own before its symbol editing moved into this shared header).
-      // Compare the typed draft against the CURRENT symbol's BARE form —
-      // what the header actually displays — before re-normalizing. The
-      // header shows a symbol with its market prefix stripped (bareSymbol,
-      // above), so a non-US panel on "HK.00700" displays "00700". Retyping
-      // that same bare text is meant to be a true no-op, but normalizeSymbol
-      // defaults any bare ticker to "US." — comparing the NORMALIZED sym
-      // against the current symbol would not catch this ("US.00700" !=
-      // "HK.00700", so it would still look like a real edit). Comparing in
-      // bare space first catches it regardless of market.
-      const current = symbolRef.current;
-      if (current && draft.trim().toUpperCase() === bareSymbol(current).toUpperCase()) return;
-      const sym = normalizeSymbol(draft);
-      try {
-        if (group !== null) {
-          const r = await linkGroups.focusChecked(group, sym);
-          if (!r.ok) toast.push({ level: "danger", text: `${sym} rejected — ${r.reason}` });
-          // On reject the group is left completely untouched (LinkGroups.focusChecked's
-          // own guarantee) and the header already reverted to the live symbol below —
-          // never a half-switched group.
-          return;
-        }
-        if (def?.demand) {
-          const ack = await demandRegistry.ensure(config.id, sym, def.demand);
-          if (ack.status !== "accepted") {
-            toast.push({ level: "danger", text: `${sym} rejected — ${ack.reason ?? "unknown symbol"}` });
-            return; // leave the prior symbol untouched — no half-loaded pinned panel
-          }
-        }
-        // Patch, not a full-settings rewrite: `config.settings` here is frozen
-        // at panel creation (dockview never re-invokes the factory), so spreading
-        // it reverted every setting the panel persisted since mount — a symbol
-        // commit used to silently wipe a chart's indicators, timeframe, etc.
-        panelSymbols?.set(config.id, sym);
-        setSymbol(sym);
-        onConfigChange({ symbol: sym });
-      } catch (err) {
-        // Review finding (Important): `commit` is invoked fire-and-forget
-        // (`void commit(...)`) below. A thrown/rejected promise here — e.g. a
-        // transport-level failure in `linkGroups.focusChecked`'s underlying
-        // `sendCommand`, not just an engine-level "blocked" ack — would
-        // otherwise become a silent unhandled rejection: no toast, no
-        // feedback, and the user left unsure whether their symbol change
-        // went through. Surface it the same way a rejected ack is surfaced.
-        toast.push({ level: "danger", text: `${sym} failed — ${err instanceof Error ? err.message : "unexpected error"}` });
-      }
-    };
-
     const onKeyDown = (e: KeyboardEvent): void => {
       const prev = tlRef.current;
       const t = document.activeElement;
@@ -423,7 +429,7 @@ export function PanelFrame(
       e.stopPropagation();
       if (e.key === "Enter") {
         setTl({ editing: false });
-        if (prev.draft.length > 0) void commit(prev.draft); // empty draft on Enter == cancel, not a garbage symbol
+        if (prev.draft.length > 0) void commitSymbol(prev.draft); // empty draft on Enter cancels
         return;
       }
       setTl(reduceTypeToLoad(prev, ev));
@@ -431,7 +437,7 @@ export function PanelFrame(
 
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [active, modalOpen, group, def?.symbolBearing, def?.demand, linkGroups, demandRegistry, onConfigChange, toast, config.id, config.settings]);
+  }, [active, modalOpen, def?.symbolBearing, commitSymbol]);
 
   const handleGroupPick = (g: LinkGroup) => {
     // Detaching keeps the symbol the panel is showing now, not the stale
@@ -465,6 +471,13 @@ export function PanelFrame(
               {effectiveDisplaySymbol ?? "—"}
             </span>
           )
+        )}
+        {!tl.editing && ["chart", "ladder", "tape", "order-ticket"].includes(config.panelId) && (
+          <HoverButton type="button" aria-label="Browse USDT perpetuals" title="Browse USDT perpetuals"
+            onClick={() => setShowMarketPicker(true)}
+            style={{ display: "inline-flex", border: "none", background: "transparent", color: palette.textMuted, padding: 2, cursor: "pointer" }}>
+            <IconSearch size={13} />
+          </HoverButton>
         )}
         {!def?.headerControls && (
           def?.shortTitle ? (
@@ -501,6 +514,9 @@ export function PanelFrame(
   return (
     <div className={active ? "panel-focused" : undefined} style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {headerHost ? createPortal(header, headerHost) : header}
+      {showMarketPicker && <PerpetualMarketPicker commands={commands} onClose={() => setShowMarketPicker(false)}
+        {...(openSettings && { onOpenVenues: () => { setShowMarketPicker(false); openSettings.openVenueSettings(); } })}
+        onPick={market => { setShowMarketPicker(false); void commitSymbol(market); }} />}
       <div ref={hostRef} data-testid="panel-body" style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
         <ErrorBoundary label={config.panelId}>
           <PanelHeaderSlotContext.Provider value={def?.headerControls ? headerSlot : undefined}>

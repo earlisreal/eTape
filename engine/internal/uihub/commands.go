@@ -234,6 +234,32 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		return ack, false
 	}
 	switch name {
+	case "ListPerpetualMarkets":
+		if cd.feed == nil {
+			return blocked("Crypto markets are unavailable in this workspace mode."), false
+		}
+		catalog, ok := cd.feed().(interface {
+			PerpetualMarkets(context.Context) ([]instrument.PerpetualMarket, error)
+		})
+		if !ok {
+			return blocked("Crypto markets are unavailable in this workspace mode."), false
+		}
+		go func() {
+			request, cancel := context.WithTimeout(ctx, 8*time.Second)
+			defer cancel()
+			markets, err := catalog.PerpetualMarkets(request)
+			if err != nil {
+				reply(blocked("Could not load USDT perpetuals."))
+				return
+			}
+			rows := make([]wsmsg.PerpetualMarket, 0, len(markets))
+			for _, m := range markets {
+				rows = append(rows, wsmsg.PerpetualMarket{Symbol: m.ID.String(), Exchange: m.ID.Exchange,
+					Base: m.Base, Settlement: m.Settlement, TradingEnabled: m.TradingEnabled})
+			}
+			reply(wsmsg.AckMsg{Status: wsmsg.AckAccepted, Value: rows})
+		}()
+		return wsmsg.AckMsg{}, true
 	case "SubmitTrail":
 		var a wsmsg.SubmitTrailArgs
 		if json.Unmarshal(args, &a) != nil {

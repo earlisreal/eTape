@@ -62,13 +62,15 @@ func (c *Client) Rules(symbol string) (instrument.ContractRules, bool) {
 }
 
 type Client struct {
-	http        *http.Client
-	base        string
-	stream      string
-	mu          sync.Mutex
-	cache       map[string]cachedContract
-	funding     map[string]fundingTime
-	nextRequest time.Time
+	http         *http.Client
+	base         string
+	stream       string
+	mu           sync.Mutex
+	cache        map[string]cachedContract
+	markets      []instrument.PerpetualMarket
+	marketsUntil time.Time
+	funding      map[string]fundingTime
+	nextRequest  time.Time
 }
 
 type fundingTime struct {
@@ -166,6 +168,41 @@ func parseSymbol(symbol string) (instrument.Perpetual, bool) {
 	return id, ok && id.Exchange == Exchange
 }
 
+func (c *Client) PerpetualMarkets(ctx context.Context) ([]instrument.PerpetualMarket, error) {
+	c.mu.Lock()
+	if time.Now().Before(c.marketsUntil) {
+		markets := c.markets
+		c.mu.Unlock()
+		return markets, nil
+	}
+	c.mu.Unlock()
+
+	var contracts []Contract
+	if err := c.get(ctx, "/api/v1/contract/detail/country", &contracts); err != nil {
+		return nil, err
+	}
+	markets := make([]instrument.PerpetualMarket, 0, len(contracts))
+	until := time.Now().Add(time.Minute)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, item := range contracts {
+		id := instrument.Perpetual{Exchange: Exchange, Native: item.Symbol}
+		symbol := id.String()
+		if _, ok := parseSymbol(symbol); !ok || !isUSDTPerpetual(item) || item.State != 0 || item.Base == "" {
+			continue
+		}
+		c.cache[symbol] = cachedContract{value: item, until: until}
+		markets = append(markets, instrument.PerpetualMarket{ID: id, Base: item.Base, Settlement: item.Settlement, TradingEnabled: item.APIAllowed})
+	}
+	sort.Slice(markets, func(i, j int) bool { return markets[i].ID.Native < markets[j].ID.Native })
+	c.markets, c.marketsUntil = markets, until
+	return markets, nil
+}
+
+func isUSDTPerpetual(item Contract) bool {
+	return item.Product == 1 && item.Quote == "USDT" && item.Settlement == "USDT"
+}
+
 func (c *Client) Contract(ctx context.Context, symbol string) (Contract, error) {
 	id, ok := parseSymbol(symbol)
 	if !ok {
@@ -194,7 +231,7 @@ func (c *Client) Contract(ctx context.Context, symbol string) (Contract, error) 
 		return Contract{}, errors.Join(feed.ErrFeedUnavailable, err)
 	}
 	for _, item := range contracts {
-		if item.Symbol == id.Native && item.Product == 1 && item.Quote == "USDT" && item.Settlement == "USDT" {
+		if item.Symbol == id.Native && isUSDTPerpetual(item) {
 			c.mu.Lock()
 			c.cache[symbol] = cachedContract{value: item, until: time.Now().Add(time.Minute)}
 			c.mu.Unlock()
