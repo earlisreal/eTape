@@ -74,12 +74,14 @@ Named workspaces are cataloged in engine config (`windows.v1`) by stable UUID; `
 React/Vite shell around imperative market-data stores and renderers. Wire messages enter `src/wire`, route into `src/data`, then panels/controllers schedule chart or canvas work. The Account panel keeps live Open Orders and the read-only Closed Orders projection in the imperative execution store; the upper tab is session-local while each table's sort preference is persisted. Time & Sales ticks retain the engine-stamped Significant Print level in the imperative tape ring; the separate `md.tape.status` read model feeds read-only settings text. React owns layout/settings, never high-frequency payload state.
 
 **New window → Crypto Monitoring** opens four pinned charts and a Crypto Scanner.
-You can also add a **Crypto Scanner** to any workspace. Choose MEXC, Binance,
-Binance Futures Demo or BingX, then rank USDT perpetuals by 5-minute gain,
-5-minute loss or 24-hour USDT turnover. Each Scanner saves its exchange,
-filters, sort and sound settings. Double-click a row to focus its exact
-exchange contract in a Link Group. Binance Futures Demo uses the public demo
-market feed and opens demo contracts from its results.
+You can also add a **Crypto Scanner** to any workspace. Open its header gear to
+choose MEXC, Binance, Binance Futures Demo or BingX, rank USDT perpetuals by
+5-minute gain, 5-minute loss or 24-hour USDT turnover, and set filters. Select
+**Apply** to save changes. Each Scanner saves its own exchange, filters, sort
+and sound settings. Click a column header to sort or a row to select it.
+Double-click the row or press Enter on the market name to load the exact exchange
+contract in a Link Group. Binance Futures Demo uses the public demo market feed
+and opens demo contracts from its results.
 
 Use **Sync to Following** to fill the pinned charts in Crypto Monitoring.
 **Use this Scanner** selects a different Crypto Scanner as its source. Stock

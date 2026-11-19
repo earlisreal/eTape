@@ -474,6 +474,9 @@ describe("Crypto Monitoring Scanner Sync", () => {
       },
     });
     const ui = within(crypto.container);
+    const header = within(await ui.findByTestId("scanner-header-controls"));
+    const filters = header.getByRole("button", { name: "filters" });
+    fireEvent.click(filters);
     const exchange = await ui.findByRole("combobox", { name: "Crypto Scanner exchange" }) as HTMLSelectElement;
     expect(exchange.value).toBe("BINANCE");
     const production = ui.getByRole("table", { name: "Binance crypto Scanner results" });
@@ -482,8 +485,15 @@ describe("Crypto Monitoring Scanner Sync", () => {
 
     fireEvent.change(exchange, { target: { value: "BINANCE-DEMO" } });
     expect(exchange.selectedOptions[0]?.textContent).toBe("Binance Futures Demo");
+    expect(crypto.commands.sendCommand).not.toHaveBeenCalledWith("GetCryptoScanner", { exchange: "BINANCE-DEMO" });
+    fireEvent.click(ui.getByRole("button", { name: "Apply" }));
+    expect(filters.getAttribute("aria-expanded")).toBe("false");
     const demo = ui.getByRole("table", { name: "Binance Futures Demo crypto Scanner results" });
-    fireEvent.click(await within(demo).findByRole("button", { name: "BTC/USDT" }));
+    const market = await within(demo).findByRole("button", { name: "BTC/USDT" });
+    fireEvent.click(market, { detail: 1 });
+    expect(crypto.linkGroups.symbolFor(scanner.group ?? "green")).not.toBe(demoSymbol);
+    expect(market.closest("tr")?.classList.contains("scanner-selected")).toBe(true);
+    fireEvent.doubleClick(market);
     expect(crypto.linkGroups.symbolFor(scanner.group ?? "green")).toBe(demoSymbol);
     expect(crypto.commands.sendCommand).toHaveBeenCalledWith("GetCryptoScanner", { exchange: "BINANCE-DEMO" });
 

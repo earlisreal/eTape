@@ -171,6 +171,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "%",
     description: "USDT perpetual movers and turnover",
     symbolBearing: false,
+    headerControls: true,
   },
   "watchlist": {
     component: WatchlistPanel,

@@ -1,5 +1,4 @@
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { createPortal } from "react-dom";
 import type { PanelProps } from "./registry";
 import type { ScannerFilters, ScannerSession } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
@@ -14,8 +13,8 @@ import { useDismissibleLayer } from "../controls/useDismissibleLayer";
 import { TVContextMenu, type MenuEntry } from "./tv/TVContextMenu";
 import { menuChrome } from "../menuChrome";
 import { PanelHeaderSlotContext } from "./headerSlot";
-import { IconGear, IconVolume, IconVolumeOff } from "./tv/tvIcons";
-import { rankScannerRows, readScannerSort, scannerModeSort, scannerSyncStatusText } from "../scannerSync";
+import { ScannerHeader, ScannerSyncControl } from "./ScannerControls";
+import { rankScannerRows, readScannerSort, scannerModeSort } from "../scannerSync";
 import { focusMainWorkspace } from "../windows";
 import { soundEngine } from "../../sound/SoundEngine";
 import { DEFAULT_SCANNER_FILTERS, scannerFiltersFromSettings } from "../scannerFilters";
@@ -26,18 +25,18 @@ const SESSION_LABEL: Record<ScannerSession, string> = {
 type ScannerColumn = "sym" | "changePct" | "last" | "float" | "relVol" | "vol" | "sessionVol" | "turnover" | "shortInterest";
 type MetricColumn = Exclude<ScannerColumn, "sym">;
 type ColumnSettings = { order: MetricColumn[]; hidden: MetricColumn[] };
-const METRIC_COLUMNS: { col: MetricColumn; label: string; align: "right" }[] = [
-  { col: "changePct", label: "%", align: "right" },
-  { col: "last", label: "Last", align: "right" },
-  { col: "float", label: "Float", align: "right" },
-  { col: "relVol", label: "REL VOL", align: "right" },
-  { col: "vol", label: "Vol", align: "right" },
-  { col: "sessionVol", label: "Session Vol", align: "right" },
-  { col: "turnover", label: "Turnover", align: "right" },
-  { col: "shortInterest", label: "Short Int", align: "right" },
+const METRIC_COLUMNS: { col: MetricColumn; label: string }[] = [
+  { col: "changePct", label: "%" },
+  { col: "last", label: "Last" },
+  { col: "float", label: "Float" },
+  { col: "relVol", label: "REL VOL" },
+  { col: "vol", label: "Vol" },
+  { col: "sessionVol", label: "Session Vol" },
+  { col: "turnover", label: "Turnover" },
+  { col: "shortInterest", label: "Short Int" },
 ];
 const DEFAULT_COLUMN_ORDER: MetricColumn[] = METRIC_COLUMNS.map(({ col }) => col);
-const SYMBOL_COLUMN = { col: "sym" as const, label: "Symbol", align: "left" as const };
+const SYMBOL_COLUMN = { col: "sym" as const, label: "Symbol" };
 
 const isMetricColumn = (value: unknown): value is MetricColumn =>
   typeof value === "string" && DEFAULT_COLUMN_ORDER.includes(value as MetricColumn);
@@ -65,7 +64,7 @@ const visibleColumns = (settings: ColumnSettings) => [
   ...settings.order
     .filter((col) => !settings.hidden.includes(col))
     .map((col) => METRIC_COLUMNS.find((item) => item.col === col)!)
-].map((column) => column as { col: ScannerColumn; label: string; align: "left" | "right" });
+];
 
 const defaultSortForVisibleColumns = (mode: ScannerFilters["mode"], settings: ColumnSettings): SortState => {
   const next = scannerModeSort(mode);
@@ -216,72 +215,17 @@ export function ScannerPanel(
     [{ label: `Add ${bareSymbol(sym)} to watchlist`, onClick: () => void commands.sendCommand("WatchlistAdd", { symbol: sym }) }];
 
   const sessionLabel = cv.session ? SESSION_LABEL[cv.session] : null;
-  const syncStatus = scannerSync && (scannerSync.statusVisible ?? scannerSync.selected)
-    && scannerSync.status.kind !== "disabled"
-    && (scannerSync.status.targetCount > 0 || scannerSync.status.kind === "paused")
-    ? scannerSync.status.kind === "paused" ? "Paused" : `${scannerSync.status.availableCount}/${scannerSync.status.targetCount}`
-    : null;
-  const syncControl = scannerSync && (
-    <div data-testid="scanner-sync-control" style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", borderBottom: `1px solid ${palette.border}`, minWidth: 0 }}>
-      {scannerSync.selected ? (
-        <>
-          <span className="mono" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Sync to Following</span>
-          <button type="button" aria-label={scannerSync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync"}
-            aria-pressed={scannerSync.enabled} title={scannerSync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync"} onClick={scannerSync.onToggle}
-            style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: scannerSync.enabled ? palette.accent : palette.textMuted, cursor: "pointer", padding: 0, fontFamily: FONTS.mono, fontSize: 11, lineHeight: 1, whiteSpace: "nowrap", flex: "0 0 auto" }}>
-            <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "center", width: 28, height: 16, padding: 2, boxSizing: "border-box", border: `1px solid ${scannerSync.enabled ? palette.accent : palette.border}`, borderRadius: 8, background: scannerSync.enabled ? palette.accent : palette.surface, transition: "background 120ms ease" }}>
-              <span style={{ width: 10, height: 10, borderRadius: "50%", background: scannerSync.enabled ? palette.bg : palette.textMuted, transform: `translateX(${scannerSync.enabled ? 14 : 0}px)`, transition: "transform 120ms ease" }} />
-            </span>
-            <span>{scannerSync.enabled ? "ON" : "OFF"}</span>
-          </button>
-          <span style={{ flex: 1, minWidth: 0 }} />
-        </>
-      ) : (
-        <>
-          <span className="mono" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Monitoring source</span>
-          <span style={{ flex: 1, minWidth: 0 }} />
-          <button type="button" aria-label="Use this Scanner as Monitoring Source" title="Use this Scanner as the Monitoring Source" onClick={scannerSync.onSelect}
-            style={{ border: `1px solid ${palette.border}`, borderRadius: 3, background: palette.surface, color: palette.textMuted, cursor: "pointer", padding: "2px 5px", fontFamily: FONTS.mono, fontSize: 11, lineHeight: 1, whiteSpace: "nowrap", flex: "0 0 auto" }}>
-            Use this Scanner
-          </button>
-        </>
-      )}
-      {syncStatus && <span className="mono" aria-live="polite" title={scannerSync.status.kind === "paused" ? scannerSyncStatusText(scannerSync.status) : undefined} style={{ color: palette.textMuted, whiteSpace: "nowrap", flex: "0 0 auto" }}>{syncStatus}</span>}
-    </div>
-  );
-  const headerControls = (
-    <div data-testid="scanner-header-controls" style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
-      <span className="serif" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Scanner</span>
-      {sessionLabel && <span className="mono" style={{ color: palette.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>· <span>{sessionLabel}</span></span>}
-      <span style={{ flex: 1 }} />
-      <button type="button" aria-label={scannerSoundMuted ? "Unmute Scanner sounds" : "Mute Scanner sounds"}
-        aria-pressed={scannerSoundMuted} title={scannerSoundMuted ? "Unmute Scanner sounds" : "Mute Scanner sounds"}
-        onClick={toggleScannerSound}
-        style={{ display: "inline-flex", border: "none", background: "transparent", color: scannerSoundMuted ? palette.textMuted : palette.text, cursor: "pointer", padding: 3, flex: "0 0 auto" }}>
-        {scannerSoundMuted ? <IconVolumeOff size={13} /> : <IconVolume size={13} />}
-      </button>
-      <button type="button" aria-label="filters" aria-expanded={filtersOpen} title="Filters"
-        ref={filterTriggerRef}
-        onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())}
-        style={{ position: "relative", display: "inline-flex", border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", padding: 3, flex: "0 0 auto" }}>
-        <IconGear size={13} />
-      </button>
-      <button type="button" aria-label="columns" aria-expanded={columnsOpen} title="Columns"
-        ref={columnsTriggerRef}
-        onClick={() => (columnsOpen ? setColumnsOpen(false) : openColumns())}
-        style={{ border: `1px solid ${palette.border}`, borderRadius: 3, background: palette.surface, color: palette.textMuted, cursor: "pointer", padding: "2px 5px", fontFamily: FONTS.mono, fontSize: 10, lineHeight: 1, flex: "0 0 auto" }}>
-        columns
-      </button>
-    </div>
-  );
-
-  const th = { padding: "2px 8px", position: "sticky" as const, top: 0, background: palette.surface };
-  // Data-surface treatment (matches tape/ladder): mono, tabular figures, ticker as the row anchor.
-  const symCell = { textAlign: "left" as const, padding: "2px 8px", fontFamily: FONTS.mono, fontWeight: 600 };
-  const numCell = { padding: "2px 8px", fontFamily: FONTS.mono, fontWeight: 500, fontVariantNumeric: "tabular-nums" as const };
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", position: "relative", background: palette.bg, color: palette.text, fontSize: 12 }}>
-      {headerSlot === undefined ? headerControls : headerSlot ? createPortal(headerControls, headerSlot) : null}
+    <div className="scanner-panel">
+      <ScannerHeader title="Scanner" context={sessionLabel} muted={scannerSoundMuted} onMute={toggleScannerSound}
+        filtersOpen={filtersOpen} onFilters={() => (filtersOpen ? setFiltersOpen(false) : openFilters())} filterTriggerRef={filterTriggerRef}>
+        <button type="button" aria-label="columns" aria-expanded={columnsOpen} title="Columns"
+          ref={columnsTriggerRef}
+          onClick={() => (columnsOpen ? setColumnsOpen(false) : openColumns())}
+          style={{ border: `1px solid ${palette.border}`, borderRadius: 3, background: palette.surface, color: palette.textMuted, cursor: "pointer", padding: "2px 5px", fontFamily: FONTS.mono, fontSize: 10, lineHeight: 1, flex: "0 0 auto" }}>
+          columns
+        </button>
+      </ScannerHeader>
       {!cv.refreshedAt && cv.rows.length === 0 && <div style={{ padding: "6px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>Waiting for scanner data…</div>}
       {!cv.refreshedAt && cv.rows.length > 0 && <div role="status" style={{ padding: "6px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>Quote snapshots pending for visible symbols…</div>}
       {filtersOpen && (
@@ -305,10 +249,10 @@ export function ScannerPanel(
           </div>
         </div>
       )}
-      {syncControl}
+      {scannerSync && <ScannerSyncControl sync={scannerSync} />}
       {(
-        <div data-testid="scanner-filter-summary" className="mono" style={{ display: "flex", gap: 8, alignItems: "center", padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div data-testid="scanner-filter-summary" className="mono scanner-summary scanner-truncate">
+          <span>
             {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "session_volume" ? "Session Volume · top 200 candidates" : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" || filters.mode === "session_volume" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume, minSessionVolume: filters.minSessionVolume, minTurnover: filters.minTurnover, minRelativeVolume: filters.minRelativeVolume, minPrice: filters.minPrice, maxPrice: filters.maxPrice })}
           </span>
         </div>
@@ -340,12 +284,12 @@ export function ScannerPanel(
           </div>
         </div>
       )}
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <div className="scanner-results">
+        <table className="scanner-table">
           <thead>
             <tr style={{ color: palette.textMuted, textAlign: "right" }}>
               {shownColumns.map((c) => (
-                <th key={c.col} style={{ ...th, textAlign: c.align, cursor: "pointer" }} onClick={() => clickSort(c.col)}
+                <th key={c.col} scope="col" onClick={() => clickSort(c.col)}
                   className={`col-head sortable${sort?.col === c.col ? " sort-active" : ""}`}>
                   {c.label} {sortIndicator(sort, c.col)}
                 </th>
@@ -369,22 +313,22 @@ export function ScannerPanel(
                   transition: "background 120ms ease" }}>
                 {shownColumns.map((column) => {
                   switch (column.col) {
-                    case "sym": return <td key={column.col} style={symCell} title={r.shortSellRestricted ? "Short Sell Restricted — derived Rule 201 estimate" : undefined}>{appendSsrMarker(bareSymbol(r.symbol), r.shortSellRestricted)}</td>;
-                    case "changePct": return <td key={column.col} style={{ ...numCell, color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>{formatChangePct(r.changePct)}</td>;
-                    case "last": return <td key={column.col} style={numCell}>{r.last === null ? "—" : formatPrice(r.last, quoteDecimals(r.last, 2))}</td>;
-                    case "float": return <td key={column.col} style={numCell}>{formatCompactShares(r.floatShares)}</td>;
-                    case "relVol": return <td key={column.col} style={numCell} title="Latest daily volume divided by the mean of up to 50 preceding daily bars.">{formatRelativeVolume(r.relativeVolume)}</td>;
-                    case "vol": return <td key={column.col} style={numCell} title="Latest reported base daily volume.">{formatCompactShares(r.volume)}</td>;
-                    case "sessionVol": return <td key={column.col} style={numCell} title="Provider-reported volume for the current Scanner session.">{formatCompactShares(r.sessionVolume)}</td>;
-                    case "turnover": return <td key={column.col} style={numCell} title="Latest reported base daily dollar turnover.">{formatDollarTurnover(r.turnover)}</td>;
-                    case "shortInterest": return <td key={column.col} style={numCell} title={r.shortInterestAsOf ? `as of ${r.shortInterestAsOf}` : undefined}>{formatShortInterest(r.shortInterest)}</td>;
+                    case "sym": return <td key={column.col} className="mono scanner-symbol" title={r.shortSellRestricted ? "Short Sell Restricted — derived Rule 201 estimate" : undefined}>{appendSsrMarker(bareSymbol(r.symbol), r.shortSellRestricted)}</td>;
+                    case "changePct": return <td key={column.col} className="mono scanner-change" data-direction={r.changePct === null ? "missing" : r.changePct > 0 ? "up" : r.changePct < 0 ? "down" : undefined}>{formatChangePct(r.changePct)}</td>;
+                    case "last": return <td key={column.col} className="mono">{r.last === null ? "—" : formatPrice(r.last, quoteDecimals(r.last, 2))}</td>;
+                    case "float": return <td key={column.col} className="mono">{formatCompactShares(r.floatShares)}</td>;
+                    case "relVol": return <td key={column.col} className="mono" title="Latest daily volume divided by the mean of up to 50 preceding daily bars.">{formatRelativeVolume(r.relativeVolume)}</td>;
+                    case "vol": return <td key={column.col} className="mono" title="Latest reported base daily volume.">{formatCompactShares(r.volume)}</td>;
+                    case "sessionVol": return <td key={column.col} className="mono" title="Provider-reported volume for the current Scanner session.">{formatCompactShares(r.sessionVolume)}</td>;
+                    case "turnover": return <td key={column.col} className="mono" title="Latest reported base daily dollar turnover.">{formatDollarTurnover(r.turnover)}</td>;
+                    case "shortInterest": return <td key={column.col} className="mono" title={r.shortInterestAsOf ? `as of ${r.shortInterestAsOf}` : undefined}>{formatShortInterest(r.shortInterest)}</td>;
                   }
                 })}
               </tr>
               );
             })}
             {rows.length === 0 && cv.refreshedAt && (
-              <tr><td colSpan={shownColumns.length} style={{ padding: 12, color: palette.textMuted, textAlign: "center" }}>No symbols match current filters.</td></tr>
+              <tr className="scanner-empty"><td colSpan={shownColumns.length}>No symbols match current filters.</td></tr>
             )}
           </tbody>
         </table>

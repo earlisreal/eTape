@@ -1,0 +1,62 @@
+.scanner-panel {
+  display: flex; flex-direction: column; position: relative; height: 100%;
+  min-height: 0; min-width: 0; overflow: hidden; background: var(--bg); color: var(--text); font-size: 12px;
+}
+.scanner-header-controls { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.scanner-title { font-weight: 600; white-space: nowrap; }
+.scanner-caption, .scanner-truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scanner-caption { color: var(--text-muted); }
+.scanner-spacer { flex: 1; min-width: 0; }
+.scanner-header-icon {
+  display: inline-flex; align-items: center; flex-shrink: 0; padding: 3px;
+  border: 0; background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.scanner-sound[aria-pressed="false"], .scanner-header-icon:hover { color: var(--text); }
+.scanner-sync {
+  display: flex; align-items: center; gap: 6px; padding: 3px 8px;
+  border-bottom: 1px solid var(--border); min-width: 0;
+}
+.scanner-sync-toggle, .scanner-sync-source {
+  flex: 0 0 auto; color: var(--text-muted); cursor: pointer; font-size: 11px; line-height: 1; white-space: nowrap;
+}
+.scanner-sync-toggle { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; }
+.scanner-sync-toggle[aria-pressed="true"] { color: var(--accent); }
+.scanner-sync-track {
+  display: inline-flex; align-items: center; width: 28px; height: 16px; padding: 2px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); transition: var(--btn-transition);
+}
+.scanner-sync-track > span { width: 10px; height: 10px; border-radius: 50%; background: var(--text-muted); }
+.scanner-sync-toggle[aria-pressed="true"] .scanner-sync-track { border-color: var(--accent); background: var(--accent); }
+.scanner-sync-toggle[aria-pressed="true"] .scanner-sync-track > span { margin-left: auto; background: var(--bg); }
+.scanner-sync-source { padding: 2px 5px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); }
+.scanner-sync-status { color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
+.scanner-summary { padding: 3px 8px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.scanner-status { padding: 6px 8px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.scanner-results { flex: 1; min-height: 0; overflow: auto; }
+.scanner-table { width: 100%; border-collapse: collapse; }
+.scanner-table th {
+  padding: 2px 8px; position: sticky; top: 0; z-index: 1; background: var(--surface); text-align: right;
+}
+.scanner-table th:first-child, .scanner-table .scanner-symbol { text-align: left; }
+.scanner-table .scanner-column-button, .scanner-table .scanner-symbol-button {
+  border: 0; padding: 0; background: transparent; color: inherit; cursor: pointer;
+  font: inherit; letter-spacing: inherit; text-transform: inherit;
+}
+.scanner-table th:has(.scanner-column-button) { padding: 0; }
+.scanner-table .scanner-column-button { width: 100%; padding: 2px 8px; text-align: inherit; white-space: nowrap; }
+.scanner-column-button:focus-visible, .scanner-symbol-button:focus-visible { outline-offset: -2px; }
+.scanner-table tbody tr { cursor: pointer; text-align: right; user-select: none; transition: var(--btn-transition); }
+.scanner-table tbody tr:where(:not(.scanner-empty)):hover { background: rgba(154,106,27,.06); }
+.scanner-table tbody tr.scanner-selected { background: transparent; box-shadow: inset 0 0 0 1px var(--accent); }
+.scanner-table td.mono { padding: 2px 8px; font-weight: 500; }
+.scanner-table td.scanner-symbol { font-weight: 600; white-space: nowrap; }
+.scanner-change[data-direction="up"] { color: var(--up); }
+.scanner-change[data-direction="down"] { color: var(--down); }
+.scanner-change[data-direction="missing"] { color: var(--text-muted); }
+.scanner-table .scanner-empty td { padding: 12px; color: var(--text-muted); text-align: center; cursor: default; }
+.crypto-scanner-filters { width: 248px; max-width: calc(100% - 16px); overflow: auto; }
+.crypto-scanner-filters form { display: grid; gap: 6px; }
+.crypto-scanner-filters label { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.crypto-scanner-filters input { width: 76px; }
+.crypto-scanner-filters select { max-width: 100%; }
+.crypto-scanner-filter-actions { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px; margin-top: 4px; }

@@ -59,10 +59,12 @@ export const cryptoModes = ["5m Gainers", "5m Losers", "Most Active"] as const;
 export type CryptoMode = typeof cryptoModes[number];
 type CryptoSortKey = "base" | "last" | "changePct" | "turnover" | "spreadBps";
 type CryptoSort = { col: CryptoSortKey; dir: "asc" | "desc" };
-export const cryptoColumns: { key: CryptoSortKey; label: string }[] = [
-  { key: "base", label: "Market" }, { key: "last", label: "Last" },
-  { key: "changePct", label: "5m %" }, { key: "turnover", label: "24h Turnover (USDT)" },
-  { key: "spreadBps", label: "Spread (bps)" },
+export const cryptoColumns: { key: CryptoSortKey; label: string; title?: string }[] = [
+  { key: "base", label: "Market" },
+  { key: "changePct", label: "5m %" },
+  { key: "last", label: "Last" },
+  { key: "turnover", label: "24h Turnover", title: "24-hour turnover (USDT)" },
+  { key: "spreadBps", label: "Spread", title: "Spread (bps)" },
 ];
 
 export function readCryptoScanner(settings: Record<string, unknown>) {
