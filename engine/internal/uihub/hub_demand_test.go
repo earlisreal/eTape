@@ -218,6 +218,42 @@ func TestHubDemand_WatchThenFocusedUsesSeparateHistoryRoles(t *testing.T) {
 	}
 }
 
+func TestHubDemand_PerpetualSkipsStockHistory(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	sf := &spyHubFeed{}
+	h.SetFeed(sf)
+	prepare, warm := &spyBackfill{}, &spyBackfill{}
+	h.SetHistoryWarm(prepare.trigger, warm.trigger)
+	var cachedDaily []string
+	h.SetCachedDaily(func(symbol string) { cachedDaily = append(cachedDaily, symbol) })
+	h.Register(&fakeClient{nid: 1})
+
+	const perpetual = "PERP.MEXC.BTC_USDT"
+	const stock = "US.AAPL"
+	h.EnsureDemand(1, feed.WatchDemand("perpetual-tape", perpetual))
+	h.EnsureDemand(1, feed.WatchDemand("stock-tape", stock))
+	h.sync()
+	h.EnsureDemand(1, feed.ChartDemand("perpetual-chart", perpetual))
+	h.EnsureDemand(1, feed.ChartDemand("stock-chart", stock))
+	h.sync()
+
+	if got := warm.snapshot(); !reflect.DeepEqual(got, []string{stock}) {
+		t.Errorf("archive warm symbols = %v, want [%s]", got, stock)
+	}
+	if got := prepare.snapshot(); !reflect.DeepEqual(got, []string{perpetual, stock}) {
+		t.Errorf("focused chart symbols = %v, want [%s %s]", got, perpetual, stock)
+	}
+	if !reflect.DeepEqual(cachedDaily, []string{stock}) {
+		t.Errorf("daily cache symbols = %v, want [%s]", cachedDaily, stock)
+	}
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	if len(sf.ensured) != 4 || sf.ensured[0].Symbol != perpetual || !reflect.DeepEqual(sf.ensured[0].Subs, []feed.SubType{feed.SubTicker}) {
+		t.Errorf("feed demands = %+v, want all four including the perpetual tape ticker", sf.ensured)
+	}
+}
+
 func TestHubDemand_InterestDoesNotBackfill(t *testing.T) {
 	h, cancel := runHub(t)
 	defer cancel()

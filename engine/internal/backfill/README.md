@@ -8,11 +8,17 @@ When OpenD cannot validate a new US symbol, `BootstrapChartHistory` coalesces
 requests for that symbol and fetches bounded recent daily and one-minute ranges
 in parallel. It archives any returned bars before the first chart seed.
 
-Coordinates history providers, archive coverage, demand, and merges. The
-provider chain clips and deduplicates bars before persistence and uses Yahoo
-for daily history when Alpaca returns no in-range bars. `PrepareChart` owns
-focused chart seeding on a dedicated foreground slot. `WarmArchive` owns
-scanner/watch persistence and never seeds the market-data core. `ten_second_days`
+Coordinates stock history providers, archive coverage, demand, and merges.
+Perpetual Time & Sales subscribes to live trades through the exchange feed.
+Focused perpetual charts load recent one-minute and daily candles from the
+contract's exchange. Perpetual demands skip stock archive warming and the
+OpenD daily cache.
+
+The stock provider chain clips and deduplicates bars before persistence and
+uses Yahoo for daily history when Alpaca returns no in-range bars.
+`PrepareChart` owns focused chart seeding on a dedicated foreground slot.
+`WarmArchive` owns scanner/watch persistence and never seeds the market-data
+core. `ten_second_days`
 limits archived 10s bars by calendar days. Its default `0` loads only the current
 trading cycle beginning at the latest NYSE close/post-market start.
 `intraday_days` is the calendar-day 1m retention window for focused charts and
