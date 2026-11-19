@@ -636,7 +636,9 @@ describe("AppShell Monitoring Scanner Sync", () => {
       refreshedAt: "2026-08-15T08:00:01.000Z",
       rows: [row("US.A", 100), row("US.B", 90), row("US.C", 80), row("US.D", 70), row("US.E", 200)],
     } }));
-    await waitFor(() => expect(saved.some((workspace) => workspace.panels.find((panel) => panel.id === "m-chart-yellow")?.settings.symbol === "US.E")).toBe(true));
+    // The second update can wait a full second for the scanner's trailing
+    // throttle before the workspace save begins.
+    await waitFor(() => expect(saved.some((workspace) => workspace.panels.find((panel) => panel.id === "m-chart-yellow")?.settings.symbol === "US.E")).toBe(true), { timeout: 2000 });
   });
 
   it("excludes linked charts from the target count", async () => {
