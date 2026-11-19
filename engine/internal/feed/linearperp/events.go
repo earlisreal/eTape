@@ -83,7 +83,7 @@ func parseEvent(exchange string, t topic, raw json.RawMessage, frameMs int64) (f
 
 func parseTrades(exchange, symbol string, raw json.RawMessage) feed.Event {
 	var rows []trade
-	if exchange == Binance {
+	if exchange != BingX {
 		var row trade
 		if json.Unmarshal(raw, &row) != nil {
 			return nil
@@ -119,7 +119,7 @@ func parseTrades(exchange, symbol string, raw json.RawMessage) feed.Event {
 
 func parseBars(exchange, symbol string, raw json.RawMessage) feed.Event {
 	var rows []barFrame
-	if exchange == Binance {
+	if exchange != BingX {
 		var v struct {
 			Bar barFrame `json:"k"`
 		}

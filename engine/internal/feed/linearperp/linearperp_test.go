@@ -16,7 +16,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed"
 )
 
-func TestBothPerpetualCatalogsAndCandleHistory(t *testing.T) {
+func TestPerpetualCatalogsAndCandleHistory(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UnixMilli()
 		switch r.URL.Path {
@@ -28,7 +28,11 @@ func TestBothPerpetualCatalogsAndCandleHistory(t *testing.T) {
 			fmt.Fprintf(w, `{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"100","quoteVolume":"12345","bidPrice":"99.9","askPrice":"100.1","closeTime":%d}]}`, now)
 		case "/fapi/v1/exchangeInfo":
 			fmt.Fprint(w, `{"symbols":[
-				{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","status":"TRADING","underlyingType":"COIN"},
+				{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","status":"TRADING","underlyingType":"COIN",
+				 "filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10","minPrice":"200.00","maxPrice":"800000"},
+				            {"filterType":"LOT_SIZE","stepSize":"0.0001","minQty":"0.0001","maxQty":"1000"},
+				            {"filterType":"MARKET_LOT_SIZE","stepSize":"0.0001","minQty":"0.0001","maxQty":"120"},
+				            {"filterType":"MIN_NOTIONAL","notional":"50"}]},
 				{"symbol":"TSLAUSDT","baseAsset":"TSLA","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","status":"TRADING","underlyingType":"EQUITY"},
 				{"symbol":"ETHUSDC","baseAsset":"ETH","quoteAsset":"USDC","marginAsset":"USDC","contractType":"PERPETUAL","status":"TRADING","underlyingType":"COIN"}
 			]}`)
@@ -55,16 +59,27 @@ func TestBothPerpetualCatalogsAndCandleHistory(t *testing.T) {
 	}))
 	defer server.Close()
 	for _, pair := range []struct {
-		client *Client
-		native string
-	}{{NewBinance(), "BTCUSDT"}, {NewBingX(), "BTC-USDT"}} {
+		client  *Client
+		native  string
+		trading bool
+	}{{NewBinance(), "BTCUSDT", false}, {NewBinanceDemo(), "BTCUSDT", true}, {NewBingX(), "BTC-USDT", false}} {
 		c := pair.client
 		ctx := context.Background()
 		c.base = server.URL
 		symbol := "PERP." + c.exchange + "." + pair.native
 		rows, err := c.PerpetualMarkets(ctx)
-		if err != nil || len(rows) != 1 || rows[0].ID.String() != symbol || rows[0].TradingEnabled {
+		if err != nil || len(rows) != 1 || rows[0].ID.String() != symbol || rows[0].TradingEnabled != pair.trading {
 			t.Fatalf("%s market list %+v, %v", c.exchange, rows, err)
+		}
+		if pair.trading {
+			rules, ok := c.DemoRules(symbol)
+			if !ok || rules.Multiplier != "0.0001" || rules.PriceTick != "0.10" ||
+				rules.MinNotional != 50 || rules.Maximum != 10_000_000 || rules.Market.Maximum != 1_200_000 {
+				t.Fatalf("incorrect Demo lot and price filters: %+v", rules)
+			}
+			if _, ok := c.DemoRules("PERP.BINANCE.BTCUSDT"); ok {
+				t.Fatal("Demo order rules accepted a production symbol")
+			}
 		}
 		if err := c.Validate(ctx, symbol); err != nil {
 			t.Fatal(err)

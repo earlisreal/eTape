@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PerpetualMarket } from "../gen/wsmsg";
 import type { PanelProps } from "./panels/registry";
-import { cryptoExchange, cryptoExchangeKey, cryptoExchangeLabel, defaultCryptoExchange, useCryptoPreference } from "./cryptoScanner";
+import { binanceDemoExchange, cryptoExchange, cryptoExchangeKey, cryptoExchangeLabel, defaultCryptoExchange, perpetualExchange, useCryptoPreference } from "./cryptoScanner";
 import { Button } from "./controls/Button";
 import { Dialog } from "./controls/Dialog";
 
@@ -41,7 +41,7 @@ export function PerpetualMarketPicker({ commands, onPick, onClose, onOpenVenues 
   const search = filter.trim().toUpperCase().replace(/[ :./_-]/g, "");
   const exchange = selectedExchange ?? marketExchange;
   const exchanges = [...new Set([marketExchange, ...(markets?.map(m => m.exchange) ?? [])])];
-  const results = markets?.filter(m => m.exchange === exchange && `${m.exchange}${m.base}${m.settlement}`.includes(search));
+  const results = markets?.filter(m => m.exchange === exchange && `${m.exchange.replaceAll("-", "")}${m.base}${m.settlement}`.includes(search));
 
   return <Dialog title="USDT perpetuals" onClose={onClose} width={420}
     footer={onOpenVenues && <Button onClick={onOpenVenues}>Configure crypto venues</Button>}>
@@ -53,7 +53,7 @@ export function PerpetualMarketPicker({ commands, onPick, onClose, onOpenVenues 
         setSelectedExchange(event.target.value);
         setLimit(60);
       }}>{exchanges.map(value => {
-        const known = cryptoExchange(value);
+        const known = perpetualExchange(value);
         return <option key={value} value={value}>{known ? cryptoExchangeLabel[known] : value}</option>;
       })}</select></label>}
       <input ref={input} aria-label="Search USDT perpetuals" type="search" className="field" placeholder="Search coin, pair or exchange"
@@ -68,7 +68,7 @@ export function PerpetualMarketPicker({ commands, onPick, onClose, onOpenVenues 
             <Button type="button" variant="quiet" aria-label={`${m.base}/${m.settlement} ${m.exchange}`} onClick={() => onPick(m.symbol)}
               style={{ display: "flex", justifyContent: "space-between", width: "100%", padding: "6px 4px" }}>
               <span className="mono">{m.base}/{m.settlement}</span>
-              <span style={{ color: "var(--text-muted)" }}>{m.exchange}{m.tradingEnabled ? "" : " · Market data only"}</span>
+              <span style={{ color: "var(--text-muted)" }}>{m.exchange === binanceDemoExchange ? cryptoExchangeLabel[binanceDemoExchange] : m.exchange}{m.tradingEnabled ? "" : " · Market data only"}</span>
             </Button>
           </li>)}
         </ul>}

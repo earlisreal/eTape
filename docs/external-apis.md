@@ -122,6 +122,22 @@ are provider signals only.
 
 ## USDT perpetual exchanges
 
+Binance Futures Demo uses `PERP.BINANCE-DEMO.<contract>` for public data and
+execution. REST is pinned to `demo-fapi.binance.com`. The
+`demo-fstream.binance.com` market and public WebSocket routes provide mark,
+aggregate trades, candles and partial-depth snapshots. The demo catalog supplies
+price and quantity filters, including separate market-order lots. Archive sizes
+use the same 10⁻⁸ base-asset scale as Binance production.
+
+Signed account reads require a one-way, single-asset Demo account. Opening
+orders require isolated margin and matching exchange leverage. Closes use
+`positionSide=BOTH` and `reduceOnly=true`. The adapter persists its client order ID
+before submission and reconciles exchange order status with matching trade IDs
+before publishing fills or a terminal state. It polls signed account, position
+and working-order snapshots and allows cancellation of its own managed orders.
+[Binance Futures Demo endpoints](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/general-info#testnet-api-information)
+· [Futures trade API](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade)
+
 The perpetual router sends history and subscriptions to each instrument's
 exchange and preserves its native symbol in stored observations. Binance uses
 USDⓈ-M exchange information and candles, market streams for aggregate trades,

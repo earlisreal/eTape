@@ -13,7 +13,7 @@ const MARKET_PREFIXES = ["US.", "HK.", "PERP."];
  * Allow-list (not a regex) so dotted US tickers like BRK.B aren't misread. */
 export function normalizeSymbol(raw: string): string {
   const upper = raw.toUpperCase();
-  const market = /^(MEXC|BINANCE|BINGX)[:.]([A-Z0-9]+)[./_-]USDT$/.exec(upper);
+  const market = /^(MEXC|BINANCE|BINANCE-DEMO|BINGX)[:.]([A-Z0-9]+)[./_-]USDT$/.exec(upper);
   if (market) {
     const [, exchange, base] = market;
     const separator = exchange === "MEXC" ? "_" : exchange === "BINGX" ? "-" : "";

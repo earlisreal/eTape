@@ -122,13 +122,13 @@ func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, perpetual .
 		switch v.Broker {
 		case "sim":
 			out = append(out, venueBroker{ID: id, Env: v.Env, Broker: sim.New(id, clk, v.EffectiveStartingBalance(), sim.Options{SlippageBps: v.SlippageBps, FillLatencyMs: v.FillLatencyMs})})
-		case "mexc-sim", "mexc", "bingx-vst":
+		case "mexc-sim", "mexc", "bingx-vst", "binance-demo":
 			expected := "paper"
 			if v.Broker == "mexc" {
 				expected = "live"
 			}
 			if v.Env != expected || len(perpetual) == 0 {
-				return nil, fmt.Errorf("venue %s: %s requires environment %s and its Futures feed", v.ID, v.Broker, expected)
+				return nil, fmt.Errorf("venue %s: %s requires environment %s and its perpetual feed", v.ID, v.Broker, expected)
 			}
 			broker, err := perpetual[0](v)
 			if err != nil {

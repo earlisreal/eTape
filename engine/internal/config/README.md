@@ -20,6 +20,7 @@ migrations retain the old keys. `scan.rank_pages` and
 
 USDT perpetual execution uses `mexc-sim` with `env = "paper"` for local
 simulation, `mexc` with `env = "live"` for MEXC Futures, and `bingx-vst` with
-`env = "paper"` for BingX Virtual. Both authenticated venues require
+`env = "paper"` for BingX Virtual. Binance USDⓈ-M Futures Demo uses
+`binance-demo` with `env = "paper"`. Authenticated venues require
 `credentials` to name a stored API key. Settings → Venues & creds writes each
 venue and its gate entry together. Changes apply after engine restart.

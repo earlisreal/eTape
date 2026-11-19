@@ -457,7 +457,7 @@ function PositionsTable({
       const side = row.qty > 0 ? "SELL" : "COVER";
       void oc.submit({ venue, symbol: row.symbol, side, type: "MARKET", tif: "IOC", session: "AUTO",
         qty: Math.abs(row.qty), limitPrice: 0, stopPrice: 0, perpetual: { leverage: row.leverage ?? 1 } },
-      `Close ${Math.abs(row.qty)} ${row.symbol.startsWith("PERP.BINGX.") ? "lots" : "contracts"}`);
+      `Close ${Math.abs(row.qty)} ${row.symbol.startsWith("PERP.BINGX.") || row.symbol.startsWith("PERP.BINANCE-DEMO.") ? "lots" : "contracts"}`);
       return;
     }
     const quote = stores.quote.get(row.symbol);

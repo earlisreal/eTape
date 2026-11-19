@@ -201,13 +201,14 @@ const (
 type Broker string
 
 const (
-	BrokerTradeZero Broker = "tradezero"
-	BrokerAlpaca    Broker = "alpaca"
-	BrokerMoomoo    Broker = "moomoo"
-	BrokerSim       Broker = "sim" // practice venue: demo's injected venue, and any live-configured Broker:"sim" venue
-	BrokerMEXCSim   Broker = "mexc-sim"
-	BrokerMEXC      Broker = "mexc"
-	BrokerBingXVST  Broker = "bingx-vst"
+	BrokerTradeZero   Broker = "tradezero"
+	BrokerAlpaca      Broker = "alpaca"
+	BrokerMoomoo      Broker = "moomoo"
+	BrokerSim         Broker = "sim" // practice venue: demo's injected venue, and any live-configured Broker:"sim" venue
+	BrokerMEXCSim     Broker = "mexc-sim"
+	BrokerMEXC        Broker = "mexc"
+	BrokerBingXVST    Broker = "bingx-vst"
+	BrokerBinanceDemo Broker = "binance-demo"
 )
 
 // AckStatus is AckMsg.Status's typed enum (kept narrow so tygo emits a

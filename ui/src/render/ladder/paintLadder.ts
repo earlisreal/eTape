@@ -60,7 +60,7 @@ export function paintLadder(ctx: CanvasRenderingContext2D, s: LadderPaintState):
   ctx.font = `9.5px ${FONTS.mono}`;
   ctx.fillStyle = p.textMuted;
   ctx.textAlign = "left";
-  const sizeLabel = s.symbol.startsWith("PERP.") ? "CONTRACTS" : "SIZE";
+  const sizeLabel = s.symbol.startsWith("PERP.BINANCE-DEMO.") ? "BASE QTY" : s.symbol.startsWith("PERP.") ? "CONTRACTS" : "SIZE";
   ctx.fillText(sizeLabel, PAD, headY);
   ctx.textAlign = "right";
   ctx.fillText("BID", mid - PAD, headY);

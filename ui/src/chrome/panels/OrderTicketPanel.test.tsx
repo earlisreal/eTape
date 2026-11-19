@@ -62,6 +62,41 @@ describe("OrderTicketPanel", () => {
     }
   });
 
+  it("keeps Binance Futures Demo orders and saved routes on the Demo market", async () => {
+    const { props, stores, linkGroups, sent } = mkProps();
+    const paper = { ...status().venues[0], env: "paper" };
+    const demoVenue = { ...paper, broker: "binance-demo" as const, venue: "binance-demo" };
+    const st = { ...status(), venues: [paper, demoVenue] };
+    const symbol = "PERP.BINANCE-DEMO.BTCUSDT";
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: st });
+    stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: {
+      symbol, bid: 59999, ask: 60001, last: 60000, mark: 60000, ts: "",
+      contract: { base: "BTC", settlement: "USDT", multiplier: "0.0001", priceTick: "0.1",
+        quantityStep: 1, minimum: 1, maximum: 1000, minLeverage: 1, maxLeverage: 125, tradingEnabled: true },
+    } });
+    linkGroups.focus("green", symbol);
+    wrap(props);
+    const venue = screen.getByTestId("venue") as HTMLSelectElement;
+    expect([...venue.options].map(option => option.value)).toEqual(["", "binance-demo"]);
+    fireEvent.change(venue, { target: { value: "binance-demo" } });
+    expect(screen.getByTestId("venue-environment-badge").textContent).toBe("DEMO");
+    fireEvent.change(screen.getByLabelText("Size"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("Limit price"), { target: { value: "60000" } });
+    fireEvent.change(screen.getByLabelText("Isolated leverage"), { target: { value: "20" } });
+    expect(screen.getByText(/0.001 BTC/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Short" }));
+    await waitFor(() => expect(sent.find(entry => entry.name === "SubmitOrder")?.args).toMatchObject({
+      venue: "binance-demo", symbol, side: "SHORT", qty: 10, limitPrice: 60000, perpetual: { leverage: 20 },
+    }));
+    act(() => linkGroups.focus("green", "PERP.BINANCE.BTCUSDT"));
+    expect(screen.queryByTestId("venue-environment-badge")).toBeNull();
+    expect(linkGroups.venueFor("green", st)).toBeUndefined();
+    act(() => linkGroups.focus("green", symbol));
+    expect(linkGroups.venueFor("green", st)).toBe("binance-demo");
+    act(() => linkGroups.focus("green", "US.AAPL"));
+    expect(linkGroups.venueFor("green", st)).toBe("alpaca-paper");
+  });
+
   it("shows no venue environment for a pinned panel", () => {
     const { props, stores } = mkProps();
     props.config.group = null;

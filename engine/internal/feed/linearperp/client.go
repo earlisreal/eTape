@@ -27,20 +27,28 @@ const (
 )
 
 type Client struct {
-	exchange string
-	base     string
-	http     *http.Client
-	marketWS string
-	bookWS   string
-	mu       sync.Mutex
-	markets  map[string]instrument.PerpetualMarket
-	until    time.Time
-	scanner  cryptoscanner.Cache
+	exchange  string
+	base      string
+	http      *http.Client
+	marketWS  string
+	bookWS    string
+	mu        sync.Mutex
+	markets   map[string]instrument.PerpetualMarket
+	until     time.Time
+	scanner   cryptoscanner.Cache
+	demoRules map[string]DemoRules
 }
 
 func NewBinance() *Client {
 	return &Client{exchange: Binance, base: "https://fapi.binance.com", http: &http.Client{Timeout: 7 * time.Second},
 		marketWS: "wss://fstream.binance.com/market/stream", bookWS: "wss://fstream.binance.com/public/stream"}
+}
+
+const BinanceDemoREST = "https://demo-fapi.binance.com"
+
+func NewBinanceDemo() *Client {
+	return &Client{exchange: instrument.BinanceDemo, base: BinanceDemoREST, http: &http.Client{Timeout: 7 * time.Second},
+		marketWS: "wss://demo-fstream.binance.com/market/stream", bookWS: "wss://demo-fstream.binance.com/public/stream"}
 }
 
 func NewBingX() *Client {
@@ -90,7 +98,9 @@ func (c *Client) PerpetualMarkets(ctx context.Context) ([]instrument.PerpetualMa
 	defer c.mu.Unlock()
 	rows := make([]instrument.PerpetualMarket, 0, len(c.markets))
 	for _, row := range c.markets {
-		rows = append(rows, row)
+		if c.exchange != instrument.BinanceDemo || row.TradingEnabled {
+			rows = append(rows, row)
+		}
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ID.Native < rows[j].ID.Native })
 	return rows, nil
@@ -111,33 +121,47 @@ func (c *Client) refreshMarkets(ctx context.Context) error {
 
 func (c *Client) loadMarkets(ctx context.Context) (map[string]instrument.PerpetualMarket, error) {
 	markets := map[string]instrument.PerpetualMarket{}
-	add := func(symbol, base string) {
+	add := func(symbol, base string, trading bool) {
 		id := instrument.Perpetual{Exchange: c.exchange, Native: symbol}
 		if _, ok := instrument.ParsePerpetual(id.String()); !ok || base == "" {
 			return
 		}
-		markets[symbol] = instrument.PerpetualMarket{ID: id, Base: base, Settlement: "USDT", CryptoUnderlying: true}
+		markets[symbol] = instrument.PerpetualMarket{ID: id, Base: base, Settlement: "USDT", CryptoUnderlying: true, TradingEnabled: trading}
 	}
-	if c.exchange == Binance {
+	if c.exchange != BingX {
 		var data struct {
 			Symbols []struct {
-				Symbol     string `json:"symbol"`
-				Type       string `json:"contractType"`
-				Status     string `json:"status"`
-				Base       string `json:"baseAsset"`
-				Quote      string `json:"quoteAsset"`
-				Margin     string `json:"marginAsset"`
-				Underlying string `json:"underlyingType"`
+				Symbol     string          `json:"symbol"`
+				Type       string          `json:"contractType"`
+				Status     string          `json:"status"`
+				Base       string          `json:"baseAsset"`
+				Quote      string          `json:"quoteAsset"`
+				Margin     string          `json:"marginAsset"`
+				Underlying string          `json:"underlyingType"`
+				Filters    []binanceFilter `json:"filters"`
 			} `json:"symbols"`
 		}
 		if err := c.get(ctx, "/fapi/v1/exchangeInfo", nil, &data); err != nil {
 			return nil, err
 		}
+		rules := make(map[string]DemoRules)
 		for _, row := range data.Symbols {
-			if row.Type == "PERPETUAL" && row.Status == "TRADING" && row.Quote == "USDT" && row.Margin == "USDT" && row.Underlying == "COIN" {
-				add(row.Symbol, row.Base)
+			if row.Type != "PERPETUAL" || row.Quote != "USDT" || row.Margin != "USDT" || row.Underlying != "COIN" {
+				continue
+			}
+			if c.exchange == instrument.BinanceDemo {
+				if terms, ok := binanceRules(row.Base, row.Status == "TRADING", row.Filters); ok {
+					rules[row.Symbol] = terms
+					add(row.Symbol, row.Base, terms.TradingEnabled)
+				}
+			} else if row.Status == "TRADING" {
+				add(row.Symbol, row.Base, false)
 			}
 		}
+		if c.exchange == instrument.BinanceDemo && len(rules) == 0 {
+			return nil, errors.New("no Binance Futures Demo contract rules")
+		}
+		c.demoRules = rules
 	} else {
 		var rows []struct {
 			Symbol   string `json:"symbol"`
@@ -161,7 +185,7 @@ func (c *Client) loadMarkets(ctx context.Context) (map[string]instrument.Perpetu
 		for _, row := range rows {
 			if row.Status == 1 && row.Currency == "USDT" && row.Symbol == row.Base+"-USDT" &&
 				!nonCrypto[row.Symbol] {
-				add(row.Symbol, row.Base)
+				add(row.Symbol, row.Base, false)
 			}
 		}
 	}
@@ -205,7 +229,7 @@ func (c *Client) History(ctx context.Context, symbol string, res feed.Resolution
 	}
 	params := url.Values{"symbol": {id.Native}, "interval": {interval}, "limit": {"1000"}}
 	var result []feed.Bar
-	if c.exchange == Binance {
+	if c.exchange != BingX {
 		var rows [][]json.Number
 		if err := c.get(ctx, "/fapi/v1/klines", params, &rows); err != nil {
 			return nil, err

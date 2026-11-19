@@ -27,6 +27,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/backfill"
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
+	"github.com/earlisreal/eTape/engine/internal/broker/binance"
 	"github.com/earlisreal/eTape/engine/internal/broker/bingx"
 	mexcBroker "github.com/earlisreal/eTape/engine/internal/broker/mexc"
 	"github.com/earlisreal/eTape/engine/internal/broker/netx"
@@ -496,8 +497,10 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		st.Flush()
 	}
 	var mexcAPI *mexc.Client
+	var binanceDemoAPI *linearperp.Client
 	if !*demo {
 		mexcAPI = mexc.NewClient()
+		binanceDemoAPI = linearperp.NewBinanceDemo()
 	}
 	perpetualAccounts := map[string]bool{}
 	vbs, err := buildBrokers(cfg, credsFile, execClk, func(v config.Venue) (exec.Broker, error) {
@@ -516,10 +519,16 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		}
 		perpetualAccounts[key] = true
 		path := dbPath + "." + v.ID + ".perpetual-orders.json"
-		if v.Broker == "mexc" {
+		switch v.Broker {
+		case "mexc":
 			return mexcBroker.NewLive(id, pair, execClk, path, mexcAPI)
+		case "bingx-vst":
+			return bingx.NewVirtual(id, pair, execClk, path)
+		case "binance-demo":
+			return binance.NewDemo(id, pair, execClk, path, binanceDemoAPI)
+		default:
+			return nil, fmt.Errorf("unsupported perpetual venue %s", v.Broker)
 		}
-		return bingx.NewVirtual(id, pair, execClk, path)
 	})
 	if err != nil {
 		log.Error("build brokers", "err", err)
@@ -830,6 +839,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		router = perpetualFeedRouter{stocks: feedForHub, archived: st.HasArchivedSymbol, sources: []perpetualSource{
 			{exchange: mexc.Exchange, api: mexcAPI, stream: stream},
 			{exchange: linearperp.Binance, api: binance, stream: linearperp.NewStream(binance)},
+			{exchange: instrument.BinanceDemo, api: binanceDemoAPI, stream: linearperp.NewStream(binanceDemoAPI)},
 			{exchange: linearperp.BingX, api: bingx, stream: linearperp.NewStream(bingx)},
 		}}
 		for _, source := range router.sources {

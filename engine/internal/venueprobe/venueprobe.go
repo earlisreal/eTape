@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
+	"github.com/earlisreal/eTape/engine/internal/broker/binance"
 	"github.com/earlisreal/eTape/engine/internal/broker/bingx"
 	"github.com/earlisreal/eTape/engine/internal/broker/mexc"
 	"github.com/earlisreal/eTape/engine/internal/broker/moomoo"
@@ -140,6 +141,18 @@ func (p *Prober) TestConnection(ctx context.Context, broker, env, credName, keyI
 			mode = "one-way mode"
 		}
 		return Result{OK: true, Env: "live", Message: "USDT Futures balance read verified · " + mode}
+	case "binance-demo":
+		if env != "paper" {
+			return Result{Message: "Select the Binance Futures Demo account check."}
+		}
+		cr, ok := p.resolveCreds(credName, keyID, secretKey)
+		if !ok {
+			return Result{Message: "Binance Futures Demo API key and secret are required."}
+		}
+		if err := binance.VerifyDemo(ctx, cr, p.clk); err != nil {
+			return Result{Message: err.Error()}
+		}
+		return Result{OK: true, Env: "paper", Message: "Demo USDT collateral, one-way mode and single-asset mode verified."}
 	case "bingx-vst":
 		if env != "paper" {
 			return Result{Message: "Select the BingX Virtual account check."}

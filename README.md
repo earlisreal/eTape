@@ -236,6 +236,20 @@ Notes:
 
 ### USDT perpetuals
 
+**Binance Futures Demo.** In **Settings → Venues & creds → Binance Futures Demo**,
+enter an API key and secret from [Binance Demo API Management](https://demo.binance.com/en/my/settings/api-management).
+Use **Test connection**, save, and restart eTape. Open **Browse USDT perpetuals**
+and choose **Binance Futures Demo**, or enter `binance-demo.btc.usdt`.
+Select the **binance-demo** execution venue in the linked Order Ticket and confirm
+the **DEMO** badge. Charts, depth and tape for that symbol use Binance's demo feed.
+
+The venue supports market and limit orders, managed-order cancellation, and
+reduce-only closes in either direction. In Binance Demo, select one-way and
+single-asset mode. Set the contract to isolated margin before opening, then
+enter the same leverage in eTape. The ticket accepts lots or USDT position
+value and previews the base-asset quantity. Chart Risk Entry and attached
+stops are available on the MEXC Perpetual Simulator.
+
 Open a Chart, Time & Sales, DOM Ladder, or Order Ticket. Use **Browse USDT perpetuals**
 next to the symbol to search MEXC, Binance USDⓈ-M, or BingX. You can also type
 `mexc.btc.usdt`, `binance.btc.usdt`, or `bingx.btc.usdt` followed by Enter.

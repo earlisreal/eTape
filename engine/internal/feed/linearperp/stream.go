@@ -86,7 +86,7 @@ func (s *Stream) wanted(lane int) map[string]topic {
 			add := func(kind, name string) {
 				out[name] = topic{symbol: d.Symbol, kind: kind}
 			}
-			if s.client.exchange == Binance {
+			if s.client.exchange != BingX {
 				native := strings.ToLower(id.Native)
 				if lane == 1 {
 					if sub == feed.SubBook {
@@ -218,7 +218,7 @@ func (s *Stream) session(ctx context.Context, lane int, endpoint string) error {
 		sort.Strings(names)
 		send, done := context.WithTimeout(socket, 4*time.Second)
 		defer done()
-		if s.client.exchange == Binance {
+		if s.client.exchange != BingX {
 			method := "UNSUBSCRIBE"
 			if subscribe {
 				method = "SUBSCRIBE"
@@ -331,6 +331,9 @@ func (s *Stream) session(ctx context.Context, lane int, endpoint string) error {
 					last[t.symbol] = value.Ticks[len(value.Ticks)-1].Price
 				case feed.QuoteEvent:
 					value.Quote.Last = last[t.symbol]
+					if rules, ok := s.client.DemoRules(t.symbol); ok {
+						value.Quote.Contract = &rules.ContractRules
+					}
 					event = value
 				}
 				s.emit(ctx, event)

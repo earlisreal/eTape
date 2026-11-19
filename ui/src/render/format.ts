@@ -77,7 +77,7 @@ export function formatSize(size: number): string {
 }
 
 export function formatMarketSize(size: number, symbol: string): string {
-  return (symbol.startsWith("PERP.BINANCE.") || symbol.startsWith("PERP.BINGX.")) ?
+  return (symbol.startsWith("PERP.BINANCE.") || symbol.startsWith("PERP.BINANCE-DEMO.") || symbol.startsWith("PERP.BINGX.")) ?
     ASSET_SIZE_FMT.format(size) : formatSize(size);
 }
 

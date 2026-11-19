@@ -8,7 +8,7 @@ import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
 import type { PerpetualMarket } from "../../gen/wsmsg";
-import { cryptoBrokerExchange, preferredCryptoAccountKey, useCryptoPreference } from "../cryptoScanner";
+import { binanceDemoExchange, cryptoBrokerExchange, cryptoExchangeLabel, preferredCryptoAccountKey, useCryptoPreference } from "../cryptoScanner";
 import { useVenueSelection } from "../exec/venueSelection";
 import { VenueEnvironmentBadge, venueEnvironment } from "../exec/VenueEnvironmentBadge";
 import { useOrderConfig } from "../exec/useOrderConfig";
@@ -256,8 +256,8 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
         Use preferred account ({preferred.venue}{preferred.env ? " · " + preferred.env : ""})
       </button>}
       {group !== null && preferredExchange && exchange !== preferredExchange &&
-        <button className="ctl" type="button" onClick={() => void openOnPreferredExchange()}>Open on {preferredExchange}</button>}
-      {exchange === "MEXC" || exchange === "BINGX" ?
+        <button className="ctl" type="button" onClick={() => void openOnPreferredExchange()}>Open on {cryptoExchangeLabel[preferredExchange]}</button>}
+      {exchange === "MEXC" || exchange === "BINGX" || exchange === binanceDemoExchange ?
         <PerpetualTicket key={`${venue}/${symbol}`} symbol={symbol} venue={venue} broker={venueStatus?.broker}
           routeReady={cryptoBrokerExchange(venueStatus?.broker) === exchange}
           positionReady={venueStatus?.positionDataReady ?? false}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { binanceDemoExchange, cryptoExchangeLabel } from "../cryptoScanner";
 import type { Quote, Side, SubmitOrderArgs } from "../../wire/contract";
 
 interface Props {
@@ -20,9 +21,10 @@ export function PerpetualTicket({ symbol, venue, routeReady, broker, positionRea
   const [stop, setStop] = useState("");
   const [leverage, setLeverage] = useState(1);
   const bingx = symbol.startsWith("PERP.BINGX.");
-  const exchange = bingx ? "BingX Virtual" : "MEXC";
+  const demo = symbol.startsWith(`PERP.${binanceDemoExchange}.`);
+  const exchange = bingx ? "BingX Virtual" : demo ? cryptoExchangeLabel[binanceDemoExchange] : "MEXC";
   const supportsStop = broker === "mexc-sim";
-  const units = bingx ? "lots" : "contracts";
+  const units = bingx || demo ? "lots" : "contracts";
   const contract = quote?.contract;
   const hasDepth = !!quote && quote.bid > 0 && quote.ask > 0;
   const usable = routeReady && positionReady && contract && quote?.mark && hasDepth && venue;
@@ -56,9 +58,10 @@ export function PerpetualTicket({ symbol, venue, routeReady, broker, positionRea
     </div>
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
       <label>Size <input className="ctl" type="number" min={0} value={quantity} onChange={e => setQuantity(e.target.value)} /></label>
-      <select aria-label="Size unit" className="ctl" value={valueUnit} onChange={e => setValueUnit(e.target.value === "notional" ? "notional" : "contracts")}><option value="contracts">{bingx ? "Lots" : "Contracts"}</option><option value="notional">USDT position value</option></select>
+      <select aria-label="Size unit" className="ctl" value={valueUnit} onChange={e => setValueUnit(e.target.value === "notional" ? "notional" : "contracts")}><option value="contracts">{bingx || demo ? "Lots" : "Contracts"}</option><option value="notional">USDT position value</option></select>
       <label>Isolated leverage <input className="ctl" type="number" min={contract?.minLeverage ?? 1} max={bingx ? undefined : contract?.maxLeverage} value={leverage} onChange={e => setLeverage(Number(e.target.value))} /></label>
     </div>
+    {demo && <span>Match the isolated leverage set for this contract in Binance Demo.</span>}
     {supportsStop && <label>Fair-price stop (optional) <input className="ctl" type="number" min={0} step={contract?.priceTick ?? "any"} value={stop} onChange={e => setStop(e.target.value)} /></label>}
     {notional > 0 && contract && <span>{contracts} {units} · {(contracts * multiplier).toLocaleString("en-US", { maximumFractionDigits: 12 })} {contract.base} · {notional.toFixed(2)} USDT position value{validLeverage ? ` · ≈ ${(notional / leverage).toFixed(2)} ${bingx ? "VST" : "USDT"} margin` : ""}</span>}
     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>

@@ -22,7 +22,7 @@ func (c *Client) CryptoScanner(ctx context.Context) (wsmsg.CryptoScannerSnapshot
 
 func (c *Client) scannerTickers(ctx context.Context) ([]cryptoscanner.Ticker, error) {
 	path := "/openApi/swap/v2/quote/ticker"
-	if c.exchange == Binance {
+	if c.exchange != BingX {
 		path = "/fapi/v1/ticker/24hr"
 	}
 	var response []struct {
@@ -35,7 +35,7 @@ func (c *Client) scannerTickers(ctx context.Context) ([]cryptoscanner.Ticker, er
 		return nil, err
 	}
 	books := make(map[string]bookTicker)
-	if c.exchange == Binance {
+	if c.exchange != BingX {
 		var quotes []bookTicker
 		if err := c.get(ctx, "/fapi/v1/ticker/bookTicker", nil, &quotes); err == nil {
 			cutoff := time.Now().Add(-20 * time.Second).UnixMilli()
@@ -49,7 +49,7 @@ func (c *Client) scannerTickers(ctx context.Context) ([]cryptoscanner.Ticker, er
 	tickers := make([]cryptoscanner.Ticker, 0, len(response))
 	for _, row := range response {
 		quote := row.bookTicker
-		if c.exchange == Binance {
+		if c.exchange != BingX {
 			quote = books[row.Symbol]
 		}
 		ticker := cryptoscanner.Ticker{

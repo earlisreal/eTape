@@ -78,7 +78,7 @@ export function depthFraction(value: number, max: number): number {
 /** Depth rendering requires a market that supplies book updates. */
 export function entitledForDepth(symbol: string): boolean {
   return symbol.startsWith("US.") || symbol.startsWith("PERP.MEXC.") ||
-    symbol.startsWith("PERP.BINANCE.") || symbol.startsWith("PERP.BINGX.");
+    symbol.startsWith("PERP.BINANCE.") || symbol.startsWith("PERP.BINANCE-DEMO.") || symbol.startsWith("PERP.BINGX.");
 }
 
 export function normalizeLadderLevels(value: unknown): number {

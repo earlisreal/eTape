@@ -310,7 +310,7 @@ type VenueConfig struct {
 
 var venueIDRe = regexp.MustCompile(`^[a-z0-9-]+$`)
 
-var validBrokers = map[string]bool{"tradezero": true, "alpaca": true, "moomoo": true, "sim": true, "mexc-sim": true, "mexc": true, "bingx-vst": true}
+var validBrokers = map[string]bool{"tradezero": true, "alpaca": true, "moomoo": true, "sim": true, "mexc-sim": true, "mexc": true, "bingx-vst": true, "binance-demo": true}
 
 // ReadVenueConfig parses the TOML file fresh and returns its venue+gate subset.
 // A missing file yields the defaults (not an error), matching boot semantics.
@@ -347,13 +347,13 @@ func ValidateVenueConfig(vc VenueConfig, credKeys []string) error {
 		if v.Env != "paper" && v.Env != "live" {
 			return fmt.Errorf("venue %q: env %q must be paper or live", v.ID, v.Env)
 		}
-		if (v.Broker == "mexc-sim" || v.Broker == "bingx-vst") && v.Env != "paper" {
+		if (v.Broker == "mexc-sim" || v.Broker == "bingx-vst" || v.Broker == "binance-demo") && v.Env != "paper" {
 			return fmt.Errorf("venue %q: %s requires the paper environment", v.ID, v.Broker)
 		}
 		if v.Broker == "mexc" && v.Env != "live" {
 			return fmt.Errorf("venue %q: mexc requires the live environment", v.ID)
 		}
-		if v.Broker == "tradezero" || v.Broker == "alpaca" || v.Broker == "mexc" || v.Broker == "bingx-vst" {
+		if v.Broker == "tradezero" || v.Broker == "alpaca" || v.Broker == "mexc" || v.Broker == "bingx-vst" || v.Broker == "binance-demo" {
 			if !keys[v.Credentials] {
 				return fmt.Errorf("venue %q: credentials %q names no existing key", v.ID, v.Credentials)
 			}

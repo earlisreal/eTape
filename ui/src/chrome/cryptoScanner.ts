@@ -5,7 +5,15 @@ import type { CommandClient } from "./catalogs";
 export const cryptoExchanges = ["MEXC", "BINANCE", "BINGX"] as const;
 export type CryptoExchange = typeof cryptoExchanges[number];
 export const defaultCryptoExchange = cryptoExchanges[0];
-export const cryptoExchangeLabel: Record<CryptoExchange, string> = { MEXC: "MEXC", BINANCE: "Binance", BINGX: "BingX" };
+export const binanceDemoExchange = "BINANCE-DEMO";
+export type PerpetualExchange = CryptoExchange | typeof binanceDemoExchange;
+export const cryptoExchangeLabel: Record<PerpetualExchange, string> = {
+  MEXC: "MEXC", BINANCE: "Binance", BINGX: "BingX", [binanceDemoExchange]: "Binance Futures Demo",
+};
+
+export function perpetualExchange(value: unknown): PerpetualExchange | undefined {
+  return value === binanceDemoExchange ? value : cryptoExchange(value);
+}
 export const cryptoExchangeKey = "crypto.exchange.v1";
 export const preferredCryptoAccountKey = "crypto.account.v1";
 
@@ -45,7 +53,8 @@ export function useCryptoPreference(commands: CommandClient, key: string, enable
   return { value, error, save };
 }
 
-export function cryptoBrokerExchange(broker: string | undefined): CryptoExchange | undefined {
+export function cryptoBrokerExchange(broker: string | undefined): PerpetualExchange | undefined {
+  if (broker === "binance-demo") return binanceDemoExchange;
   if (broker === "bingx-vst") return "BINGX";
   return broker === "mexc-sim" || broker === "mexc" ? "MEXC" : undefined;
 }
