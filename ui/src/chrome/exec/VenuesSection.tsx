@@ -42,7 +42,7 @@ import type { ConnState } from "../../wire/WsClient";
 
 interface Commands { sendCommand(name: string, args: unknown): Promise<AckMsg>; }
 
-const BROKER_LABEL: Record<string, string> = { tradezero: "TradeZero", alpaca: "Alpaca", moomoo: "moomoo", sim: "Simulated" };
+const BROKER_LABEL: Record<string, string> = { tradezero: "TradeZero", alpaca: "Alpaca", moomoo: "moomoo", sim: "Simulated", "mexc-sim": "MEXC Perpetual Simulator" };
 const GATE_CAPS = ["maxOrderValue", "maxPositionValue", "maxPositionShares", "maxOpenOrders"] as const;
 const GLOBAL_CAPS = ["maxDayLoss", "maxSymbolPositionValue", "maxSymbolPositionShares"] as const;
 const CAP_LABELS: Record<(typeof GATE_CAPS)[number] | (typeof GLOBAL_CAPS)[number], string> = {
@@ -71,16 +71,17 @@ interface SecretDraft { keyId: string; secret: string }
 type TestStatus = "idle" | "testing" | "ok" | "fail";
 interface TestState { status: TestStatus; message?: string; accounts?: TestAccount[]; env?: string; accountId?: string }
 
-interface Slots { sim: number; moomoo: number; alpacaPaper: number; alpacaLive: number; tradezero: number }
+interface Slots { sim: number; mexcPaper: number; moomoo: number; alpacaPaper: number; alpacaLive: number; tradezero: number }
 
 // Each slot claims the FIRST venue matching its (broker, env) predicate.
 // Broker values are mutually exclusive per venue, so independent `if`s (not
 // an if/else chain) are just as correct — kept as ifs for clarity, not for
 // any exclusivity reason.
 function resolveSlots(venues: Venue[]): Slots {
-  const s: Slots = { sim: -1, moomoo: -1, alpacaPaper: -1, alpacaLive: -1, tradezero: -1 };
+  const s: Slots = { sim: -1, mexcPaper: -1, moomoo: -1, alpacaPaper: -1, alpacaLive: -1, tradezero: -1 };
   venues.forEach((v, i) => {
     if (v.broker === "sim" && s.sim === -1) s.sim = i;
+    if (v.broker === "mexc-sim" && v.env === "paper" && s.mexcPaper === -1) s.mexcPaper = i;
     if (v.broker === "moomoo" && v.env === "live" && s.moomoo === -1) s.moomoo = i;
     if (v.broker === "alpaca" && v.env === "live" && s.alpacaLive === -1) s.alpacaLive = i;
     if (v.broker === "alpaca" && v.env !== "live" && s.alpacaPaper === -1) s.alpacaPaper = i;
@@ -166,7 +167,7 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
 
   const slots = useMemo(() => resolveSlots(draft.venues), [draft.venues]);
   const claimed = useMemo(
-    () => new Set([slots.sim, slots.moomoo, slots.alpacaPaper, slots.alpacaLive, slots.tradezero].filter((i) => i !== -1)),
+    () => new Set(Object.values(slots).filter(i => i !== -1)),
     [slots],
   );
   const overflow = useMemo(() => draft.venues.map((_, i) => i).filter((i) => !claimed.has(i)), [draft.venues, claimed]);
@@ -537,7 +538,8 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
   };
 
   const groupLabel = { marginBottom: 4 } as const;
-  const perpetualPaper = draft.venues.findIndex(v => v.broker === "mexc-sim");
+  const perpetualPaper = slots.mexcPaper;
+  const perpetualPaperKey = rowKeys[perpetualPaper];
   const fieldWrap = { display: "flex", flexDirection: "column", gap: 2, fontSize: 10.5, color: palette.textMuted } as const;
 
   return (
@@ -582,8 +584,20 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
       <div className={`broker-card ${stripeClass(perpetualPaper >= 0, false)}`}>
         <CardHeader title="MEXC Perpetual Simulator" />
         <div style={{ padding: 12 }}>
-          {perpetualPaper < 0 ? <Button data-testid="mexc-sim-add" onClick={() => addSimulator("mexc-sim")}>Add MEXC paper venue</Button> :
-            <label>Starting collateral (USDT) <input className="field" type="number" min={1} value={draft.venues[perpetualPaper].startingBalance ?? 100000} onChange={e => patchVenue(perpetualPaper, { startingBalance: Number(e.target.value) })} /></label>}
+          {perpetualPaper < 0 ? <Button data-testid="mexc-sim-add" disabled={!setup} onClick={() => addSimulator("mexc-sim")}>Add MEXC paper venue</Button> : <>
+            <div style={{ display: "flex", alignItems: "end", flexWrap: "wrap", gap: 8 }}>
+              <label style={fieldWrap}>Starting collateral (USDT)
+                <input className="field" type="number" min={1} value={draft.venues[perpetualPaper].startingBalance ?? 100000}
+                  onChange={e => patchVenue(perpetualPaper, { startingBalance: Number(e.target.value) })} />
+              </label>
+              <Button variant="danger" confirm confirmLabel="Confirm remove" onClick={() => removeVenue(perpetualPaper)}>Remove paper venue</Button>
+            </div>
+            {perpetualPaperKey && <RiskLimits caps={capsByRow[perpetualPaperKey] ?? zeroCaps()}
+              expanded={limitsOpen[perpetualPaperKey] ?? false}
+              onToggle={() => setLimitsOpen(open => ({ ...open, [perpetualPaperKey]: !open[perpetualPaperKey] }))}
+              onUpdateCap={(cap, value) => updateCap(perpetualPaperKey, cap, value)}
+              currency="USDT" fieldWrap={fieldWrap} groupLabel={groupLabel} testIdPrefix="mexc-paper" />}
+          </>}
         </div>
       </div>
       <div className="broker-card">
@@ -730,12 +744,14 @@ function stripeClass(hasVenue: boolean, isLive: boolean): string {
   return isLive ? "broker-card-live" : "broker-card-ok";
 }
 
-function RiskLimits({ caps, expanded, onToggle, onUpdateCap, fieldWrap, groupLabel, testIdPrefix }: {
+function RiskLimits({ caps, expanded, onToggle, onUpdateCap, fieldWrap, groupLabel, testIdPrefix, currency }: {
   caps: GateLimitsView; expanded: boolean; onToggle: () => void;
   onUpdateCap: (cap: (typeof GATE_CAPS)[number], value: number) => void;
   fieldWrap: object; groupLabel: object; testIdPrefix: string;
+  currency?: "USDT";
 }): JSX.Element {
-  const setCount = GATE_CAPS.filter((c) => (caps[c] ?? 0) > 0).length;
+  const visibleCaps = currency ? GATE_CAPS.filter(c => c !== "maxPositionShares") : GATE_CAPS;
+  const setCount = visibleCaps.filter(c => (caps[c] ?? 0) > 0).length;
   return (
     <div>
       <Button variant="quiet" data-testid={`${testIdPrefix}-limits-toggle`} onClick={onToggle}>
@@ -747,9 +763,9 @@ function RiskLimits({ caps, expanded, onToggle, onUpdateCap, fieldWrap, groupLab
           <div className="col-head" style={groupLabel}>Risk limits</div>
           <div style={{ color: "var(--text-muted)", fontSize: 12, marginBottom: 6 }}>Set a limit to 0 to disable it.</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-            {GATE_CAPS.map((cap) => (
+            {visibleCaps.map((cap) => (
               <label key={cap} style={fieldWrap}>
-                {CAP_LABELS[cap]}
+                {currency ? CAP_LABELS[cap].replace("($)", "(USDT)") : CAP_LABELS[cap]}
                 <input className="field mono" value={String(caps[cap] ?? 0)}
                   onChange={(e) => onUpdateCap(cap, Number(e.target.value) || 0)}
                   style={{ width: 72 }} />

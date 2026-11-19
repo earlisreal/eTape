@@ -242,8 +242,9 @@ followed by Enter.
 Use the same Link Group to follow the contract in all three panels. MEXC USDT
 perpetuals use public Futures market data, UTC chart buckets and contract counts
 for volume and depth. They work during weekends and with OpenD disconnected.
-Enable the **MEXC Perpetual Simulator** under Settings → Venues & creds, save
-and restart eTape, then select its Execution Venue in the same Link Group.
+Enable the **MEXC Perpetual Simulator** under Settings → Venues & creds.
+Set the starting collateral and any USDT risk limits, save and restart eTape,
+then select its Execution Venue in the same Link Group.
 The Order Ticket accepts contracts or USDT position value and isolated
 leverage. It offers separate open and close actions for each direction. The
 simulator uses live MEXC depth and maintains a separate USDT ledger. The chart

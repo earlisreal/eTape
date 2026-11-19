@@ -74,6 +74,29 @@ function execStatusFor(venues: ExecStatus["venues"]): ExecStatus {
 }
 
 describe("VenuesSection — Simulator card", () => {
+  it("saves the MEXC paper venue with a USDT risk gate", async () => {
+    const commands = makeCommands([baseSetup()]);
+    wrap(commands);
+    const add = await screen.findByTestId<HTMLButtonElement>("mexc-sim-add");
+    await waitFor(() => expect(add.disabled).toBe(false));
+    fireEvent.click(add);
+    fireEvent.change(screen.getByLabelText("Starting collateral (USDT)"), { target: { value: "5000" } });
+    fireEvent.click(screen.getByTestId("mexc-paper-limits-toggle"));
+    fireEvent.change(screen.getByLabelText("Max order value (USDT)"), { target: { value: "2500" } });
+    fireEvent.click(screen.getByTestId("save-venues"));
+    await waitFor(() => expect(commands.sent).toContainEqual({
+      name: "SetVenueSetup",
+      args: expect.objectContaining({
+        venues: expect.arrayContaining([expect.objectContaining({
+          id: "mexc-paper", broker: "mexc-sim", env: "paper", startingBalance: 5000,
+        })]),
+        gate: expect.objectContaining({ venue: expect.objectContaining({
+          "mexc-paper": expect.objectContaining({ maxOrderValue: 2500, maxOpenOrders: 0 }),
+        }) }),
+      }),
+    }));
+  });
+
   it("shows the unconfigured body + Add simulator when no sim venue exists, and appends a default sim venue on click", async () => {
     const commands = makeCommands([baseSetup(), baseSetup()]);
     wrap(commands);
