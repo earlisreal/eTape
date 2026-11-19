@@ -114,24 +114,19 @@ func (a *virtualAPI) account(ctx context.Context) (accountState, error) {
 	if err := a.request(ctx, read, "/openApi/swap/v3/user/balance", nil, true, &balances); err != nil {
 		return state, err
 	}
-	for _, asset := range []string{"VST", "USDT"} {
-		for _, b := range balances {
-			if b.Asset != asset {
-				continue
-			}
-			cash, cashErr := b.Available.Float64()
-			equity, equityErr := b.Equity.Float64()
-			used, usedErr := b.Used.Float64()
-			if cashErr != nil || equityErr != nil || usedErr != nil || used < 0 {
-				return state, errors.New("invalid BingX Virtual collateral values")
-			}
-			state.Account = exec.AccountSnapshot{Currency: "VST", Equity: equity, BuyingPower: cash, AvailableCash: cash,
-				MarginUsed: used, DayPnLProvisional: true}
-			break
+	for _, b := range balances {
+		if b.Asset != "VST" {
+			continue
 		}
-		if state.Account.Currency == "VST" {
-			break
+		cash, cashErr := b.Available.Float64()
+		equity, equityErr := b.Equity.Float64()
+		used, usedErr := b.Used.Float64()
+		if cashErr != nil || equityErr != nil || usedErr != nil || used < 0 {
+			return state, errors.New("invalid BingX Virtual collateral values")
 		}
+		state.Account = exec.AccountSnapshot{Currency: "VST", Equity: equity, BuyingPower: cash, AvailableCash: cash,
+			MarginUsed: used, DayPnLProvisional: true}
+		break
 	}
 	if state.Account.Currency == "" {
 		return state, errors.New("BingX Virtual returned no VST collateral account")

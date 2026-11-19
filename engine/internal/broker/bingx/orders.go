@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/instrument"
@@ -179,8 +180,9 @@ func (a *virtualAPI) lookup(ctx context.Context, req exec.OrderRequest) (order, 
 		return o, 0, err
 	}
 	buy := req.Side == exec.SideBuy || req.Side == exec.SideCover
+	reduce := req.Side == exec.SideSell || req.Side == exec.SideCover
 	if !validID(o.id()) || !strings.EqualFold(o.Client, req.ClientOrderID) || o.Symbol != params.Get("symbol") ||
-		o.Type != req.Type.String() || o.Side != "BUY" && o.Side != "SELL" || buy != (o.Side == "BUY") {
+		o.Type != req.Type.String() || o.Side != "BUY" && o.Side != "SELL" || buy != (o.Side == "BUY") || o.ReduceOnly != reduce {
 		return o, 0, errors.New("mismatched BingX Virtual order identity")
 	}
 	switch o.Status {
@@ -218,15 +220,14 @@ func (a *virtualAPI) Observe(ctx context.Context, req exec.OrderRequest) (exec.P
 		return report, nil
 	}
 	var reply list[struct {
-		ID       json.Number `json:"tradeId"`
 		OrderID  json.Number `json:"orderId"`
 		Symbol   string      `json:"symbol"`
 		Side     string      `json:"side"`
-		Quantity json.Number `json:"qty"`
+		Quantity json.Number `json:"volume"`
 		Price    json.Number `json:"price"`
-		Ts       int64       `json:"time"`
+		Time     string      `json:"filledTime"`
 	}]
-	reply.Key = "fillOrders"
+	reply.Key = "fill_orders"
 	if o.Time <= 0 {
 		return report, errors.New("missing BingX Virtual order time")
 	}
@@ -236,18 +237,23 @@ func (a *virtualAPI) Observe(ctx context.Context, req exec.OrderRequest) (exec.P
 		return report, err
 	}
 	var sum float64
-	seen := make(map[string]bool)
+	occurrences := make(map[string]int)
 	for _, f := range reply.Items {
-		id := f.ID.String()
 		q, ok := lots(f.Quantity, digits)
 		price, err := f.Price.Float64()
-		if !validID(id) || seen[id] || f.OrderID.String() != o.id() || f.Symbol != o.Symbol || f.Side != o.Side ||
-			!ok || q <= 0 || err != nil || price <= 0 || f.Ts <= 0 {
+		when, timeErr := time.Parse(time.RFC3339Nano, f.Time)
+		if f.OrderID.String() != o.id() || f.Symbol != o.Symbol || f.Side != o.Side ||
+			!ok || q <= 0 || err != nil || price <= 0 || timeErr != nil || when.UnixMilli() <= 0 {
 			return report, errors.New("invalid BingX Virtual fills")
 		}
-		seen[id] = true
+		// VST returns no execution ID. Build stable identities from the
+		// normalized execution and preserve its multiplicity within this order.
+		key := strconv.FormatInt(when.UnixMilli(), 10) + ":" + strconv.FormatInt(int64(q), 10) + ":" +
+			strconv.FormatFloat(price, 'f', -1, 64)
+		occurrences[key]++
+		id := key + ":" + strconv.Itoa(occurrences[key])
 		sum += q
-		report.Fills = append(report.Fills, exec.PerpetualFill{ID: id, Qty: q, Price: price, TsMs: f.Ts})
+		report.Fills = append(report.Fills, exec.PerpetualFill{ID: id, Qty: q, Price: price, TsMs: when.UnixMilli()})
 	}
 	if sum != filled {
 		return report, errors.New("BingX Virtual fills do not yet reconcile with the order")

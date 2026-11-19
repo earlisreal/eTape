@@ -39,8 +39,8 @@ func TestVirtualSubmitObserveAndCancel(t *testing.T) {
 			if c.base != vstURL {
 				t.Fatal("virtual API uses the wrong host")
 			}
-			order := fmt.Sprintf(`{"orderId":%s,"clientOrderId":%q,"symbol":"BTC-USDT","side":%q,"type":"LIMIT","status":"PARTIALLYFILLED","origQty":"0.0030","executedQty":"0.0010","time":%d}`,
-				exactID, strings.ToLower(submitted), tc.direction, current-100)
+			order := fmt.Sprintf(`{"orderId":%s,"clientOrderId":%q,"symbol":"BTC-USDT","side":%q,"reduceOnly":%t,"type":"LIMIT","status":"PARTIALLYFILLED","origQty":"0.0030","executedQty":"0.0020","time":%d}`,
+				exactID, strings.ToLower(submitted), tc.direction, tc.reduce, current-100)
 			var posts, cancels atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				msg := ""
@@ -97,7 +97,9 @@ func TestVirtualSubmitObserveAndCancel(t *testing.T) {
 					if q.Get("orderId") != exactID || q.Get("tradingUnit") != "COIN" {
 						t.Error("fill query did not use the exact ID and base units")
 					}
-					msg = fmt.Sprintf(`{"fillOrders":[{"tradeId":"100000000000000001","orderId":%s,"symbol":"BTC-USDT","side":%q,"qty":"0.001","price":"92000","time":%d}]}`, exactID, tc.direction, current-50)
+					fill := fmt.Sprintf(`{"orderId":%q,"symbol":"BTC-USDT","side":%q,"volume":"0.001","price":"92000","filledTime":%q}`,
+						exactID, tc.direction, time.UnixMilli(current-50).UTC().Format(time.RFC3339Nano))
+					msg = `{"fill_orders":[` + fill + "," + fill + `]}`
 				default:
 					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 					w.WriteHeader(http.StatusNotFound)
@@ -122,7 +124,7 @@ func TestVirtualSubmitObserveAndCancel(t *testing.T) {
 			}
 			report, err := c.Observe(t.Context(), req)
 			if err != nil || report.BrokerOrderID != exactID || report.Status != exec.StatusAccepted ||
-				len(report.Fills) != 1 || report.Fills[0].Qty != 10 {
+				len(report.Fills) != 2 || report.Fills[0].Qty != 10 || report.Fills[0].ID == report.Fills[1].ID {
 				t.Fatalf("unreconciled order: %+v, %v", report, err)
 			}
 			if err := c.Cancel(t.Context(), req); err != nil || cancels.Load() != 1 {
