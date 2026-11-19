@@ -43,7 +43,7 @@ import type { ConnState } from "../../wire/WsClient";
 
 interface Commands { sendCommand(name: string, args: unknown): Promise<AckMsg>; }
 
-const BROKER_LABEL: Record<string, string> = { tradezero: "TradeZero", alpaca: "Alpaca", moomoo: "moomoo", sim: "Simulated", "mexc-sim": "MEXC Perpetual Simulator" };
+const BROKER_LABEL: Record<string, string> = { tradezero: "TradeZero", alpaca: "Alpaca", moomoo: "moomoo", sim: "Simulated", "mexc-sim": "MEXC Perpetual Simulator", mexc: "MEXC Live", "bingx-vst": "BingX Virtual" };
 const GATE_CAPS = ["maxOrderValue", "maxPositionValue", "maxPositionShares", "maxOpenOrders"] as const;
 const GLOBAL_CAPS = ["maxDayLoss", "maxSymbolPositionValue", "maxSymbolPositionShares"] as const;
 const CAP_LABELS: Record<(typeof GATE_CAPS)[number] | (typeof GLOBAL_CAPS)[number], string> = {
@@ -72,17 +72,26 @@ interface SecretDraft { keyId: string; secret: string }
 type TestStatus = "idle" | "testing" | "ok" | "fail";
 interface TestState { status: TestStatus; message?: string; accounts?: TestAccount[]; env?: string; accountId?: string }
 
-interface Slots { sim: number; mexcPaper: number; moomoo: number; alpacaPaper: number; alpacaLive: number; tradezero: number }
+const cryptoSlots = [
+  { slot: "mexcLive", broker: "mexc", id: "mexc-live", env: "live", pending: "__pending_mexc_live__", currency: "USDT", badge: "LIVE" },
+  { slot: "bingxVST", broker: "bingx-vst", id: "bingx-vst", env: "paper", pending: "__pending_bingx_vst__", currency: "VST", badge: "VST" },
+] as const;
+type CryptoSlot = (typeof cryptoSlots)[number]["slot"];
+type CredentialSlotName = "alpacaPaper" | "alpacaLive" | "tradezero" | CryptoSlot;
+interface Slots { sim: number; mexcPaper: number; mexcLive: number; bingxVST: number; moomoo: number; alpacaPaper: number; alpacaLive: number; tradezero: number }
 
 // Each slot claims the FIRST venue matching its (broker, env) predicate.
 // Broker values are mutually exclusive per venue, so independent `if`s (not
 // an if/else chain) are just as correct — kept as ifs for clarity, not for
 // any exclusivity reason.
 function resolveSlots(venues: Venue[]): Slots {
-  const s: Slots = { sim: -1, mexcPaper: -1, moomoo: -1, alpacaPaper: -1, alpacaLive: -1, tradezero: -1 };
+  const s: Slots = { sim: -1, mexcPaper: -1, mexcLive: -1, bingxVST: -1, moomoo: -1, alpacaPaper: -1, alpacaLive: -1, tradezero: -1 };
   venues.forEach((v, i) => {
     if (v.broker === "sim" && s.sim === -1) s.sim = i;
     if (v.broker === "mexc-sim" && v.env === "paper" && s.mexcPaper === -1) s.mexcPaper = i;
+    for (const { slot, broker, env } of cryptoSlots) {
+      if (v.broker === broker && v.env === env && s[slot] === -1) s[slot] = i;
+    }
     if (v.broker === "moomoo" && v.env === "live" && s.moomoo === -1) s.moomoo = i;
     if (v.broker === "alpaca" && v.env === "live" && s.alpacaLive === -1) s.alpacaLive = i;
     if (v.broker === "alpaca" && v.env !== "live" && s.alpacaPaper === -1) s.alpacaPaper = i;
@@ -337,7 +346,8 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
           return;
         }
         patchVenue(idx, { env: r.env || v.env, accountId: r.accountId || v.accountId });
-        const message = `Connected · ${(r.env || v.env).toUpperCase()}${r.accountId ? " · " + r.accountId : ""}`;
+        const message = cryptoBrokerExchange(v.broker) ? r.message :
+          `Connected · ${(r.env || v.env).toUpperCase()}${r.accountId ? " · " + r.accountId : ""}`;
         setTestState((s) => ({ ...s, [rowKey]: { status: "ok", message, accounts: r.accounts, env: r.env || v.env, accountId: r.accountId || v.accountId } }));
         toast.push({ level: "success", text: message });
       } else {
@@ -372,7 +382,8 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
           return;
         }
         const detectedEnv = r.env || env;
-        const message = `Connected · ${detectedEnv.toUpperCase()}${r.accountId ? " · " + r.accountId : ""}`;
+        const message = cryptoBrokerExchange(broker) ? r.message :
+          `Connected · ${detectedEnv.toUpperCase()}${r.accountId ? " · " + r.accountId : ""}`;
         setTestState((s) => ({ ...s, [pendingKey]: { status: "ok", message, accounts: r.accounts, env: detectedEnv, accountId: r.accountId } }));
         toast.push({ level: "success", text: message });
       } else {
@@ -426,9 +437,9 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
   // authoritative check (surfaced via `err` on failure) for anything this
   // client-side pass doesn't cover, e.g. an id collision with an overflow venue.
   const slotIssues = useMemo(() => {
-    const issues: { alpacaPaper?: string; alpacaLive?: string; tradezero?: string } = {};
+    const issues: Partial<Record<CredentialSlotName, string>> = {};
 
-    const checkExisting = (idx: number, key: "alpacaPaper" | "alpacaLive" | "tradezero", broker: string) => {
+    const checkExisting = (idx: number, key: CredentialSlotName, broker: string) => {
       const v = draft.venues[idx];
       const typed = secretDrafts[v.credentials];
       const typedKeyId = !!typed?.keyId, typedSecret = !!typed?.secret;
@@ -439,7 +450,7 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
       if (!verified) { issues[key] = "test connection before saving"; return; }
       if (broker === "tradezero" && !v.accountId) issues[key] = "account id is required for TradeZero";
     };
-    const checkPending = (pendingKey: string, key: "alpacaPaper" | "alpacaLive" | "tradezero", broker: string) => {
+    const checkPending = (pendingKey: string, key: CredentialSlotName, broker: string) => {
       const typed = secretDrafts[pendingKey];
       const typedKeyId = !!typed?.keyId, typedSecret = !!typed?.secret;
       if (!typedKeyId && !typedSecret) return; // untouched slot: nothing to validate, nothing to save
@@ -452,6 +463,10 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
     if (slots.alpacaPaper !== -1) checkExisting(slots.alpacaPaper, "alpacaPaper", "alpaca"); else checkPending(PENDING_ALPACA_PAPER, "alpacaPaper", "alpaca");
     if (slots.alpacaLive !== -1) checkExisting(slots.alpacaLive, "alpacaLive", "alpaca"); else checkPending(PENDING_ALPACA_LIVE, "alpacaLive", "alpaca");
     if (slots.tradezero !== -1) checkExisting(slots.tradezero, "tradezero", "tradezero"); else checkPending(PENDING_TRADEZERO, "tradezero", "tradezero");
+    for (const { slot, broker, pending } of cryptoSlots) {
+      if (slots[slot] >= 0) checkExisting(slots[slot], slot, broker);
+      else checkPending(pending, slot, broker);
+    }
     return issues;
   }, [draft.venues, secretDrafts, rowKeys, testState, slots]);
   const hasErrors = Object.values(slotIssues).some(Boolean);
@@ -477,6 +492,9 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
     if (slots.alpacaPaper === -1) materialize(PENDING_ALPACA_PAPER, "alpaca-paper", "alpaca", "paper");
     if (slots.alpacaLive === -1) materialize(PENDING_ALPACA_LIVE, "alpaca-live", "alpaca", "live");
     if (slots.tradezero === -1) materialize(PENDING_TRADEZERO, "tradezero", "tradezero", "live");
+    for (const { slot, id, broker, env, pending } of cryptoSlots) {
+      if (slots[slot] === -1) materialize(pending, id, broker, env);
+    }
     return { venues, newCreds };
   };
 
@@ -603,6 +621,34 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
           </>}
         </div>
       </div>
+      {cryptoSlots.map(({ slot, broker, id, env, pending, badge, currency }) => {
+        const index = slots[slot];
+        const venue = index >= 0 ? draft.venues[index] : null;
+        const credential = venue?.credentials ?? pending;
+        const rowKey = venue ? rowKeys[index] : pending;
+        const status = execStatus?.venues.find(v => v.venue === venue?.id);
+        return <div key={id} className={`broker-card ${stripeClass(!!venue, env === "live")}`}>
+          <CardHeader title={BROKER_LABEL[broker]}>
+            <span className={`chip ${env === "live" ? "chip-live" : "chip-set"}`}>{badge}</span>
+          </CardHeader>
+          <div style={{ padding: 12 }}>
+            <CredentialSlot venue={venue} keySet={!!venue && (setup?.credKeys ?? []).includes(credential)}
+              typed={secretDrafts[credential] ?? { keyId: "", secret: "" }} test={testState[rowKey]} issue={slotIssues[slot]}
+              onTyped={(field, value) => setSecretField(credential, field, value)}
+              onTest={() => { if (venue) void testExisting(index); else void testPending(pending, broker, env, false); }}
+              onRemove={venue ? () => removeVenue(index) : undefined}
+              caption={env === "live"
+                ? "Use a Futures-enabled key and one-way isolated positions. Opening orders are blocked when the USD daily-loss limit is enabled."
+                : "Use the BingX Virtual account in one-way mode. Set isolated margin and leverage in BingX before opening a position."}
+              testIdPrefix={id} fieldWrap={fieldWrap} />
+            {status && !status.connected && status.note && <div role="status">{status.note}</div>}
+            {venue && <RiskLimits caps={capsByRow[rowKey] ?? zeroCaps()} expanded={limitsOpen[rowKey] ?? false}
+              onToggle={() => setLimitsOpen(open => ({ ...open, [rowKey]: !open[rowKey] }))}
+              onUpdateCap={(cap, value) => updateCap(rowKey, cap, value)} currency={currency}
+              fieldWrap={fieldWrap} groupLabel={groupLabel} testIdPrefix={id} />}
+          </div>
+        </div>;
+      })}
       <div className="broker-card">
         <CardHeader title="Preferred crypto account" />
         <div style={{ padding: 12 }}>
@@ -775,7 +821,7 @@ function RiskLimits({ caps, expanded, onToggle, onUpdateCap, fieldWrap, groupLab
   caps: GateLimitsView; expanded: boolean; onToggle: () => void;
   onUpdateCap: (cap: (typeof GATE_CAPS)[number], value: number) => void;
   fieldWrap: object; groupLabel: object; testIdPrefix: string;
-  currency?: "USDT";
+  currency?: "USDT" | "VST";
 }): JSX.Element {
   const visibleCaps = currency ? GATE_CAPS.filter(c => c !== "maxPositionShares") : GATE_CAPS;
   const setCount = visibleCaps.filter(c => (caps[c] ?? 0) > 0).length;
@@ -792,7 +838,7 @@ function RiskLimits({ caps, expanded, onToggle, onUpdateCap, fieldWrap, groupLab
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
             {visibleCaps.map((cap) => (
               <label key={cap} style={fieldWrap}>
-                {currency ? CAP_LABELS[cap].replace("($)", "(USDT)") : CAP_LABELS[cap]}
+                {currency ? CAP_LABELS[cap].replace("($)", `(${currency})`) : CAP_LABELS[cap]}
                 <input className="field mono" value={String(caps[cap] ?? 0)}
                   onChange={(e) => onUpdateCap(cap, Number(e.target.value) || 0)}
                   style={{ width: 72 }} />

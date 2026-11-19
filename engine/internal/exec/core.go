@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math"
 	"sort"
@@ -370,6 +371,9 @@ func (c *Core) Recover(ctx context.Context) error {
 				return err
 			}
 		}
+	}
+	if err := c.recoverPerpetualOrders(); err != nil {
+		return err
 	}
 	cutoffMs := session.PoolDay(c.clk.Now()) * 1000
 	var history []EventEnvelope
@@ -761,7 +765,7 @@ func (c *Core) emitProjectedAccount(v VenueID) {
 		return
 	}
 	start, open, realized, day := c.cycles.account(v)
-	if acct.Currency == "USDT" {
+	if acct.Currency == "USDT" || acct.Currency == "VST" {
 		open, realized, day = acct.Realized, acct.Realized, acct.DayPnL
 	}
 	if b := c.brokers[v]; b != nil && (b.Capabilities().AuthoritativeDayPnL || b.Capabilities().CalculatedDayPnL) {
@@ -845,6 +849,9 @@ func (c *Core) applyPositionFill(e OrderFilled, prior Order, hadPrior bool) {
 			return
 		}
 		c.positionExecIDs[key] = true
+	}
+	if e.PositionFromSnapshot {
+		return
 	}
 	if c.trailPositionChecks[e.F.Venue] != nil {
 		return
@@ -1137,7 +1144,7 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 	// Append OrderSubmitted BEFORE the POST (crash-recovery rule). Append failure
 	// blocks submission.
 	o := newOrderFromRequest(req, c.now())
-	guarded := c.requiresReductionGuard(req)
+	guarded := c.requiresReductionGuard(req) || b.Capabilities().ReconciledPerpetual
 	if guarded {
 		o.Action = &OrderAction{Kind: ActionSubmit, Phase: ActionRequested}
 	}
@@ -1198,6 +1205,14 @@ func (c *Core) postSubmit(ctx context.Context, b Broker, req OrderRequest, guard
 		return
 	}
 	ack, err := b.SubmitOrder(ctx, req)
+	var declined PerpetualSubmitDeclined
+	if errors.As(err, &declined) {
+		select {
+		case c.bevents <- OrderRejected{V: req.Venue, OID: req.ClientOrderID, Reason: declined.Error(), Ts: c.now()}:
+		case <-ctx.Done():
+		}
+		return
+	}
 	if guarded {
 		outcome := BrokerSubmitOutcome{V: req.Venue, OID: req.ClientOrderID, Accepted: err == nil && ack.Accepted}
 		if err != nil {
@@ -1527,6 +1542,14 @@ func (c *Core) emitStatus() {
 }
 
 func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
+	if observed, ok := be.(PerpetualObservation); ok {
+		err := c.foldPerpetualObservation(observed)
+		if err != nil {
+			c.syslog("exec.perpetual", err.Error())
+		}
+		observed.Persisted <- err == nil
+		return
+	}
 	if result, ok := be.(trailPositionCheckResult); ok {
 		c.finishTrailPositionCheck(ctx, result)
 		return
@@ -1803,7 +1826,9 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		c.emit(StatusUpdate{Venue: e.V, Connected: true, MasterArmed: c.state.MasterArmed})
 	case BrokerConnDown:
 		c.protectionRevision[e.V]++
-		c.printHealthy = false
+		if broker := c.brokers[e.V]; broker == nil || !broker.Capabilities().ReconciledPerpetual {
+			c.printHealthy = false
+		}
 		c.setPositionsReady(e.V, false)
 		c.pauseHeldVenue(e.V, "venue connection lost; reconcile and resume manually")
 		c.emit(StatusUpdate{Venue: e.V, Connected: false, MasterArmed: c.state.MasterArmed, Note: e.Note})

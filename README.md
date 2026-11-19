@@ -268,8 +268,25 @@ Simulated funding uses the last observed rate and the published settlement time.
 **Futures API Check** in Settings verifies USDT balance access and position mode
 for MEXC, Binance and BingX. MEXC also reports counts for open positions, working
 orders and active TP/SL orders.
-eTape routes crypto orders to the MEXC paper venue. Live execution and forced
-liquidation modeling remain pending.
+
+**MEXC Live** and **BingX Virtual** are separate cards under **Settings → Venues
+& creds**. Enter the venue's Futures API credentials, run **Test connection**,
+save, and restart the engine. Set the exchange account to one-way mode. Set
+isolated margin and the intended leverage on the exchange before opening a
+position. Find the matching exchange in **Crypto Scanner → Exchange** or
+**Browse USDT perpetuals** and select the corresponding **Execution Venue** in
+the linked Order Ticket. BingX Virtual displays the VST badge and uses
+exchange-hosted simulated funds. Its order size can be entered in lots or
+USDT position value. The ticket shows the equivalent base-asset quantity.
+
+Both authenticated routes support market and limit orders, reduce-only closes,
+and cancellation of eTape orders. After a lost response, eTape checks the
+original client order ID and reserves the contract until the result is known.
+New MEXC Live openings are blocked while the global USD daily-loss limit is
+enabled because eTape cannot reconcile its USD day P&L. Chart Risk Entry and
+attached protection are available on the MEXC Perpetual Simulator. Live MEXC
+order permissions and BingX Virtual fills still require an exchange account
+smoke test. Forced-liquidation modeling is pending for the local simulator.
 
 ## Connecting brokers
 

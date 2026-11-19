@@ -24,6 +24,9 @@ type Capabilities struct {
 	// DayLossActiveVenueOnly is retained for config/fixture compatibility; the
 	// global gate now always aggregates eligible live venues.
 	DayLossActiveVenueOnly bool
+	// ReconciledPerpetual uses a durable adapter journal and authoritative
+	// position snapshots. Exchange-hosted protection is not admitted here.
+	ReconciledPerpetual bool
 }
 
 // Broker is the per-venue adapter contract. One instance per configured venue;

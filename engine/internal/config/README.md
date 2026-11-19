@@ -17,3 +17,9 @@ to the database on live boot before a subsequent UI/seed write removes their
 TOML keys; saved per-panel filters remain authoritative. Demo and failed
 migrations retain the old keys. `scan.rank_pages` and
 `news.catalyst_min_score` are retired and ignored if present in older files.
+
+USDT perpetual execution uses `mexc-sim` with `env = "paper"` for local
+simulation, `mexc` with `env = "live"` for MEXC Futures, and `bingx-vst` with
+`env = "paper"` for BingX Virtual. Both authenticated venues require
+`credentials` to name a stored API key. Settings → Venues & creds writes each
+venue and its gate entry together. Changes apply after engine restart.

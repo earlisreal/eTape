@@ -61,11 +61,12 @@ type OrderBlocked struct {
 	Ts     int64
 }
 type OrderFilled struct {
-	F              Fill
-	CumQty         float64
-	LeavesQty      float64
-	AvgPrice       float64
-	PositionExecID string
+	F                    Fill
+	CumQty               float64
+	LeavesQty            float64
+	AvgPrice             float64
+	PositionExecID       string
+	PositionFromSnapshot bool `json:",omitempty"`
 }
 type OrderCanceled struct {
 	V   VenueID

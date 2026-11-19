@@ -256,8 +256,10 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       </button>}
       {group !== null && preferredExchange && exchange !== preferredExchange &&
         <button className="ctl" type="button" onClick={() => void openOnPreferredExchange()}>Open on {preferredExchange}</button>}
-      {symbol.startsWith("PERP.MEXC.") ?
-        <PerpetualTicket key={`${venue}/${symbol}`} symbol={symbol} venue={venue} routeReady={venueStatus?.broker === "mexc-sim"}
+      {exchange === "MEXC" || exchange === "BINGX" ?
+        <PerpetualTicket key={`${venue}/${symbol}`} symbol={symbol} venue={venue} broker={venueStatus?.broker}
+          routeReady={cryptoBrokerExchange(venueStatus?.broker) === exchange}
+          positionReady={venueStatus?.positionDataReady ?? false}
           quote={quote} positionQty={positionQty} submit={(args, label) => { void oc.submit(args, label); }} /> :
         <span>{symbol.split(".")[1]} perpetuals are available for market data.</span>}
     </div>;

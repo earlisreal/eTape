@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
+	"github.com/earlisreal/eTape/engine/internal/broker/bingx"
 	"github.com/earlisreal/eTape/engine/internal/broker/mexc"
 	"github.com/earlisreal/eTape/engine/internal/broker/moomoo"
 	"github.com/earlisreal/eTape/engine/internal/broker/tradezero"
@@ -139,7 +140,22 @@ func (p *Prober) TestConnection(ctx context.Context, broker, env, credName, keyI
 			mode = "one-way mode"
 		}
 		return Result{OK: true, Env: "live", Message: "USDT Futures balance read verified · " + mode}
+	case "bingx-vst":
+		if env != "paper" {
+			return Result{Message: "Select the BingX Virtual account check."}
+		}
+		cr, ok := p.resolveCreds(credName, keyID, secretKey)
+		if !ok {
+			return Result{Message: "BingX Virtual API key and secret are required."}
+		}
+		if err := bingx.VerifyVirtual(ctx, cr, p.clk); err != nil {
+			return Result{Message: err.Error()}
+		}
+		return Result{OK: true, Env: "paper", Message: "BingX Virtual balance and one-way mode verified."}
 	case "mexc":
+		if env != "" && env != "live" {
+			return Result{Message: "Select the MEXC Live account check."}
+		}
 		cr, ok := p.resolveCreds(credName, keyID, secretKey)
 		if !ok {
 			return Result{Message: "MEXC Futures API key and secret are required"}

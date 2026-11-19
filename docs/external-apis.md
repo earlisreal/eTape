@@ -134,15 +134,31 @@ contracts. Depth snapshots replace the board, and reconnects mark gaps in tape.
 [Binance USDⓈ-M market data](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/market-data)
 · [BingX swap market reference](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-market/api-reference.md)
 
-The MEXC Futures REST write and reconciliation code is covered by HTTP fixtures.
-It signs the exact POST body, checks one-way isolated terms, sends reduce-only
-closes, and reconciles ambiguous entries by external ID. Protection evidence
-requires a matching active fair-price market stop on the filled position. The
-Settings probe uses the read-only account snapshot. Binance and BingX Settings
-checks sign their USDT balance and position-mode reads. Live routing and exchange
-verification remain pending. [MEXC signing](https://www.mexc.com/api-docs/futures/integration-guide)
+MEXC Live signs the exact Futures POST body, validates one-way isolated terms and
+the effective leverage tier, and sends close orders with the confirmed position
+ID and reduce-only flag. It reads executions by exchange order ID and verifies
+their total against the order queried by external ID. The Settings check reads
+positions, working orders and active TP/SL. MEXC Live openings are blocked when
+the USD daily-loss cap is active, pending transfer-aware USD account valuation.
+Attached protection stays on the local MEXC simulator until the native
+first-partial stop lifecycle can be verified. [MEXC signing](https://www.mexc.com/api-docs/futures/integration-guide)
 · [Order placement](https://www.mexc.com/api-docs/futures/account-and-trading-endpoints/place-order)
 · [Active TP/SL records](https://www.mexc.com/api-docs/futures/account-and-trading-endpoints/get-current-take-profitstop-loss-order-list)
+
+BingX Virtual directs authenticated reads and writes exclusively to
+`open-api-vst.bingx.com`. Orders use `positionSide=BOTH`, and exits add the
+reduce-only flag. The adapter converts integer lots to exact base quantities
+and verifies the VST mark, collateral and effective leverage before opening.
+Charts and depth use the public BingX feed. The generic Binance and BingX Futures
+API checks use their production read-only endpoints. [BingX API environments](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/base-urls.md)
+· [Swap orders and fills](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md)
+
+The authenticated adapters save pending submissions next to the local database
+before writing to an exchange. They retain ambiguous outcomes and query the
+original ID after restart. eTape imports individual fills once and uses account
+polls as the source of position quantities. Only eTape-managed orders can be
+canceled from these routes. HTTP fixtures cover the request and reconciliation
+protocols. Private exchange smoke tests are pending.
 
 ## Research-only alternatives
 

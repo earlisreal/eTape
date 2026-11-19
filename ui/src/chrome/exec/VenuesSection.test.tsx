@@ -74,6 +74,29 @@ function execStatusFor(venues: ExecStatus["venues"]): ExecStatus {
 }
 
 describe("VenuesSection — Simulator card", () => {
+  it.each([
+    { id: "mexc-live", broker: "mexc", env: "live" },
+    { id: "bingx-vst", broker: "bingx-vst", env: "paper" },
+  ])("saves the $id credentials and adds the correctly scoped venue", async ({ id, broker, env }) => {
+    const commands = makeCommands([baseSetup()], { TestConnection: testAck(okResult({ env, accountId: "", message: "Futures reads verified" })) });
+    wrap(commands);
+    const key = await screen.findByTestId(`${id}-keyid`);
+    fireEvent.change(key, { target: { value: "fixture-key" } });
+    fireEvent.change(screen.getByTestId(`${id}-secret`), { target: { value: "fixture-secret" } });
+    fireEvent.click(screen.getByTestId(`${id}-test`));
+    expect((await screen.findByTestId(`${id}-test-result`)).textContent).toContain("Futures reads verified");
+    expect(commands.sent).toContainEqual({ name: "TestConnection", args: expect.objectContaining({ broker, env }) });
+    fireEvent.click(screen.getByTestId("save-venues"));
+    await waitFor(() => expect(commands.sent).toContainEqual({
+      name: "SetVenueSetup",
+      args: expect.objectContaining({
+        venues: expect.arrayContaining([expect.objectContaining({ id, broker, env, credentials: expect.stringMatching(/^key-/) })]),
+        gate: expect.objectContaining({ venue: expect.objectContaining({ [id]: expect.objectContaining({ maxOpenOrders: 0 }) }) }),
+      }),
+    }));
+    expect(commands.sent.filter(call => call.name === "PutCredential")).toHaveLength(1);
+  });
+
   it("checks Binance and BingX Futures reads under their own exchange credentials", async () => {
     const commands = makeCommands([baseSetup()], { TestConnection: testAck(okResult({ env: "live", message: "Futures read verified" })) });
     wrap(commands);

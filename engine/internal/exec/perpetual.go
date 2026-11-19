@@ -55,6 +55,9 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 		return errors.New("use a valid contract count and market or tick-aligned limit price")
 	}
 	o := req.Perpetual
+	if broker.Capabilities().ReconciledPerpetual && (o.ProtectionPrice != 0 || o.RiskBudget != 0 || o.ProtectionID != "" || o.AutoLeverage) {
+		return errors.New("attached protection and Chart Risk Entry are unavailable on this perpetual venue")
+	}
 	if o.Multiplier != 0 && o.Multiplier != rules.ContractSize() {
 		return errors.New("the contract multiplier changed; review the order")
 	}
@@ -109,9 +112,12 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 
 func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualRiskEntry) CmdAck {
 	deny := func(err string) CmdAck { return CmdAck{Reason: err} }
-	_, rules, err := c.perpetualRoute(cm.Venue, cm.Symbol)
+	broker, rules, err := c.perpetualRoute(cm.Venue, cm.Symbol)
 	if err != nil {
 		return deny(err.Error())
+	}
+	if broker.Capabilities().ReconciledPerpetual {
+		return deny("Chart Risk Entry requires the MEXC Perpetual Simulator")
 	}
 	long := cm.Side == SideBuy
 	if (!long && cm.Side != SideShort) || (long && cm.Stop >= cm.Trigger) || (!long && cm.Stop <= cm.Trigger) {

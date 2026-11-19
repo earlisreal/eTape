@@ -24,6 +24,7 @@ type position struct {
 	Volume           json.Number `json:"holdVol"`
 	Frozen           json.Number `json:"frozenVol"`
 	Average          json.Number `json:"holdAvgPriceFullyScale"`
+	RoundedAverage   json.Number `json:"holdAvgPrice"`
 	LiquidationPrice json.Number `json:"liquidatePrice"`
 	Leverage         int         `json:"leverage"`
 	InitialMargin    json.Number `json:"im"`
@@ -112,11 +113,19 @@ const (
 // placeOrder assumes an admitted, durably recorded intent. A transport error
 // leaves the outcome unknown; the caller can read it by the same external ID.
 func (c client) placeOrder(ctx context.Context, req exec.OrderRequest, rules instrument.ContractRules, fairPrice float64) (orderReceipt, error) {
+	input, err := c.prepareOrder(ctx, req, rules, fairPrice)
+	if err != nil {
+		return orderReceipt{}, err
+	}
+	return c.sendOrder(ctx, input)
+}
+
+func (c client) prepareOrder(ctx context.Context, req exec.OrderRequest, rules instrument.ContractRules, fairPrice float64) (orderSubmission, error) {
 	id, ok := instrument.ParsePerpetual(req.Symbol)
 	if !ok || id.Exchange != "MEXC" || !validClientID(req.ClientOrderID) ||
 		req.Perpetual == nil || !rules.Valid() || !rules.ValidQuantity(req.Qty) ||
 		req.Perpetual.Multiplier != rules.ContractSize() {
-		return orderReceipt{}, errors.New("invalid MEXC Futures order terms")
+		return orderSubmission{}, errors.New("invalid MEXC Futures order terms")
 	}
 	input := orderSubmission{orderIdentity: orderIdentity{Symbol: id.Native, ClientID: req.ClientOrderID},
 		MarginMode: isolated, PositionMode: oneWay, Volume: decimal(req.Qty), Price: "0"}
@@ -131,7 +140,7 @@ func (c client) placeOrder(ctx context.Context, req exec.OrderRequest, rules ins
 	case exec.SideSell:
 		input.Side, direction, input.ReduceOnly = 4, longPosition, true
 	default:
-		return orderReceipt{}, errors.New("invalid MEXC Futures direction")
+		return orderSubmission{}, errors.New("invalid MEXC Futures direction")
 	}
 	switch {
 	case req.Type == exec.TypeMarket:
@@ -146,27 +155,27 @@ func (c client) placeOrder(ctx context.Context, req exec.OrderRequest, rules ins
 		case exec.TIFFOK:
 			input.Type = 4
 		default:
-			return orderReceipt{}, errors.New("unsupported MEXC Futures time in force")
+			return orderSubmission{}, errors.New("unsupported MEXC Futures time in force")
 		}
 	default:
-		return orderReceipt{}, errors.New("invalid MEXC Futures order price or type")
+		return orderSubmission{}, errors.New("invalid MEXC Futures order price or type")
 	}
 	stop := req.Perpetual.ProtectionPrice
 	if stop != 0 {
 		if input.ReduceOnly || input.Type != 3 || !rules.ValidPrice(stop) ||
 			direction == longPosition && (stop >= req.LimitPrice || stop >= fairPrice) ||
 			direction == shortPosition && (stop <= req.LimitPrice || stop <= fairPrice) {
-			return orderReceipt{}, errors.New("MEXC fair-price protection requires a price-capped IOC opening")
+			return orderSubmission{}, errors.New("MEXC fair-price protection requires a price-capped IOC opening")
 		}
 		input.StopLoss, input.LossTrend = decimal(stop), fairTrigger
 	}
 
 	state, err := c.snapshot(ctx)
 	if err != nil {
-		return orderReceipt{}, fmt.Errorf("preflight MEXC Futures: %w", err)
+		return orderSubmission{}, fmt.Errorf("preflight MEXC Futures: %w", err)
 	}
 	if state.Mode != oneWay {
-		return orderReceipt{}, errors.New("MEXC Futures account must be in one-way mode")
+		return orderSubmission{}, errors.New("MEXC Futures account must be in one-way mode")
 	}
 	var current *position
 	for i, p := range state.Positions {
@@ -175,31 +184,35 @@ func (c client) placeOrder(ctx context.Context, req exec.OrderRequest, rules ins
 		}
 		qty, valid := quantity(p.Volume)
 		if !valid {
-			return orderReceipt{}, errors.New("invalid MEXC Futures position volume")
+			return orderSubmission{}, errors.New("invalid MEXC Futures position volume")
 		}
 		if qty != 0 {
 			if current != nil || (p.Side != longPosition && p.Side != shortPosition) {
-				return orderReceipt{}, errors.New("ambiguous MEXC Futures position")
+				return orderSubmission{}, errors.New("ambiguous MEXC Futures position")
 			}
 			current = &state.Positions[i]
 		}
 	}
 	if input.ReduceOnly {
 		if stop != 0 || current == nil || current.Side != direction || current.MarginMode != isolated || !validExchangeID(current.ID) {
-			return orderReceipt{}, errors.New("MEXC close requires a matching isolated position")
+			return orderSubmission{}, errors.New("MEXC close requires a matching isolated position")
 		}
 		held, _ := quantity(current.Volume)
 		frozen, valid := quantity(current.Frozen)
 		if !valid || req.Qty > held-frozen {
-			return orderReceipt{}, errors.New("MEXC close exceeds available contracts")
+			return orderSubmission{}, errors.New("MEXC close exceeds available contracts")
 		}
 		input.PositionID = current.ID
 	} else {
 		input.Leverage = req.Perpetual.Leverage
 		if err := c.checkOpening(ctx, req, rules, fairPrice, input, direction, state, current); err != nil {
-			return orderReceipt{}, err
+			return orderSubmission{}, err
 		}
 	}
+	return input, nil
+}
+
+func (c client) sendOrder(ctx context.Context, input orderSubmission) (orderReceipt, error) {
 	var result orderReceipt
 	if err := c.post(ctx, "/api/v1/private/order/create", input, &result); err != nil {
 		return orderReceipt{}, err

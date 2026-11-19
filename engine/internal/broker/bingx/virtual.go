@@ -1,0 +1,231 @@
+// Package bingx connects only to the exchange's Virtual Simulated Trading API.
+package bingx
+
+import (
+	"bytes"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math/big"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/earlisreal/eTape/engine/internal/broker/perps"
+	"github.com/earlisreal/eTape/engine/internal/clock"
+	"github.com/earlisreal/eTape/engine/internal/creds"
+	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/instrument"
+)
+
+const vstURL = "https://open-api-vst.bingx.com"
+
+type Virtual struct {
+	*perps.Adapter
+	api *virtualAPI
+}
+
+type virtualAPI struct {
+	base         string
+	http         *http.Client
+	clock        clock.Clock
+	creds        creds.Pair
+	quotes       sync.Map
+	catalogMu    sync.RWMutex
+	catalog      map[string]contract
+	catalogUntil time.Time
+}
+
+type contract struct {
+	Symbol       string      `json:"symbol"`
+	Asset        string      `json:"asset"`
+	Currency     string      `json:"currency"`
+	PriceDigits  *int        `json:"pricePrecision"`
+	QtyDigits    *int        `json:"quantityPrecision"`
+	Minimum      json.Number `json:"tradeMinQuantity"`
+	MinimumValue json.Number `json:"tradeMinUSDT"`
+	Fee          json.Number `json:"takerFeeRate"`
+	Status       int         `json:"status"`
+	Open         string      `json:"apiStateOpen"`
+	Close        string      `json:"apiStateClose"`
+}
+
+func NewVirtual(venue exec.VenueID, cr creds.Pair, clk clock.Clock, path string) (*Virtual, error) {
+	if cr.KeyID == "" || cr.SecretKey == "" {
+		return nil, errors.New("BingX Virtual requires API credentials")
+	}
+	api := newVirtualAPI(cr, clk)
+	a, err := perps.New(venue, clk, path, "bingx-vst:"+cr.KeyID, api)
+	if err != nil {
+		return nil, err
+	}
+	return &Virtual{Adapter: a, api: api}, nil
+}
+
+func newVirtualAPI(cr creds.Pair, clk clock.Clock) *virtualAPI {
+	return &virtualAPI{base: vstURL, clock: clk, creds: cr, http: &http.Client{
+		Timeout:       5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}
+}
+
+// VerifyVirtual checks account access and one-way mode with read-only VST requests.
+func VerifyVirtual(ctx context.Context, cr creds.Pair, clk clock.Clock) error {
+	_, err := newVirtualAPI(cr, clk).account(ctx)
+	return err
+}
+
+func (a *Virtual) SetFairQuote(q feed.Quote) {
+	if id, ok := instrument.ParsePerpetual(q.Symbol); ok && id.Exchange == "BINGX" {
+		a.api.quotes.Store(q.Symbol, q)
+	}
+}
+
+type apiError int
+
+func (e apiError) Error() string { return fmt.Sprintf("BingX Virtual API code %d", e) }
+
+func (a *virtualAPI) request(ctx context.Context, method, path string, params url.Values, signed bool, into any) error {
+	if params == nil {
+		params = make(url.Values)
+	}
+	if signed {
+		params.Set("timestamp", strconv.FormatInt(a.clock.Now().UnixMilli(), 10))
+		params.Set("recvWindow", "5000")
+	}
+	query := params.Encode()
+	if signed {
+		mac := hmac.New(sha256.New, []byte(a.creds.SecretKey))
+		mac.Write([]byte(query))
+		query += "&signature=" + hex.EncodeToString(mac.Sum(nil))
+	}
+	target := a.base + path
+	if query != "" {
+		target += "?" + query
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target, nil)
+	if err != nil {
+		return errors.New("could not build BingX Virtual request")
+	}
+	if signed {
+		req.Header.Set("X-BX-APIKEY", a.creds.KeyID)
+	}
+	res, err := a.http.Do(req)
+	if err != nil {
+		// net/http errors can include the signed URL.
+		return errors.New("BingX Virtual connection failed")
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("BingX Virtual returned HTTP %d", res.StatusCode)
+	}
+	var response struct {
+		Code *int            `json:"code"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(&response); err != nil || response.Code == nil {
+		return errors.New("invalid BingX Virtual response")
+	}
+	if *response.Code != 0 {
+		return apiError(*response.Code)
+	}
+	if len(response.Data) == 0 || bytes.Equal(response.Data, []byte("null")) || json.Unmarshal(response.Data, into) != nil {
+		return errors.New("invalid BingX Virtual data")
+	}
+	return nil
+}
+
+func (a *virtualAPI) refreshCatalog(ctx context.Context) error {
+	a.catalogMu.RLock()
+	fresh := a.clock.Now().Before(a.catalogUntil)
+	a.catalogMu.RUnlock()
+	if fresh {
+		return nil
+	}
+	var items []contract
+	if err := a.request(ctx, http.MethodGet, "/openApi/swap/v2/quote/contracts", nil, false, &items); err != nil {
+		return err
+	}
+	catalog := make(map[string]contract)
+	for _, item := range items {
+		id, ok := instrument.ParsePerpetual("PERP.BINGX." + item.Symbol)
+		if ok && strings.HasSuffix(id.Native, "-USDT") && item.Currency == "USDT" && item.Asset != "" &&
+			item.QtyDigits != nil && *item.QtyDigits >= 0 && *item.QtyDigits <= 12 &&
+			item.PriceDigits != nil && *item.PriceDigits >= 0 && *item.PriceDigits <= 12 {
+			catalog[id.Native] = item
+		}
+	}
+	if len(catalog) == 0 {
+		return errors.New("no BingX Virtual USDT contracts")
+	}
+	a.catalogMu.Lock()
+	a.catalog, a.catalogUntil = catalog, a.clock.Now().Add(2*time.Minute)
+	a.catalogMu.Unlock()
+	return nil
+}
+
+func tick(precision int) string {
+	if precision == 0 {
+		return "1"
+	}
+	return "0." + strings.Repeat("0", precision-1) + "1"
+}
+
+func lots(raw json.Number, digits int) (float64, bool) {
+	value, ok := new(big.Rat).SetString(raw.String())
+	if !ok {
+		return 0, false
+	}
+	unit, _ := new(big.Rat).SetString(tick(digits))
+	value.Quo(value, unit)
+	if !value.IsInt() || value.Num().BitLen() > 53 {
+		return 0, false
+	}
+	return float64(value.Num().Int64()), true
+}
+
+func (a *virtualAPI) contract(native string) (contract, bool) {
+	a.catalogMu.RLock()
+	defer a.catalogMu.RUnlock()
+	item, ok := a.catalog[native]
+	return item, ok && a.clock.Now().Before(a.catalogUntil)
+}
+
+func (a *virtualAPI) Rules(symbol string) (instrument.ContractRules, bool) {
+	id, ok := instrument.ParsePerpetual(symbol)
+	if !ok || id.Exchange != "BINGX" {
+		return instrument.ContractRules{}, false
+	}
+	item, ok := a.contract(id.Native)
+	if !ok {
+		return instrument.ContractRules{}, false
+	}
+	minimum, valid := lots(item.Minimum, *item.QtyDigits)
+	if !valid || minimum < 0 {
+		return instrument.ContractRules{}, false
+	}
+	// Actual opening size and leverage limits are account- and side-specific.
+	rules := instrument.ContractRules{Base: item.Asset, Settlement: "USDT", Multiplier: tick(*item.QtyDigits),
+		PriceTick: tick(*item.PriceDigits), QuantityStep: 1, Minimum: int64(max(1, minimum)), Maximum: 1<<53 - 1,
+		MinLeverage: 1, MaxLeverage: 500, TakerFee: item.Fee.String(), TradingEnabled: item.Status == 1 && item.Open == "true"}
+	return rules, rules.Valid()
+}
+
+func (a *virtualAPI) FairPrice(symbol string) (float64, bool) {
+	value, ok := a.quotes.Load(symbol)
+	if !ok {
+		return 0, false
+	}
+	q := value.(feed.Quote)
+	age := a.clock.Now().Sub(time.UnixMilli(q.TsMs))
+	return q.Mark, q.Mark > 0 && age >= -2*time.Second && age < 5*time.Second
+}

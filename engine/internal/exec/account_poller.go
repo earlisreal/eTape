@@ -170,7 +170,7 @@ func (p *AccountPoller) targets() []VenueID {
 	}
 	out := make([]VenueID, 0, len(set))
 	for v := range set {
-		if p.brokers[v] != nil {
+		if broker := p.brokers[v]; broker != nil && !broker.Capabilities().ReconciledPerpetual {
 			out = append(out, v)
 		}
 	}

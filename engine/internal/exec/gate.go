@@ -29,6 +29,8 @@ type GateConfig struct {
 	// breaker. Production sets this for live venues; nil keeps legacy fixtures
 	// inclusive.
 	DayLossEligible map[VenueID]bool
+	// UnvaluedLive identifies live venues without reconciled USD day P&L.
+	UnvaluedLive map[VenueID]bool
 	// AccountRequired identifies live venues whose account snapshots protect
 	// new opening orders. A venue becomes stale after the poller reports false.
 	AccountRequired map[VenueID]bool
@@ -103,15 +105,19 @@ func Evaluate(s *State, cfg GateConfig, req OrderRequest, marks MarkSource) (boo
 	if _, dup := s.orderIndex[req.ClientOrderID]; dup {
 		return false, "duplicate order id"
 	}
-	if AnyRequiredAccountStale(s, cfg) && !reducesPosition(s, req) {
+	reducing := reducesPosition(s, req)
+	if AnyRequiredAccountStale(s, cfg) && !reducing {
 		return false, "account data stale"
+	}
+	if cfg.Global.MaxDayLoss > 0 && cfg.UnvaluedLive[req.Venue] && !reducing {
+		return false, "USD day-loss is unavailable for this venue"
 	}
 
 	// 3.5. global day-loss breach — checked here (not just reactively via
 	// auto-disarm) so a re-arm after breach, or the window before the first
 	// account refresh, cannot bypass it. Auto-disarm (Core.handleBrokerEvent)
 	// remains the reactive layer on top of this authoritative submit-time check.
-	if BreachedDayLoss(s, cfg) {
+	if BreachedDayLoss(s, cfg) && (!cfg.UnvaluedLive[req.Venue] || !reducing) {
 		return false, "day-loss breached"
 	}
 

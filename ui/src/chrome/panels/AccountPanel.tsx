@@ -384,8 +384,9 @@ function StatsStrip({
   const held = heldRef.current.get(venue);
   const displayEquity = positionOpen ? held?.equity ?? equity : equity;
   const displayBp = positionOpen ? held?.bp ?? bp : bp;
-  const perpetual = account?.currency === "USDT";
-  const value = (amount: number | null) => perpetual && amount !== null ? `${amount.toFixed(2)} USDT` : money(amount);
+  const perpetual = account?.currency === "USDT" || account?.currency === "VST";
+  const estimatedPnL = perpetual && account.dayPnlProvisional;
+  const value = (amount: number | null) => perpetual && amount !== null ? `${amount.toFixed(2)} ${account.currency}` : money(amount);
 
   const cell = (label: string, testid: string, value: string, tone?: number) => (
     <div style={{ display: "flex", flexDirection: "column", padding: "2px 10px" }}>
@@ -399,9 +400,9 @@ function StatsStrip({
       {cell("Equity", "acct-equity", value(perpetual ? equity : displayEquity))}
       {cell(perpetual ? "Available margin" : "Cash", "acct-cash", value(cash))}
       {cell(perpetual ? "Margin used" : "Buying Power", "acct-bp", value(perpetual ? account.marginUsed ?? 0 : displayBp))}
-      {cell(perpetual ? "Since-start P&L" : "Day P&L", "acct-daypnl", value(dayPnl), dayPnl ?? 0)}
+      {cell(perpetual ? "Since-start P&L" : "Day P&L", "acct-daypnl", value(estimatedPnL ? null : dayPnl), dayPnl ?? 0)}
       {cell("Unrealized", "acct-unrealized", value(unrealized), unrealized)}
-      {cell("Realized", "acct-realized", value(realized), realized ?? 0)}
+      {cell("Realized", "acct-realized", value(estimatedPnL ? null : realized), realized ?? 0)}
       {stale && account && <span data-testid="acct-stale" style={{ fontSize: 10, color: palette.warn }} title={`Last account update ${formatEtDateTime(account.tsMs)}`}>Stale · {formatEtDateTime(account.tsMs)}</span>}
       <div style={{ flex: 1 }} />
     </div>
@@ -456,7 +457,7 @@ function PositionsTable({
       const side = row.qty > 0 ? "SELL" : "COVER";
       void oc.submit({ venue, symbol: row.symbol, side, type: "MARKET", tif: "IOC", session: "AUTO",
         qty: Math.abs(row.qty), limitPrice: 0, stopPrice: 0, perpetual: { leverage: row.leverage ?? 1 } },
-      `Close ${Math.abs(row.qty)} contracts`);
+      `Close ${Math.abs(row.qty)} ${row.symbol.startsWith("PERP.BINGX.") ? "lots" : "contracts"}`);
       return;
     }
     const quote = stores.quote.get(row.symbol);

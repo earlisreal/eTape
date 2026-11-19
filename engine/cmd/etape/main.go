@@ -27,6 +27,8 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/backfill"
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
+	"github.com/earlisreal/eTape/engine/internal/broker/bingx"
+	mexcBroker "github.com/earlisreal/eTape/engine/internal/broker/mexc"
 	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/broker/sim"
 	"github.com/earlisreal/eTape/engine/internal/buildinfo"
@@ -497,9 +499,27 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	if !*demo {
 		mexcAPI = mexc.NewClient()
 	}
+	perpetualAccounts := map[string]bool{}
 	vbs, err := buildBrokers(cfg, credsFile, execClk, func(v config.Venue) (exec.Broker, error) {
-		return sim.NewPerpetual(sim.PerpetualConfig{Venue: exec.VenueID(v.ID), Exchange: mexc.Exchange,
-			Clock: execClk, StartingUSDT: v.EffectiveStartingBalance(), Path: dbPath + "." + v.ID + ".perpetual.json", Rules: mexcAPI.Rules})
+		id := exec.VenueID(v.ID)
+		if v.Broker == "mexc-sim" {
+			return sim.NewPerpetual(sim.PerpetualConfig{Venue: id, Exchange: mexc.Exchange,
+				Clock: execClk, StartingUSDT: v.EffectiveStartingBalance(), Path: dbPath + "." + v.ID + ".perpetual.json", Rules: mexcAPI.Rules})
+		}
+		pair, err := credsFile.Get(v.Credentials)
+		if err != nil {
+			return nil, err
+		}
+		key := v.Broker + ":" + pair.KeyID
+		if perpetualAccounts[key] {
+			return nil, fmt.Errorf("duplicate credentials on %s perpetual venues", v.Broker)
+		}
+		perpetualAccounts[key] = true
+		path := dbPath + "." + v.ID + ".perpetual-orders.json"
+		if v.Broker == "mexc" {
+			return mexcBroker.NewLive(id, pair, execClk, path, mexcAPI)
+		}
+		return bingx.NewVirtual(id, pair, execClk, path)
 	})
 	if err != nil {
 		log.Error("build brokers", "err", err)
@@ -512,21 +532,25 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	gateConfig := buildGateConfig(cfg.Gate)
 	gateConfig.DayLossEligible = map[exec.VenueID]bool{}
 	gateConfig.AccountRequired = map[exec.VenueID]bool{}
+	gateConfig.UnvaluedLive = map[exec.VenueID]bool{}
 	accountHealthVenues := map[exec.VenueID]bool{}
 	var brokerWG sync.WaitGroup
 	for _, vb := range vbs {
 		brokers[vb.ID] = vb.Broker
 		venueIDs = append(venueIDs, vb.ID)
 		if strings.EqualFold(vb.Env, "live") {
-			gateConfig.DayLossEligible[vb.ID] = true
-			gateConfig.AccountRequired[vb.ID] = true
+			gateConfig.UnvaluedLive[vb.ID] = vb.Broker.Capabilities().ReconciledPerpetual
+			gateConfig.DayLossEligible[vb.ID] = !gateConfig.UnvaluedLive[vb.ID]
+			// The perpetual adapter maintains readiness. Equity venues
+			// retain their existing global stale-account interlock.
+			gateConfig.AccountRequired[vb.ID] = !gateConfig.UnvaluedLive[vb.ID]
 		}
 		if strings.EqualFold(vb.Env, "live") {
 			if _, ok := vb.Broker.(*alpaca.Adapter); ok {
 				accountHealthVenues[vb.ID] = true
 			}
 		}
-		if vb.Run != nil {
+		if vb.Run != nil && !vb.Broker.Capabilities().ReconciledPerpetual {
 			brokerWG.Add(1)
 			go func(run func(context.Context)) { defer brokerWG.Done(); run(ctx) }(vb.Run)
 		}
@@ -545,6 +569,12 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	}
 	execDone := make(chan struct{})
 	go func() { defer close(execDone); _ = execCore.Run(ctx) }()
+	for _, vb := range vbs {
+		if vb.Run != nil && vb.Broker.Capabilities().ReconciledPerpetual {
+			brokerWG.Add(1)
+			go func(run func(context.Context)) { defer brokerWG.Done(); run(ctx) }(vb.Run)
+		}
+	}
 	demands := exec.NewAccountDemandRegistry()
 	accountPoller := exec.NewAccountPoller(exec.AccountPollerConfig{
 		Brokers: brokers, Demands: demands, Store: st, Clock: execClk,
@@ -1186,10 +1216,14 @@ func hz(rate float64) time.Duration {
 // venueseed.New call site for the exact gate; forwardMD only ever guards
 // against nil, it doesn't decide when a Seeder exists.
 func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, seeder *venueseed.Seeder, venues []venueBroker) {
-	var perpetual []*sim.PerpetualSimulator
+	var perpetual []interface{ SetFairQuote(feed.Quote) }
+	var virtual *bingx.Virtual
 	for _, v := range venues {
-		if paper, ok := v.Broker.(*sim.PerpetualSimulator); ok {
-			perpetual = append(perpetual, paper)
+		if sink, ok := v.Broker.(interface{ SetFairQuote(feed.Quote) }); ok {
+			perpetual = append(perpetual, sink)
+		}
+		if b, ok := v.Broker.(*bingx.Virtual); ok {
+			virtual = b
 		}
 	}
 	for {
@@ -1197,12 +1231,18 @@ func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, seeder *venue
 		case <-ctx.Done():
 			return
 		case u := <-core.Updates():
-			hub.PublishMD(u)
 			if q, ok := u.(md.QuoteUpdate); ok && instrument.IsPerpetual(q.Quote.Symbol) {
-				for _, paper := range perpetual {
-					paper.SetFairQuote(q.Quote)
+				for _, sink := range perpetual {
+					sink.SetFairQuote(q.Quote)
+				}
+				if virtual != nil && strings.HasPrefix(q.Quote.Symbol, "PERP.BINGX.") {
+					if rules, ok := virtual.ContractRules(q.Quote.Symbol); ok {
+						q.Quote.Contract = &rules
+						u = q
+					}
 				}
 			}
+			hub.PublishMD(u)
 			if cu, ok := u.(md.ConnUpdate); ok && cu.Up && seeder != nil {
 				seeder.OnFeedUp(ctx)
 			}

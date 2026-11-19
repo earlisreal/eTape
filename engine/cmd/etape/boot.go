@@ -122,15 +122,23 @@ func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, perpetual .
 		switch v.Broker {
 		case "sim":
 			out = append(out, venueBroker{ID: id, Env: v.Env, Broker: sim.New(id, clk, v.EffectiveStartingBalance(), sim.Options{SlippageBps: v.SlippageBps, FillLatencyMs: v.FillLatencyMs})})
-		case "mexc-sim":
-			if v.Env != "paper" || len(perpetual) == 0 {
-				return nil, fmt.Errorf("venue %s: MEXC simulator requires a paper environment and public Futures feed", v.ID)
+		case "mexc-sim", "mexc", "bingx-vst":
+			expected := "paper"
+			if v.Broker == "mexc" {
+				expected = "live"
+			}
+			if v.Env != expected || len(perpetual) == 0 {
+				return nil, fmt.Errorf("venue %s: %s requires environment %s and its Futures feed", v.ID, v.Broker, expected)
 			}
 			broker, err := perpetual[0](v)
 			if err != nil {
 				return nil, fmt.Errorf("venue %s: %w", v.ID, err)
 			}
-			out = append(out, venueBroker{ID: id, Env: v.Env, Broker: broker})
+			registered := venueBroker{ID: id, Env: v.Env, Broker: broker}
+			if runner, ok := broker.(interface{ Run(context.Context) }); ok {
+				registered.Run = runner.Run
+			}
+			out = append(out, registered)
 		case "tradezero":
 			pair, err := cr.Get(v.Credentials)
 			if err != nil {
