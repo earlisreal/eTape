@@ -12,6 +12,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/instrument"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
@@ -708,7 +709,7 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 	if f := h.feed(); f != nil {
 		f.Ensure(r.d)
 	}
-	if r.d.CachedDaily {
+	if r.d.CachedDaily && !instrument.IsPerpetual(r.d.Symbol) {
 		if fn := h.cachedDaily(); fn != nil {
 			fn(r.d.Symbol)
 		}
@@ -718,7 +719,7 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 	h.triggerBackfill(r.d.Symbol, r.d.WantsHistory, r.d.Focused)
 }
 
-// triggerBackfill dispatches an explicit focused or archive-only worker.
+// triggerBackfill dispatches focused preparation or stock-only archive warming.
 func (h *Hub) triggerBackfill(sym string, wantsHistory, focused bool) {
 	if !h.historyWired {
 		return
@@ -738,7 +739,8 @@ func (h *Hub) triggerBackfill(sym string, wantsHistory, focused bool) {
 		worker.prepare(sym, func(ok bool) { h.reportBackfill(sym, true, ok) })
 		return
 	}
-	if worker == nil || worker.warm == nil || !wantsHistory || h.warmed[sym] || h.warmInflight[sym] {
+	if worker == nil || worker.warm == nil || !wantsHistory || instrument.IsPerpetual(sym) ||
+		h.warmed[sym] || h.warmInflight[sym] {
 		return
 	}
 	h.warmInflight[sym] = true
