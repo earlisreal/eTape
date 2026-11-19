@@ -141,20 +141,23 @@ export class LinkGroups {
     const market = venueMarket(this.symbolFor(group));
     if (!group || !market) return undefined;
     const candidate = this.savedVenueFor(group, status, market);
-    return candidate && !requiresLiveConfirmation(status, this.selections(group).switchedFrom, candidate) ? candidate : undefined;
+    if (market !== "stocks" && candidate && requiresLiveConfirmation(status, this.selections(group).switchedFrom, candidate)) {
+      return undefined;
+    }
+    return candidate;
   }
 
   awaitingLiveConfirmation(group: LinkGroup, status: ExecStatus | null): boolean {
     const market = venueMarket(this.symbolFor(group));
-    if (!group || !market) return false;
+    if (!group || !market || market === "stocks") return false;
     const saved = this.savedVenueFor(group, status, market);
     return !!saved && requiresLiveConfirmation(status, this.selections(group).switchedFrom, saved);
   }
 
   needsLiveConfirmation(group: LinkGroup, venue: VenueID, status = this.getExecStatus?.()): boolean {
     if (!group) return false;
-    return requiresLiveConfirmation(status, this.venueFor(group, status), venue) ||
-      requiresLiveConfirmation(status, this.selections(group).switchedFrom, venue);
+    const current = this.venueFor(group, status) ?? this.selections(group).switchedFrom;
+    return requiresLiveConfirmation(status, current, venue);
   }
 
   matchesOrderContext(group: LinkGroup, symbol: string, venue: VenueID, status = this.getExecStatus?.()): boolean {

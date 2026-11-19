@@ -124,6 +124,7 @@ test("linked panels recall the stock and exchange accounts", async ({ page, cont
         const status: ExecStatus = frame.payload;
         status.masterArmed = false;
         status.venues.push(
+          { ...status.venues[0], venue: "alpaca-live", broker: "alpaca", env: "live", connected: false },
           { ...status.venues[0], venue: "mexc-paper", broker: "mexc-sim", env: "paper" },
           { ...status.venues[0], venue: "bingx-virtual", broker: "bingx-vst", env: "paper" },
         );
@@ -140,6 +141,15 @@ test("linked panels recall the stock and exchange accounts", async ({ page, cont
   const account = page.getByTestId("acct-venue");
   const cue = page.getByTestId("hotkey-target-cue");
   await expect(select).toHaveValue("sim-paper");
+  const confirmation = page.waitForEvent("dialog");
+  await Promise.all([
+    select.selectOption("alpaca-live"),
+    confirmation.then(async dialog => {
+      expect(dialog.message()).toBe("Switch this Link Group from paper to live trading?");
+      await dialog.accept();
+    }),
+  ]);
+  await expect(account).toHaveValue("alpaca-live");
   const load = async (symbol: string) => {
     await ticket.getByTestId("panel-symbol").click();
     await page.keyboard.type(symbol);
@@ -148,7 +158,7 @@ test("linked panels recall the stock and exchange accounts", async ({ page, cont
   await load("mexc.btc.usdt");
   await expect(select).toHaveValue("");
   await expect(select.locator("option:checked")).toHaveText("Choose a MEXC account");
-  await expect(select.locator("option[value='sim-paper']")).toHaveCount(0);
+  await expect(select.locator("option[value='alpaca-live']")).toHaveCount(0);
   await select.selectOption("mexc-paper");
   await expect(account).toHaveValue("mexc-paper");
   await expect(cue).toContainText("mexc-paper");
@@ -163,8 +173,10 @@ test("linked panels recall the stock and exchange accounts", async ({ page, cont
   await expect(select.locator("option:checked")).toHaveText("Choose a Binance account");
   await expect(select.locator("option")).toHaveCount(1);
   await load("drgo");
-  await expect(select).toHaveValue("sim-paper");
-  await expect(account).toHaveValue("sim-paper");
+  await expect(select).toHaveValue("alpaca-live");
+  await expect(account).toHaveValue("alpaca-live");
+  await expect(cue).toContainText("alpaca-live");
+  await expect(cue.getByTestId("venue-environment-badge")).toHaveText("LIVE");
   await load("mexc.btc.usdt");
   await expect(select).toHaveValue("mexc-paper");
   await load("bingx.btc.usdt");

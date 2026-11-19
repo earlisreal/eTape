@@ -24,11 +24,12 @@ was using.
 - The legacy global venue value may remain in old configuration for migration,
   but runtime routing ignores it and never falls back to the first configured
   venue.
-- Changing a group from paper to live requires confirmation. When a symbol
-  change would restore a live account after using paper, the group can browse
-  the market and only enables order entry after the account is reselected and
-  confirmed. Existing orders and positions belong to their original venue. The
-  UI keeps a warning while working orders remain there.
+- Returning to stocks restores the group's saved stock account. Explicitly
+  selecting a live account from paper requires confirmation. When a symbol
+  change would restore a live perpetual account after using paper, order entry
+  becomes available once the account is reselected and confirmed. Existing
+  orders and positions belong to their original venue. The UI keeps a warning
+  while working orders remain there.
 - The engine polls every configured live venue for risk and polls a paper (or
   otherwise non-risk) venue only while an Account panel or a grouped Chart Risk
   Entry panel demands it for account display or sizing. Demands are

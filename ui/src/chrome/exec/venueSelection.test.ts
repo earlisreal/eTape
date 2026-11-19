@@ -47,7 +47,7 @@ describe("Link Group venue resolution", () => {
     expect(lg.venueFor("green")).toBe("alpaca-paper");
   });
 
-  it("blocks a remembered live route after paper, even through an unconfigured exchange or reload", () => {
+  it("restores a remembered live stock venue after paper crypto, including on reload", () => {
     const st = status("alpaca-live", "mexc-paper");
     st.venues[0] = { ...st.venues[0], env: "live" };
     st.venues[1] = { ...st.venues[1], broker: "mexc-sim", env: "paper" };
@@ -56,15 +56,32 @@ describe("Link Group venue resolution", () => {
     lg.focus("green", "PERP.MEXC.BTC_USDT");
     lg.focus("green", "PERP.BINGX.BTC_USDT");
     lg.focus("green", "US.NVDA");
-    expect(lg.venueFor("green")).toBeUndefined();
-    expect(lg.needsLiveConfirmation("green", "alpaca-live")).toBe(true);
+    expect(lg.venueFor("green")).toBe("alpaca-live");
+    expect(lg.awaitingLiveConfirmation("green", st)).toBe(false);
+    expect(lg.needsLiveConfirmation("green", "alpaca-live")).toBe(false);
+    expect(lg.matchesOrderContext("green", "US.NVDA", "alpaca-live")).toBe(true);
 
     const restored = new LinkGroups(new BroadcastChannelBus(), () => {}, () => st);
     restored.hydrate(lg.snapshot());
     restored.hydrateVenues(lg.snapshotVenues());
-    expect(restored.venueFor("green")).toBeUndefined();
-    restored.focusVenue("green", "alpaca-live");
     expect(restored.venueFor("green")).toBe("alpaca-live");
+  });
+
+  it("still asks for confirmation before restoring a live perpetual venue after paper", () => {
+    const st = status("alpaca-paper", "mexc-live");
+    st.venues[0] = { ...st.venues[0], env: "paper" };
+    st.venues[1] = { ...st.venues[1], broker: "mexc", env: "live" };
+    const lg = new LinkGroups(new BroadcastChannelBus(), () => {}, () => st);
+    lg.hydrateVenues({ green: { stocks: "alpaca-paper", MEXC: "mexc-live" } });
+
+    lg.focus("green", "PERP.BINGX.BTC_USDT");
+    lg.focus("green", "PERP.MEXC.BTC_USDT");
+    expect(lg.venueFor("green")).toBeUndefined();
+    expect(lg.awaitingLiveConfirmation("green", st)).toBe(true);
+    expect(lg.needsLiveConfirmation("green", "mexc-live")).toBe(true);
+
+    lg.focusVenue("green", "mexc-live");
+    expect(lg.venueFor("green")).toBe("mexc-live");
   });
 
   it("waits for status before using a persisted venue", () => {

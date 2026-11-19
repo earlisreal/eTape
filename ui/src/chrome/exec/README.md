@@ -21,11 +21,11 @@ Inputs: user intent plus account/position stores; outputs: typed wire commands.
 Grouped panels use their Link Group's saved stock account or the saved account
 for the focused perpetual exchange. Choose a compatible account from the Order
 Ticket or Account panel header. A missing selection leaves the market available
-for browsing. Pinned panels need a Link Group before they can submit. A move
-from paper to live, including restoring a remembered live account, requires
-reselecting the live account and confirming. Existing orders remain
-owned by their original venue and are called out until they finish. Account
-panels publish panel-scoped account demand so the engine polls only displayed
+for browsing. Pinned panels need a Link Group before they can submit. Returning
+to stocks restores the saved stock account. Selecting a live account from paper
+or returning from paper to a saved live perpetual account requires confirmation.
+Existing orders stay with their original venue and are called out until they
+finish. Account panels publish panel-scoped demand so the engine polls only displayed
 paper accounts in addition to its live risk venues. The Account strip exposes
 the single broker/calculated Day P&L, eTape cycle Realized P&L, source label,
 and stale timestamp. Test: `npm test -- exec`.
