@@ -19,20 +19,30 @@ import { browserRaf } from "../../src/render/surface";
 import "../../src/global.css";
 
 // This harness never creates a socket, broker adapter, or engine connection.
+const autoLeverage = location.search === "?auto-leverage";
+const chartSymbol = autoLeverage ? "PERP.MEXC.BTC_USDT" : "US.AAPL";
 const stores = makeStores();
 const linkGroups = new LinkGroups({ post() {}, onMessage() { return () => {}; }, close() {} }, () => {});
 linkGroups.focusVenue("green", "sim");
 stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: {
   masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
-  venues: [{ venue: "sim", broker: "sim", env: "paper", connected: true, reconcilePending: false, note: "",
+  venues: [{ venue: "sim", broker: autoLeverage ? "mexc-sim" : "sim", env: "paper", connected: true, reconcilePending: false, note: "",
     lastReconcileMs: null, heldStopLimitAcknowledged: true, positionDataReady: true,
     gate: { maxOrderValue: 10000, maxPositionValue: 10000, maxPositionShares: 100, maxOpenOrders: 10 } }],
 } });
 stores.exec.apply({ kind: "snapshot", topic: "exec.account", key: "sim", payload: {
-  venue: "sim", equity: 10000, buyingPower: 10000, availableCash: 10000, sodEquity: 10000,
+  venue: "sim", equity: 10000, buyingPower: 10000, availableCash: autoLeverage ? 300 : 10000, sodEquity: 10000,
   realized: 0, dayPnl: 0, leverage: 1, tsMs: Date.now(), cycleStartMs: 0, cycleRealized: 0,
 } });
-const riskTemplate = { kind: "risk", id: "risk", label: "Chart Risk Entry", mode: "Dollar", value: 100, auto: { leverage: 1 },
+if (autoLeverage) stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: {
+  symbol: chartSymbol, mark: 4.51, bid: 4.50, ask: 4.52, last: 4.51, ts: new Date().toISOString(),
+  contract: {
+    base: "BTC", settlement: "USDT", multiplier: "1", priceTick: "0.01", quantityStep: 1, minimum: 1, maximum: 1000,
+    minLeverage: 1, maxLeverage: 10, takerFee: "0.001", tradingEnabled: true,
+    riskTiers: [{ maxContracts: 1000, maxLeverage: 10, maintenance: 0.005, liquidationFee: 0.001 }],
+  },
+} });
+const riskTemplate = { kind: "risk", id: "risk", label: "Chart Risk Entry", mode: "Dollar", value: 100, auto: { leverageCap: 10 },
   buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
 const config = { activeVenue: "sim", templates: [{ kind: "place", id: "stop", label: "Stop", side: "BUY", type: "STOP_LIMIT",
   tif: "DAY", session: "EXTENDED", priceSource: "Last", priceOffset: 0, limitCushion: 0.05, limitCushionUnit: "$",
@@ -49,7 +59,7 @@ const sendCommand = async (name, args) => {
     return { kind: "ack", corrId: "demand", status: "accepted" };
   }
   if (args.venue !== "sim") throw new Error("Only simulated orders are accepted");
-  if (name === "SubmitRiskEntry") {
+  if (name === "SubmitRiskEntry" || name === "SubmitPerpetualRiskEntry") {
     window.chartPanelProbe.lastRiskSubmitted = args;
     return { kind: "ack", corrId: "risk", status: "accepted", orderId: "sim-risk" };
   }
@@ -100,11 +110,11 @@ const chartBars = axisFlicker ? Array.from({ length: 90 }, (_, i) => {
 }) : Array.from({ length: 80 }, (_, i) => {
   const bucketStart = new Date(Date.parse("2026-10-01T13:30:00.000Z") + i * 60_000).toISOString();
   const close = 5.3 - i * 0.01;
-  return { symbol: "US.AAPL", timeframe: "1m", bucketStart, o: close + 0.03, h: close + 0.1,
+  return { symbol: chartSymbol, timeframe: "1m", bucketStart, o: close + 0.03, h: close + 0.1,
     l: close - 0.1, c: close, v: 100 + i, inProgress: false };
 });
 const sendQuery = async (name, args) => {
-  if (name === "QueryChartWindow") return { ...(args ?? {}), symbol: "US.AAPL", timeframe: chartTimeframe,
+  if (name === "QueryChartWindow") return { ...(args ?? {}), symbol: chartSymbol, timeframe: chartTimeframe,
     fromMs: Date.parse(chartBars[0].bucketStart), toMs: Date.parse(chartBars.at(-1).bucketStart) + (axisFlicker ? 300_000 : 60_000),
     bars: chartBars, indicators: [], historyRevision: 1 };
   if (name === "QueryFills") return [];
@@ -196,11 +206,11 @@ function ConfigReadyProbe() {
   const { loaded } = useOrderConfig();
   const { setMode } = useTheme();
   useEffect(() => {
-    window.chartPanelProbe = { isReady: () => loaded && stores.bars.series("US.AAPL", chartTimeframe).length === chartBars.length
+    window.chartPanelProbe = { isReady: () => loaded && stores.bars.series(chartSymbol, chartTimeframe).length === chartBars.length
       && !!document.querySelector("[data-testid='chart-host'] .tv-lightweight-charts"),
       errors: [], setTheme: setMode, updateBar(frame) {
         const bar = chartBars.at(-1);
-        stores.bars.apply({ kind: "delta", topic: "md.bars", key: `US.AAPL:${chartTimeframe}`,
+        stores.bars.apply({ kind: "delta", topic: "md.bars", key: `${chartSymbol}:${chartTimeframe}`,
           payload: { ...bar, c: bar.c + (frame % 2) * 0.0001, v: bar.v + frame } });
       }, startRisk() {
         stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { ...stores.exec.accounts()[0], tsMs: Date.now() } });
@@ -217,7 +227,7 @@ function ConfigReadyProbe() {
         ] });
       } };
     if (loaded) setTimeout(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
-      seq: 1, ts: new Date().toISOString(), kind: "chart-ready", detail: "US.AAPL",
+      seq: 1, ts: new Date().toISOString(), kind: "chart-ready", detail: chartSymbol,
     } }), 0);
   }, [loaded, setMode]);
   return null;
@@ -229,7 +239,7 @@ function ProductionChartPanel() {
   }));
   useEffect(() => { scheduler.start(); return () => scheduler.stop(); }, [scheduler]);
   const chartConfig = { id: "chart-order-layout", panelId: "chart", group: "green",
-    settings: { symbol: "US.AAPL", timeframe: chartTimeframe } };
+    settings: { symbol: chartSymbol, timeframe: chartTimeframe } };
   const demandRegistry = { ensure: async () => ({ kind: "ack", corrId: "demand", status: "accepted" }), release() {} };
   const panelApi = { isActive: true, onDidActiveChange: () => ({ dispose() {} }) };
   return <div data-testid="panel-shell" style={{ position: "absolute", left: 80, top: 100, width: axisFlicker ? 554 : 760, height: axisFlicker ? 436 : 560 }}>
@@ -241,4 +251,4 @@ function ProductionChartPanel() {
   </div>;
 }
 
-createRoot(document.getElementById("root")).render(axisFlicker || location.search === "?production" ? <ProductionChartPanel /> : <App />);
+createRoot(document.getElementById("root")).render(axisFlicker || autoLeverage || location.search === "?production" ? <ProductionChartPanel /> : <App />);

@@ -131,16 +131,19 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             }
             return { ...riskEntryProtection(p.stores.exec.orders().map(v => v.order), qty, venue, p.symbol), qty };
         };
-        const size = () => {
+        const size = (reviewedOnly = true) => {
             const a = latest.current.stores.exec.accounts().find(a => a.venue === venue);
             if (draft?.template.perpetual) {
                 const side = perpetualSide();
                 if (!side) return null;
                 const template = { ...draft.template, perpetual: { ...draft.template.perpetual, side } };
-                return perpetualRiskSize(template, contract(), draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0);
+                return perpetualRiskSize(template, contract(), draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0,
+                    reviewedOnly && draft.complete && !pointer ? draft.maxQty : undefined);
             }
             const context = protection();
-            return draft && riskEntrySize(riskEntryAddTemplate(draft.template, context.owner, context.stop), draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0);
+            const stock = draft && riskEntrySize(riskEntryAddTemplate(draft.template, context.owner, context.stop),
+                draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0);
+            return stock && { ...stock, kind: "stock" as const };
         };
         const sizingError = () => {
             const a = latest.current.stores.exec.accounts().find(a => a.venue === venue);
@@ -153,8 +156,11 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 if (draft.template.auto && draft.sell === draft.buy) return "Choose a stop at a different price from the entry.";
                 if (short() ? draft.sell <= draft.buy : draft.sell >= draft.buy)
                     return short() ? "Choose a stop above the short entry." : draft.template.perpetual ? "Choose a stop below the long entry." : "Sell trigger must be below buy trigger.";
-                if (!size()?.qty || (draft.complete && !draft.maxQty))
-                    return draft.template.perpetual ? "Review the contract size, leverage and USDT risk." : "Risk or funding budget rounds to zero shares.";
+                const estimate = size();
+                if (estimate?.kind === "perpetual" && estimate.autoLeverage && !contract()?.riskTiers?.length)
+                    return "Isolated risk tiers unavailable for Auto leverage.";
+                if (!estimate?.qty || (draft.complete && !draft.maxQty))
+                    return draft.template.perpetual ? "Margin, leverage or the liquidation buffer cannot support the minimum contract size." : "Risk or funding budget rounds to zero shares.";
             }
             return "";
         };
@@ -238,7 +244,9 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 const amount = s?.qty ? s.risk * qty / s.qty : 0;
                 const unit = draft.template.perpetual ? "contracts" : "shares";
                 readout.textContent = sizingError() || !s ? `— ${unit} · Est. risk —` :
-                    `${qty.toLocaleString("en-US")} ${unit} · Est. risk ${draft.template.perpetual ? `${amount.toFixed(2)} USDT · ${draft.template.perpetual.leverage}×` : amount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
+                    `${qty.toLocaleString("en-US")} ${unit} · Est. risk ${s.kind === "perpetual" ? `${amount.toFixed(2)} USDT · ${s.leverage}×${s.autoLeverage ? " Auto" : ""}` : amount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
+                if (s?.kind === "perpetual" && qty > 0)
+                    readout.textContent += `\nEst. initial margin ${(s.margin * qty / s.qty).toFixed(2)} USDT`;
                 if (draft.template.auto && (perpetualSide() || (!draft.template.perpetual && draft.sell! < draft.buy!)))
                     readout.textContent = `${isShort ? "Short" : "Long"} · ${readout.textContent}`;
                 const context = protection();
@@ -366,9 +374,9 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 maxQty: Math.min(current.maxQty, s.qty), buyCushion: current.template.buyCushion, sellCushion: effective.sellCushion,
                 ...(effective.protection?{protection:effective.protection}:{}) };
             try {
-                const perp = current.template.perpetual;
-                const ack = perp ? await latest.current.sendCommand("SubmitPerpetualRiskEntry", {
-                    venue, symbol, side: perp.side, trigger: current.buy, stop: current.sell, leverage: perp.leverage,
+                const ack = s.kind === "perpetual" ? await latest.current.sendCommand("SubmitPerpetualRiskEntry", {
+                    venue, symbol, side: s.side, trigger: current.buy, stop: current.sell, leverage: s.leverage,
+                    ...(s.autoLeverage ? { autoLeverage: true } : {}),
                     cushion: current.template.buyCushion, budget: current.template.value, maxQty: Math.min(current.maxQty, s.qty),
                     collateralPct: current.template.mode !== "Dollar",
                 }) : await latest.current.sendCommand("SubmitRiskEntry", args);
@@ -420,7 +428,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             }
             if (template.auto) {
                 template = isPerpetual
-                    ? { ...template, perpetual: { side: "BUY", leverage: template.auto.leverage }, protection: undefined }
+                    ? { ...template, perpetual: { side: "BUY", ...template.auto }, protection: undefined }
                     : { ...template, perpetual: undefined };
             }
             clear();
@@ -571,7 +579,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     draft.template.perpetual.side = side;
                 draft.complete = true;
             }
-            draft.maxQty = size()?.qty ?? 0;
+            draft.maxQty = size(false)?.qty ?? 0;
             paint();
             if ((completed || corrected) && draft.complete && latest.current.config.chartRiskAutoSend)
                 void submit();
@@ -589,7 +597,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     const tick = draft.template.perpetual ? Number(contract()?.priceTick) : price >= 1 ? 0.01 : 0.0001;
                     const next = snap(price + (e.key === "ArrowUp" ? 1 : -1) * tick);
                     if (next > 0) draft[endpoint] = next;
-                    draft.maxQty = size()?.qty ?? 0;
+                    draft.maxQty = size(false)?.qty ?? 0;
                     paint();
                 }
                 return;

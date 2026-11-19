@@ -131,8 +131,11 @@ chart, press the hotkey, then click the entry trigger and protective stop or
 drag between them. A lower stop gives a long. A higher stop gives a short on
 MEXC paper perpetuals. The preview shows the side, which locks on release or
 the second click. Auto uses a fixed risk amount in USD or USDT or a percentage
-of cash or collateral. Leverage applies to perpetuals and the selected
-Protection Mode applies to stocks. Only brief setup instructions and actionable
+of cash or collateral. New perpetual presets default to **Auto** under
+**Perpetual leverage**. Choose a cap, or select **Fixed** to enter the isolated
+leverage yourself. Existing fixed-leverage presets retain their values. The
+preview includes estimated USDT loss, leverage and initial margin.
+The selected Protection Mode applies to stocks. Only brief setup instructions and actionable
 warnings float over the bottom Volume area. The two axis chips expose planned
 shares, execution limits, custody, expiry and Enter/Escape shortcuts on hover.
 On a fully protected Chart Risk Entry long position, the same two points create

@@ -13,6 +13,15 @@ manual reductions, and restores it on startup. Working orders and open positions
 retain their market-data demand independently of open panels. Equity Chart Risk
 Entry continues to use its session-based lifecycle.
 
+Auto leverage uses MEXC's published isolated risk tiers for contract-based
+limits and regular taker fees. It maximizes contract count within the risk and
+margin budgets and picks the lowest leverage for that size, up to the preset
+cap. Its estimate reserves maintenance, liquidation and trading fees at a mark
+past the stop by the greater of one tick and 0.10% of the entry. Engine admission
+uses the previewed quantity and leverage as ceilings. It revalidates the armed
+terms on activation and the simulator checks the resulting fill price. Missing
+or unsupported tier data blocks Auto sizing.
+
 ## Trailing stops
 
 `SubmitTrail` admits one reducing SELL/COVER strategy per venue and symbol.

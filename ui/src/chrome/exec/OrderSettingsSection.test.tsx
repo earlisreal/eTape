@@ -65,15 +65,16 @@ describe("OrderSettingsSection", () => {
     fireEvent.click(screen.getByTestId("save"));
     expect(onSave.mock.calls[0][0]).toMatchObject({chartRiskAutoSend:true,templates:expect.arrayContaining([expect.objectContaining({kind:"risk",mode:"Dollar",value:100,buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"}})])});
   });
-  it("saves Auto instrument and direction with perpetual leverage", () => {
+  it("defaults a new perpetual preset to Auto leverage and saves the cap", () => {
     const { onSave } = wrap();
     fireEvent.click(screen.getByTestId("add-template"));
     fireEvent.click(screen.getByTestId("add-risk"));
     fireEvent.change(screen.getByLabelText("Instrument and direction"), { target: { value: "auto" } });
-    fireEvent.change(screen.getByLabelText("Perpetual isolated leverage"), { target: { value: "5" } });
+    expect((screen.getByLabelText("Perpetual leverage") as HTMLSelectElement).value).toBe("auto");
+    fireEvent.change(screen.getByLabelText("Leverage cap (×)"), { target: { value: "5" } });
     fireEvent.click(screen.getByTestId("save"));
     expect(onSave.mock.calls[0][0].templates).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: "risk", auto: { leverage: 5 }, mode: "Dollar" }),
+      expect.objectContaining({ kind: "risk", auto: { leverageCap: 5 }, mode: "Dollar" }),
     ]));
   });
   it("lists templates and saves an edited label", () => {

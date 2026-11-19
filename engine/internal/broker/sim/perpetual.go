@@ -394,6 +394,9 @@ func (b *PerpetualSimulator) match(next *perpetualLedger, id string, book *feed.
 		if required > available {
 			return b.cancel(next, o)
 		}
+		if o.Perpetual.AutoLeverage && !rules.AutoRiskAllowed(qty, price, o.Perpetual.ProtectionPrice, o.Perpetual.Leverage, o.Side == exec.SideBuy) {
+			return b.cancel(next, o)
+		}
 	}
 	if qty > 0 {
 		consumeBook(book, o.Side, qty)

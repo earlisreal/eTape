@@ -267,8 +267,15 @@ func mapQuote(q feed.Quote, bid, ask float64) wsmsg.Quote {
 		wire.NextFundingMs = q.NextFundingMs
 	}
 	if q.Contract != nil {
-		contract := wsmsg.PerpetualContract(*q.Contract)
-		wire.Contract = &contract
+		r := q.Contract
+		wire.Contract = &wsmsg.PerpetualContract{
+			Base: r.Base, Settlement: r.Settlement, Multiplier: r.Multiplier, PriceTick: r.PriceTick,
+			QuantityStep: r.QuantityStep, Minimum: r.Minimum, Maximum: r.Maximum,
+			MinLeverage: r.MinLeverage, MaxLeverage: r.MaxLeverage, TakerFee: r.TakerFee, TradingEnabled: r.TradingEnabled,
+		}
+		for _, tier := range r.RiskTiers {
+			wire.Contract.RiskTiers = append(wire.Contract.RiskTiers, wsmsg.PerpetualRiskTier(tier))
+		}
 	}
 	return wire
 }

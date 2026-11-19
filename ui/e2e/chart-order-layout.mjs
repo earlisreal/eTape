@@ -582,6 +582,29 @@ try {
   await productionPage.keyboard.press("Enter");
   await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
   assert.equal((await productionPage.evaluate(() => window.chartPanelProbe.lastRiskSubmitted)).sharedEntryId, "risk-original", "An add must bind to the reviewed shared protection");
+
+  const perpetualPage = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+  await perpetualPage.goto(`http://127.0.0.1:${port}/?auto-leverage`);
+  await perpetualPage.waitForFunction(() => window.chartPanelProbe?.isReady());
+  const perpetualHost = await perpetualPage.getByTestId("chart-host").boundingBox();
+  await perpetualPage.mouse.move(perpetualHost.x + 130, perpetualHost.y + 210);
+  assert(await perpetualPage.evaluate(() => window.chartPanelProbe.startRisk()), "Auto leverage must start on the perpetual chart");
+  await perpetualPage.mouse.down();
+  await perpetualPage.mouse.move(perpetualHost.x + 180, perpetualHost.y + 280, { steps: 5 });
+  await perpetualPage.mouse.up();
+  const leverageReadout = perpetualPage.locator("[data-risk-readout]");
+  await leverageReadout.waitFor({ state: "visible" });
+  const readoutText = await leverageReadout.innerText();
+  const review = /([\d,]+) contracts · Est\. risk .* USDT · (\d+)× Auto\nEst\. initial margin ([\d.]+) USDT/.exec(readoutText);
+  assert(review, `Expected Auto leverage and margin in the chart preview, got ${readoutText}`);
+  assert(Number(review[2]) > 1 && Number(review[2]) <= 10);
+  assert(Number(review[3]) <= 300);
+  await perpetualPage.keyboard.press("Enter");
+  await perpetualPage.waitForFunction(() => window.chartPanelProbe.lastRiskSubmitted?.autoLeverage);
+  const automatic = await perpetualPage.evaluate(() => window.chartPanelProbe.lastRiskSubmitted);
+  assert.equal(automatic.maxQty, Number(review[1].replaceAll(",", "")));
+  assert.equal(automatic.leverage, Number(review[2]));
+  await perpetualPage.close();
   assert.equal(productionErrors.length, 0, productionErrors.join("\n"));
   assert.equal(await productionPage.evaluate(() => window.chartPanelProbe.errors.length), 0, "Risk setup must not report chart paint errors");
 

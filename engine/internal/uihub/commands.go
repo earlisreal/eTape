@@ -327,7 +327,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("invalid perpetual risk entry"), false
 		}
 		return ackFromCmd(cd.ex.Do(exec.SubmitPerpetualRiskEntry{Venue: exec.VenueID(a.Venue), Symbol: a.Symbol,
-			Side: sideFromWire(a.Side), Trigger: a.Trigger, Stop: a.Stop, Leverage: a.Leverage,
+			Side: sideFromWire(a.Side), Trigger: a.Trigger, Stop: a.Stop, Leverage: a.Leverage, AutoLeverage: a.AutoLeverage,
 			Cushion: exec.LimitCushion{Value: a.Cushion.Value, Unit: a.Cushion.Unit}, Budget: a.Budget, MaxQty: a.MaxQty, CollateralPct: a.CollateralPct})), false
 	case "SubmitOrder":
 		var a wsmsg.SubmitOrderArgs

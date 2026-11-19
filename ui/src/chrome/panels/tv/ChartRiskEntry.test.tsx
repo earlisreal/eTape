@@ -35,6 +35,7 @@ function seedMexcContract(stores: ReturnType<typeof makeStores>) {
     stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: { symbol: mexcSymbol, mark: 10, bid: 9.9, ask: 10.1, contract: {
         base: "BTC", settlement: "USDT", priceTick: "0.1", multiplier: "0.1", quantityStep: 1,
         minimum: 1, maximum: 1000, minLeverage: 1, maxLeverage: 10, takerFee: "0.001", tradingEnabled: true,
+        riskTiers: [{ maxContracts: 1000, maxLeverage: 10, maintenance: 0.005, liquidationFee: 0.001 }],
     } } });
 }
 it.each(["BUY", "SHORT"] as const)("submits a %s perpetual chart preset with contracts and leverage", async side => {
@@ -52,6 +53,24 @@ it.each(["BUY", "SHORT"] as const)("submits a %s perpetual chart preset with con
     })));
     expect(sendQuery).not.toHaveBeenCalled();
 });
+it.each([[10, 4, 45, "11.25"], [3, 3, 35, "11.67"]])(
+    "previews and submits Auto leverage with a %i× cap", async (leverageCap, leverage, maxQty, margin) => {
+        const preset: RiskEntryTemplate = { ...template, auto: { leverageCap }, value: 1 };
+        const { host, stores, sendCommand } = mount(false, preset, mexcSymbol);
+        seedMexcContract(stores);
+        stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { venue: "sim", availableCash: 12, tsMs: Date.now() } });
+        initiateChartRiskEntry(preset);
+        fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
+        fireEvent.pointerMove(window, { pointerId: 1, clientX: 130, clientY: 220 });
+        fireEvent.pointerUp(window, { pointerId: 1, clientX: 130, clientY: 220 });
+        expect(host.querySelector("[data-risk-readout]")?.textContent).toContain(`${maxQty} contracts`);
+        expect(host.querySelector("[data-risk-readout]")?.textContent).toContain(`${leverage}× Auto\nEst. initial margin ${margin} USDT`);
+        fireEvent.keyDown(window, { key: "Enter" });
+        await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.objectContaining({
+            symbol: mexcSymbol, side: "BUY", trigger: 10, stop: 9.8, autoLeverage: true, leverage, maxQty,
+        })));
+    },
+);
 let frames: Map<number, FrameRequestCallback>;
 function flushFrames() {
     const pending = [...frames.values()];

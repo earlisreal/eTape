@@ -16,6 +16,7 @@ type PerpetualOrder struct {
 	ProtectionPrice float64 `json:"protectionPrice,omitempty"`
 	ProtectionID    string  `json:"protectionId,omitempty"`
 	RiskBudget      float64 `json:"riskBudget,omitempty"`
+	AutoLeverage    bool    `json:"autoLeverage,omitempty"`
 }
 
 type SubmitPerpetualRiskEntry struct {
@@ -24,6 +25,7 @@ type SubmitPerpetualRiskEntry struct {
 	Side           Side
 	Trigger, Stop  float64
 	Leverage       int
+	AutoLeverage   bool
 	Cushion        LimitCushion
 	Budget, MaxQty float64
 	CollateralPct  bool
@@ -96,6 +98,9 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 				return errors.New("review the risk entry after margin or contract rules changed")
 			}
 		}
+		if o.AutoLeverage && !rules.AutoRiskAllowed(req.Qty, req.LimitPrice, o.ProtectionPrice, o.Leverage, req.Side == SideBuy) {
+			return errors.New("review the risk entry after the leverage tier or liquidation buffer changed")
+		}
 		return nil
 	default:
 		return errors.New("choose a perpetual direction")
@@ -123,8 +128,21 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 		}
 		budget = c.state.Venue(cm.Venue).Account.AvailableCash * cm.Budget / 100
 	}
-	size := min(cm.MaxQty, float64(rules.SizeRisk(budget, c.state.Venue(cm.Venue).Account.AvailableCash, limit, cm.Stop, cm.Leverage)))
-	options := &PerpetualOrder{Leverage: cm.Leverage, Multiplier: rules.ContractSize(), ProtectionPrice: cm.Stop, ProtectionID: c.idgen.Next(), RiskBudget: budget}
+	collateral := c.state.Venue(cm.Venue).Account.AvailableCash
+	leverage := cm.Leverage
+	var size float64
+	if cm.AutoLeverage {
+		// The preview's leverage and quantity are ceilings. Once armed, retain
+		// the admitted terms and pause if those terms become unsafe.
+		qty, chosen := rules.AutoRiskSize(budget, collateral, limit, cm.Stop, leverage, int64(cm.MaxQty), long)
+		if qty == 0 {
+			return deny("available margin and the liquidation buffer cannot support this risk entry")
+		}
+		size, leverage = float64(qty), chosen
+	} else {
+		size = min(cm.MaxQty, float64(rules.SizeRisk(budget, collateral, limit, cm.Stop, leverage)))
+	}
+	options := &PerpetualOrder{Leverage: leverage, Multiplier: rules.ContractSize(), ProtectionPrice: cm.Stop, ProtectionID: c.idgen.Next(), RiskBudget: budget, AutoLeverage: cm.AutoLeverage}
 	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeLimit, TIF: TIFIOC, Session: SessionAuto,
 		Qty: size, LimitPrice: limit, ClientOrderID: c.idgen.Next(), Perpetual: options}
 	if err = c.validatePerpetual(&req, ""); err != nil {

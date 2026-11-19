@@ -3,23 +3,99 @@ package instrument
 import (
 	"math"
 	"math/big"
+	"sort"
 	"strconv"
 )
 
 // ContractRules describe a linear perpetual in native contracts and quote
 // currency. Decimal ticks and multipliers retain the exchange's representation.
 type ContractRules struct {
-	Base           string `json:"base"`
-	Settlement     string `json:"settlement"`
-	Multiplier     string `json:"multiplier"`
-	PriceTick      string `json:"priceTick"`
-	QuantityStep   int64  `json:"quantityStep"`
-	Minimum        int64  `json:"minimum"`
-	Maximum        int64  `json:"maximum"`
-	MinLeverage    int    `json:"minLeverage"`
-	MaxLeverage    int    `json:"maxLeverage"`
-	TakerFee       string `json:"takerFee"`
-	TradingEnabled bool   `json:"tradingEnabled"`
+	Base           string     `json:"base"`
+	Settlement     string     `json:"settlement"`
+	Multiplier     string     `json:"multiplier"`
+	PriceTick      string     `json:"priceTick"`
+	QuantityStep   int64      `json:"quantityStep"`
+	Minimum        int64      `json:"minimum"`
+	Maximum        int64      `json:"maximum"`
+	MinLeverage    int        `json:"minLeverage"`
+	MaxLeverage    int        `json:"maxLeverage"`
+	TakerFee       string     `json:"takerFee"`
+	TradingEnabled bool       `json:"tradingEnabled"`
+	RiskTiers      []RiskTier `json:"riskTiers,omitempty"`
+}
+
+// RiskTier contains isolated-margin terms for a position in native contracts.
+type RiskTier struct {
+	MaxContracts   int64   `json:"maxContracts"`
+	MaxLeverage    int     `json:"maxLeverage"`
+	Maintenance    float64 `json:"maintenance"`
+	LiquidationFee float64 `json:"liquidationFee"`
+}
+
+func (t RiskTier) valid() bool {
+	return t.MaxContracts > 0 && t.MaxLeverage > 0 && t.Maintenance > 0 &&
+		t.LiquidationFee >= 0 && t.Maintenance+t.LiquidationFee < 1
+}
+
+// keepsStopAhead checks that isolated margin still covers maintenance and fees
+// at a mark past the stop by 10 basis points of entry or one tick, whichever
+// is larger. Estimate maintenance on the larger of the entry and that mark.
+func (r ContractRules) keepsStopAhead(t RiskTier, entry, stop float64, leverage int, long bool) bool {
+	if !t.valid() || leverage < r.MinLeverage || leverage > min(t.MaxLeverage, r.MaxLeverage) {
+		return false
+	}
+	buffer := max(number(r.PriceTick), entry*0.001)
+	mark := stop + buffer
+	if long {
+		mark = stop - buffer
+	}
+	rate := t.Maintenance + t.LiquidationFee
+	return mark > 0 && (long && entry > stop || !long && entry < stop) && entry/float64(leverage) >
+		math.Abs(entry-mark)+max(entry, mark)*rate+(entry+mark)*r.FeeRate()
+}
+
+// AutoRiskSize maximizes reviewed contracts first, then minimizes leverage.
+// Every candidate is capped at the position size supported by its risk tier.
+func (r ContractRules) AutoRiskSize(budget, collateral, entry, stop float64, cap int, maxQty int64, long bool) (int64, int) {
+	var bestQty int64
+	var bestLeverage int
+	for _, tier := range r.RiskTiers {
+		terms := r
+		terms.Maximum = min(r.Maximum, tier.MaxContracts, maxQty)
+		upper := min(cap, r.MaxLeverage, tier.MaxLeverage)
+		if upper < r.MinLeverage || terms.Maximum < terms.Minimum {
+			continue
+		}
+		// Stop clearance decreases with leverage, while affordable quantity
+		// increases. Find the highest safe size, then the first rate for it.
+		safeCount := sort.Search(upper-r.MinLeverage+1, func(i int) bool {
+			return !r.keepsStopAhead(tier, entry, stop, r.MinLeverage+i, long)
+		})
+		if safeCount == 0 {
+			continue
+		}
+		qty := terms.SizeRisk(budget, collateral, entry, stop, r.MinLeverage+safeCount-1)
+		if qty == 0 || qty < bestQty {
+			continue
+		}
+		leverage := r.MinLeverage + sort.Search(safeCount-1, func(i int) bool {
+			return terms.SizeRisk(budget, collateral, entry, stop, r.MinLeverage+i) >= qty
+		})
+		if qty > bestQty || leverage < bestLeverage {
+			bestQty, bestLeverage = qty, leverage
+		}
+	}
+	return bestQty, bestLeverage
+}
+
+// AutoRiskAllowed also works on an actual fill VWAP, which can be off tick.
+func (r ContractRules) AutoRiskAllowed(qty, entry, stop float64, leverage int, long bool) bool {
+	for _, tier := range r.RiskTiers {
+		if qty <= float64(tier.MaxContracts) {
+			return r.keepsStopAhead(tier, entry, stop, leverage, long)
+		}
+	}
+	return false
 }
 
 func (r ContractRules) Valid() bool {

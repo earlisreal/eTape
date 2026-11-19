@@ -18,17 +18,25 @@ type Quote struct {
 }
 
 type PerpetualContract struct {
-	Base           string `json:"base"`
-	Settlement     string `json:"settlement"`
-	Multiplier     string `json:"multiplier"`
-	PriceTick      string `json:"priceTick"`
-	QuantityStep   int64  `json:"quantityStep"`
-	Minimum        int64  `json:"minimum"`
-	Maximum        int64  `json:"maximum"`
-	MinLeverage    int    `json:"minLeverage"`
-	MaxLeverage    int    `json:"maxLeverage"`
-	TakerFee       string `json:"takerFee"`
-	TradingEnabled bool   `json:"tradingEnabled"`
+	Base           string              `json:"base"`
+	Settlement     string              `json:"settlement"`
+	Multiplier     string              `json:"multiplier"`
+	PriceTick      string              `json:"priceTick"`
+	QuantityStep   int64               `json:"quantityStep"`
+	Minimum        int64               `json:"minimum"`
+	Maximum        int64               `json:"maximum"`
+	MinLeverage    int                 `json:"minLeverage"`
+	MaxLeverage    int                 `json:"maxLeverage"`
+	TakerFee       string              `json:"takerFee"`
+	TradingEnabled bool                `json:"tradingEnabled"`
+	RiskTiers      []PerpetualRiskTier `json:"riskTiers,omitempty"`
+}
+
+type PerpetualRiskTier struct {
+	MaxContracts   int64   `json:"maxContracts"`
+	MaxLeverage    int     `json:"maxLeverage"`
+	Maintenance    float64 `json:"maintenance"`
+	LiquidationFee float64 `json:"liquidationFee"`
 }
 
 type BookLevel struct {
@@ -195,6 +203,7 @@ type SubmitPerpetualRiskEntryArgs struct {
 	Trigger       float64      `json:"trigger"`
 	Stop          float64      `json:"stop"`
 	Leverage      int          `json:"leverage"`
+	AutoLeverage  bool         `json:"autoLeverage,omitempty"`
 	Cushion       LimitCushion `json:"cushion"`
 	Budget        float64      `json:"budget"`
 	MaxQty        float64      `json:"maxQty"`

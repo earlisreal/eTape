@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -28,22 +29,97 @@ const (
 )
 
 type Contract struct {
-	Symbol       string      `json:"symbol"`
-	Base         string      `json:"baseCoin"`
-	Quote        string      `json:"quoteCoin"`
-	Settlement   string      `json:"settleCoin"`
-	Product      int         `json:"futureType"`
-	Multiplier   json.Number `json:"contractSize"`
-	PriceTick    json.Number `json:"priceUnit"`
-	QuantityStep json.Number `json:"volUnit"`
-	Minimum      json.Number `json:"minVol"`
-	Maximum      json.Number `json:"maxVol"`
-	MinLeverage  int         `json:"minLeverage"`
-	MaxLeverage  int         `json:"maxLeverage"`
-	TakerFee     json.Number `json:"takerFeeRate"`
-	TypeLabel    *int        `json:"typeLabel"`
-	State        int         `json:"state"`
-	APIAllowed   bool        `json:"apiAllowed"`
+	Symbol                string      `json:"symbol"`
+	Base                  string      `json:"baseCoin"`
+	Quote                 string      `json:"quoteCoin"`
+	Settlement            string      `json:"settleCoin"`
+	Product               int         `json:"futureType"`
+	Multiplier            json.Number `json:"contractSize"`
+	PriceTick             json.Number `json:"priceUnit"`
+	QuantityStep          json.Number `json:"volUnit"`
+	Minimum               json.Number `json:"minVol"`
+	Maximum               json.Number `json:"maxVol"`
+	MinLeverage           int         `json:"minLeverage"`
+	MaxLeverage           int         `json:"maxLeverage"`
+	TakerFee              json.Number `json:"takerFeeRate"`
+	TypeLabel             *int        `json:"typeLabel"`
+	State                 int         `json:"state"`
+	APIAllowed            bool        `json:"apiAllowed"`
+	PositionOpenType      int         `json:"positionOpenType"`
+	CountryMaxLeverage    int         `json:"countryConfigContractMaxLeverage"`
+	RiskLimitType         string      `json:"riskLimitType"`
+	RiskLimitMode         string      `json:"riskLimitMode"`
+	RiskBaseVol           json.Number `json:"riskBaseVol"`
+	RiskIncrVol           json.Number `json:"riskIncrVol"`
+	RiskIncrMmr           json.Number `json:"riskIncrMmr"`
+	RiskIncrImr           json.Number `json:"riskIncrImr"`
+	RiskLevelLimit        int         `json:"riskLevelLimit"`
+	MaintenanceMarginRate json.Number `json:"maintenanceMarginRate"`
+	InitialMarginRate     json.Number `json:"initialMarginRate"`
+	LiquidationFeeRate    json.Number `json:"liquidationFeeRate"`
+	FeeRateMode           string      `json:"feeRateMode"`
+	RiskLimitCustom       []struct {
+		MaxVol      json.Number `json:"maxVol"`
+		Maintenance json.Number `json:"mmr"`
+		MaxLeverage int         `json:"maxLeverage"`
+	} `json:"riskLimitCustom"`
+}
+
+func (item Contract) isolatedRiskTiers() []instrument.RiskTier {
+	if (item.PositionOpenType != 1 && item.PositionOpenType != 3) ||
+		item.RiskLimitType != "BY_VOLUME" || item.FeeRateMode != "NORMAL" {
+		return nil
+	}
+	fee, err := item.LiquidationFeeRate.Float64()
+	if err != nil || fee < 0 {
+		return nil
+	}
+	maxLeverage := item.MaxLeverage
+	if item.CountryMaxLeverage > 0 {
+		maxLeverage = min(maxLeverage, item.CountryMaxLeverage)
+	}
+	var tiers []instrument.RiskTier
+	switch item.RiskLimitMode {
+	case "CUSTOM":
+		for _, tier := range item.RiskLimitCustom {
+			size, sizeOK := contracts(tier.MaxVol)
+			rate, err := tier.Maintenance.Float64()
+			if !sizeOK || err != nil {
+				return nil
+			}
+			tiers = append(tiers, instrument.RiskTier{MaxContracts: size, MaxLeverage: min(maxLeverage, tier.MaxLeverage),
+				Maintenance: rate, LiquidationFee: fee})
+		}
+	case "INCREASE":
+		base, baseOK := contracts(item.RiskBaseVol)
+		step, stepOK := contracts(item.RiskIncrVol)
+		mmr, mmrErr := item.MaintenanceMarginRate.Float64()
+		imr, imrErr := item.InitialMarginRate.Float64()
+		mmrStep, mmrStepErr := item.RiskIncrMmr.Float64()
+		imrStep, imrStepErr := item.RiskIncrImr.Float64()
+		if !baseOK || !stepOK || mmrErr != nil || imrErr != nil || mmrStepErr != nil || imrStepErr != nil ||
+			step < 0 || imr <= 0 || imrStep < 0 || mmrStep < 0 || item.RiskLevelLimit > 100 {
+			return nil
+		}
+		for i := 0; i < item.RiskLevelLimit; i++ {
+			limit := int(math.Floor(1/(imr+float64(i)*imrStep) + 1e-9))
+			tiers = append(tiers, instrument.RiskTier{MaxContracts: base + int64(i)*step, MaxLeverage: min(maxLeverage, limit),
+				Maintenance: mmr + float64(i)*mmrStep, LiquidationFee: fee})
+		}
+	}
+	sort.Slice(tiers, func(i, j int) bool { return tiers[i].MaxContracts < tiers[j].MaxContracts })
+	for i, tier := range tiers {
+		if tier.MaxContracts <= 0 || tier.MaxLeverage <= 0 || tier.Maintenance <= 0 || tier.Maintenance+fee >= 1 {
+			return nil
+		}
+		if i > 0 {
+			prev := tiers[i-1]
+			if tier.MaxContracts <= prev.MaxContracts || tier.MaxLeverage > prev.MaxLeverage || tier.Maintenance < prev.Maintenance {
+				return nil
+			}
+		}
+	}
+	return tiers
 }
 
 // Rules returns fresh terms from the public catalog. Callers load the catalog
@@ -52,15 +128,18 @@ func (c *Client) Rules(symbol string) (instrument.ContractRules, bool) {
 	c.mu.Lock()
 	entry := c.cache[symbol]
 	c.mu.Unlock()
-	item := entry.value
+	return entry.rules, time.Now().Before(entry.until) && entry.rules.Valid()
+}
+
+func cacheContract(item Contract, until time.Time) cachedContract {
 	step, _ := contracts(item.QuantityStep)
 	minimum, _ := contracts(item.Minimum)
 	maximum, _ := contracts(item.Maximum)
 	rules := instrument.ContractRules{Base: item.Base, Settlement: item.Settlement, Multiplier: item.Multiplier.String(),
 		PriceTick: item.PriceTick.String(), QuantityStep: step, Minimum: minimum, Maximum: maximum,
 		MinLeverage: item.MinLeverage, MaxLeverage: item.MaxLeverage, TakerFee: item.TakerFee.String(),
-		TradingEnabled: item.State == 0 && item.APIAllowed}
-	return rules, time.Now().Before(entry.until) && rules.Valid()
+		TradingEnabled: item.State == 0 && item.APIAllowed, RiskTiers: item.isolatedRiskTiers()}
+	return cachedContract{value: item, rules: rules, until: until}
 }
 
 type Client struct {
@@ -83,6 +162,7 @@ type fundingTime struct {
 
 type cachedContract struct {
 	value Contract
+	rules instrument.ContractRules
 	until time.Time
 }
 
@@ -194,7 +274,7 @@ func (c *Client) PerpetualMarkets(ctx context.Context) ([]instrument.PerpetualMa
 		if _, ok := parseSymbol(symbol); !ok || !isUSDTPerpetual(item) || item.State != 0 || item.Base == "" {
 			continue
 		}
-		c.cache[symbol] = cachedContract{value: item, until: until}
+		c.cache[symbol] = cacheContract(item, until)
 		markets = append(markets, instrument.PerpetualMarket{ID: id, Base: item.Base, Settlement: item.Settlement, TradingEnabled: item.APIAllowed, CryptoUnderlying: item.TypeLabel != nil && *item.TypeLabel == 0})
 	}
 	sort.Slice(markets, func(i, j int) bool { return markets[i].ID.Native < markets[j].ID.Native })
@@ -236,7 +316,7 @@ func (c *Client) Contract(ctx context.Context, symbol string) (Contract, error) 
 	for _, item := range contracts {
 		if item.Symbol == id.Native && isUSDTPerpetual(item) {
 			c.mu.Lock()
-			c.cache[symbol] = cachedContract{value: item, until: time.Now().Add(time.Minute)}
+			c.cache[symbol] = cacheContract(item, time.Now().Add(time.Minute))
 			c.mu.Unlock()
 			return item, nil
 		}

@@ -25,7 +25,8 @@ import type { ExecStore } from "../../data/ExecStore";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
 import {
-  CHART_BINDINGS, DEFAULT_TEMPLATES, MANAGEMENT_ACTIONS, normalizeOrderConfig, type ActionTemplate, type ChartBinding, type DeckColor, type ManagementAction,
+  CHART_BINDINGS, DEFAULT_TEMPLATES, MANAGEMENT_ACTIONS, defaultLeverageCap, normalizeOrderConfig, type ActionTemplate, type ChartBinding, type DeckColor, type ManagementAction,
+  type PerpetualRiskLeverage,
   type HotkeyDeckConfig, type OrderConfig, type PlaceOrderTemplate, type RiskEntryTemplate,
 } from "./actionTemplate";
 import { normalizeCombo } from "./hotkeys";
@@ -300,6 +301,14 @@ interface TemplateCardProps {
 // fresh type every render, forcing React to unmount+remount every card (and
 // drop input focus) on each keystroke.
 function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEdits, setRawEdit, clearRawEdit, patch, clearChartBinding, requestChartBinding, reviewChartBinding, isPlaced, onToggleDeck, onRemove, onMove }: TemplateCardProps): JSX.Element {
+  const perpetualLeverage = t.kind === "risk" ? t.auto ?? t.perpetual : undefined;
+  const autoLeverage = perpetualLeverage?.leverageCap !== undefined || perpetualLeverage?.leverage === undefined;
+  const leverageValue = autoLeverage ? perpetualLeverage?.leverageCap ?? defaultLeverageCap : perpetualLeverage?.leverage ?? 1;
+  const patchLeverage = (settings: PerpetualRiskLeverage) => {
+    if (t.kind !== "risk") return;
+    if (t.auto) patch(t.id, { auto: settings });
+    else if (t.perpetual) patch(t.id, { perpetual: { side: t.perpetual.side, ...settings } });
+  };
   const card: CSSProperties = { border: `1px solid ${palette.border}`, borderRadius: 6, background: palette.surface, padding: "8px 10px 10px", marginBottom: 8 };
   const eyebrow: CSSProperties = { fontSize: 9.5, letterSpacing: "0.08em", textTransform: "uppercase", color: palette.textMuted, marginBottom: 4 };
   const headerRow: CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 };
@@ -362,22 +371,30 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
           <label style={fieldGroup}>Instrument and direction
             <select className="field" value={t.auto ? "auto" : t.perpetual?.side ?? "stock"} onChange={e => {
               const side = e.target.value;
-              const leverage = t.auto?.leverage ?? t.perpetual?.leverage ?? 1;
+              const leverage = autoLeverage ? { leverageCap: leverageValue } : { leverage: leverageValue };
               const mode = side !== "stock" && t.mode === "BuyingPowerPct" ? "CashPct" : t.mode;
-              if (side === "auto") patch(t.id, { auto: { leverage }, perpetual: undefined, mode });
-              else if (side === "BUY" || side === "SHORT") patch(t.id, { auto: undefined, perpetual: { side, leverage }, protection: undefined, mode });
+              if (side === "auto") patch(t.id, { auto: leverage, perpetual: undefined, mode });
+              else if (side === "BUY" || side === "SHORT") patch(t.id, { auto: undefined, perpetual: { side, ...leverage }, protection: undefined, mode });
               else patch(t.id, { auto: undefined, perpetual: undefined });
             }}>
               <option value="auto">Auto (chart and gesture)</option>
               <option value="stock">Stock long</option><option value="BUY">Perpetual long</option><option value="SHORT">Perpetual short</option>
             </select>
           </label>
-          {t.auto && <label style={fieldGroup}>Perpetual isolated leverage
-            <input className="field" type="number" min={1} step={1} value={t.auto.leverage} onChange={e => patch(t.id, { auto: { leverage: Number(e.target.value) } })} />
-          </label>}
-          {t.perpetual && <label style={fieldGroup}>Isolated leverage
-            <input className="field" type="number" min={1} step={1} value={t.perpetual.leverage} onChange={e => patch(t.id, { perpetual: { side: t.perpetual!.side, leverage: Number(e.target.value) } })} />
-          </label>}
+          {perpetualLeverage && <>
+            <label style={fieldGroup}>Perpetual leverage
+              <select className="field" value={autoLeverage ? "auto" : "fixed"} onChange={e =>
+                patchLeverage(e.target.value === "auto" ? { leverageCap: leverageValue } : { leverage: leverageValue })}>
+                <option value="auto">Auto</option><option value="fixed">Fixed</option>
+              </select>
+            </label>
+            <label style={fieldGroup}>{autoLeverage ? "Leverage cap (×)" : "Isolated leverage (×)"}
+              <input className="field" type="number" min={1} step={1} value={leverageValue} onChange={e => {
+                const value = Math.max(1, Math.trunc(Number(e.target.value)));
+                patchLeverage(autoLeverage ? { leverageCap: value } : { leverage: value });
+              }} />
+            </label>
+          </>}
           {!t.perpetual && <label style={fieldGroup}>Protection mode <select aria-label="Protection mode" className="field" value={t.protection?.mode??"FIXED"} onChange={e=>patch(t.id,{protection:e.target.value==="FIXED"?undefined:{...(t.protection??newTrailConfig()),mode:e.target.value,pricing:"CUSHION",cushion:t.sellCushion}})}>
             <option value="FIXED">Fixed</option><option value="PRICE">Trail Price</option><option value="PERCENT">Trail Percent</option><option value="CANDLE">Candle Trail</option></select></label>}
           {t.protection && <TrailEditor value={t.protection} lockMode lockSessions cushionOnly onChange={c=>patch(t.id,{protection:c,sellCushion:c.cushion})}/>}

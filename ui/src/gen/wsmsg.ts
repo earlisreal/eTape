@@ -136,6 +136,13 @@ export interface PerpetualContract {
   maxLeverage: number /* int */;
   takerFee: string;
   tradingEnabled: boolean;
+  riskTiers?: PerpetualRiskTier[];
+}
+export interface PerpetualRiskTier {
+  maxContracts: number /* int64 */;
+  maxLeverage: number /* int */;
+  maintenance: number /* float64 */;
+  liquidationFee: number /* float64 */;
 }
 export interface BookLevel {
   price: number /* float64 */;
@@ -285,6 +292,7 @@ export interface SubmitPerpetualRiskEntryArgs {
   trigger: number /* float64 */;
   stop: number /* float64 */;
   leverage: number /* int */;
+  autoLeverage?: boolean;
   cushion: LimitCushion;
   budget: number /* float64 */;
   maxQty: number /* float64 */;

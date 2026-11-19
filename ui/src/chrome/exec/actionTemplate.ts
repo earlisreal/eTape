@@ -34,9 +34,14 @@ export interface PlaceOrderTemplate {
 export const MANAGEMENT_ACTIONS = ["CancelLast", "CancelAllFocused", "CancelAllEverything", "KillSwitch"] as const;
 export type ManagementAction = typeof MANAGEMENT_ACTIONS[number];
 export interface ManagementTemplate { kind: "manage"; id: string; label: string; action: ManagementAction; hotkey?: string; deck?: boolean; deckColor?: DeckColor }
+export const defaultLeverageCap = 10;
+export interface PerpetualRiskLeverage {
+  leverage?: number;
+  leverageCap?: number;
+}
 export interface RiskEntryTemplate {
-  auto?: { leverage: number } | undefined;
-  perpetual?: { side: "BUY" | "SHORT"; leverage: number } | undefined;
+  auto?: PerpetualRiskLeverage | undefined;
+  perpetual?: (PerpetualRiskLeverage & { side: "BUY" | "SHORT" }) | undefined;
 	protection?: TrailConfig | undefined;
   kind: "risk"; id: string; label: string; hotkey?: string; deck?: boolean; deckColor?: DeckColor;
   mode: "Dollar" | "CashPct" | "BuyingPowerPct"; value: number;
