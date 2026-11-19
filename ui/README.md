@@ -22,7 +22,11 @@ The search icon next to a Chart, Time & Sales, DOM Ladder, or Order Ticket
 symbol opens the USDT perpetual market list. Search a coin, pair or exchange to
 load a MEXC, Binance, or BingX market in the panel or its Link Group. Add the MEXC
 Perpetual Simulator in Settings → Venues & creds, then select it as the Link
-Group's Execution Venue for paper orders on MEXC markets.
+Group's Execution Venue for paper orders on MEXC markets. The Order Ticket and
+Account headers offer accounts compatible with the focused market. Each Link
+Group remembers its stock selection and its selection for each perpetual
+exchange. When returning from a paper market to a saved live account, select
+and confirm that account to resume order entry.
 
 The Windows title-bar favicon stays transparent and uses the original small-icon
 grid so all five bar rows stay separate at 16–40 px. The engine gives its owned

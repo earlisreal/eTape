@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { resolveVenue } from "./venueSelection";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { ExecStatus } from "../../wire/contract";
 
@@ -12,38 +11,65 @@ const status = (...ids: string[]): ExecStatus => ({
   })),
 });
 
-describe("resolveVenue", () => {
+describe("Link Group venue resolution", () => {
   it("prefers the group's focused venue", () => {
     const lg = new LinkGroups(new BroadcastChannelBus(), () => {});
     lg.focusVenue("green", "tradezero");
-    expect(resolveVenue("green", lg, "alpaca-paper", status("alpaca-paper", "tradezero"))).toBe("tradezero");
+    expect(lg.venueFor("green", status("alpaca-paper", "tradezero"))).toBe("tradezero");
   });
 
   it("does not fall back to a global or first configured venue", () => {
     const lg = new LinkGroups(new BroadcastChannelBus(), () => {});
-    expect(resolveVenue("green", lg, "alpaca-live", status("alpaca-paper", "alpaca-live"))).toBe("");
-    expect(resolveVenue(null, lg, "", status("alpaca-paper", "alpaca-live"))).toBe("");
-  });
-
-  it("returns empty string when nothing resolves", () => {
-    const lg = new LinkGroups(new BroadcastChannelBus(), () => {});
-    expect(resolveVenue(null, lg, "", null)).toBe("");
-  });
-
-  it("does not use a stale global venue after a mode transition", () => {
-    const lg = new LinkGroups(new BroadcastChannelBus(), () => {});
-    expect(resolveVenue(null, lg, "alpaca-live", status("sim-paper"))).toBe("");
+    expect(lg.venueFor("green", status("alpaca-paper", "alpaca-live"))).toBeUndefined();
+    expect(lg.venueFor(null, status("alpaca-paper", "alpaca-live"))).toBeUndefined();
   });
 
   it("returns empty when the group's focused venue no longer exists", () => {
     const lg = new LinkGroups(new BroadcastChannelBus(), () => {});
     lg.focusVenue("green", "tradezero");
-    expect(resolveVenue("green", lg, "alpaca-live", status("sim-paper"))).toBe("");
+    expect(lg.venueFor("green", status("sim-paper"))).toBeUndefined();
   });
 
-  it("still allows a persisted group venue before status is loaded", () => {
+  it("restores a legacy perpetual venue only for its exchange and keeps it when adding a stock venue", () => {
+    const stocks = status("alpaca-paper", "mexc-paper");
+    const st: ExecStatus = { ...stocks, venues: [stocks.venues[0], { ...stocks.venues[1], broker: "mexc-sim" }] };
+    const lg = new LinkGroups(new BroadcastChannelBus(), () => {}, () => st);
+    lg.hydrateVenues({ green: "mexc-paper" });
+
+    lg.focus("green", "US.NVDA");
+    expect(lg.venueFor("green")).toBeUndefined();
+    lg.focusVenue("green", "alpaca-paper");
+    lg.focus("green", "PERP.MEXC.BTC_USDT");
+    expect(lg.venueFor("green")).toBe("mexc-paper");
+    lg.focus("green", "PERP.BINGX.BTC_USDT");
+    expect(lg.venueFor("green")).toBeUndefined();
+    lg.focus("green", "US.NVDA");
+    expect(lg.venueFor("green")).toBe("alpaca-paper");
+  });
+
+  it("blocks a remembered live route after paper, even through an unconfigured exchange or reload", () => {
+    const st = status("alpaca-live", "mexc-paper");
+    st.venues[0] = { ...st.venues[0], env: "live" };
+    st.venues[1] = { ...st.venues[1], broker: "mexc-sim", env: "paper" };
+    const lg = new LinkGroups(new BroadcastChannelBus(), () => {}, () => st);
+    lg.hydrateVenues({ green: { stocks: "alpaca-live", MEXC: "mexc-paper" } });
+    lg.focus("green", "PERP.MEXC.BTC_USDT");
+    lg.focus("green", "PERP.BINGX.BTC_USDT");
+    lg.focus("green", "US.NVDA");
+    expect(lg.venueFor("green")).toBeUndefined();
+    expect(lg.needsLiveConfirmation("green", "alpaca-live")).toBe(true);
+
+    const restored = new LinkGroups(new BroadcastChannelBus(), () => {}, () => st);
+    restored.hydrate(lg.snapshot());
+    restored.hydrateVenues(lg.snapshotVenues());
+    expect(restored.venueFor("green")).toBeUndefined();
+    restored.focusVenue("green", "alpaca-live");
+    expect(restored.venueFor("green")).toBe("alpaca-live");
+  });
+
+  it("waits for status before using a persisted venue", () => {
     const lg = new LinkGroups(new BroadcastChannelBus(), () => {});
     lg.focusVenue("green", "alpaca-live");
-    expect(resolveVenue("green", lg, undefined, null)).toBe("alpaca-live");
+    expect(lg.venueFor("green", null)).toBeUndefined();
   });
 });

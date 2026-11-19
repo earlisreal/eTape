@@ -9,7 +9,7 @@ import { TrailEditor } from "../exec/TrailEditor";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
-import { requiresLiveConfirmation, useVenueSelection } from "../exec/venueSelection";
+import { useVenueSelection } from "../exec/venueSelection";
 import { VenueEnvironmentBadge, venueEnvironment } from "../exec/VenueEnvironmentBadge";
 import { useAccountDemand } from "../exec/useAccountDemand";
 import { useOrderConfig } from "../exec/useOrderConfig";
@@ -589,7 +589,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   useSyncExternalStore((cb) => stores.quote.subscribe(cb), () => stores.quote.getRev());
   const group = groupProp === undefined ? config.group : groupProp;
   const openPositionSymbol = (symbol: string) => linkGroups.focus(group ?? "green", symbol);
-  const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
+  const { venue, venues, selectVenue, placeholder } = useVenueSelection(group, linkGroups, stores);
   useAccountDemand(commands, config.id, group === null ? "" : venue);
   const status = stores.exec.status();
   const venueStatus = status?.venues.find((v) => v.venue === venue);
@@ -602,14 +602,10 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   const actionsSlot = useContext(PanelHeaderActionsSlotContext);
   const [exportOpen, setExportOpen] = useState(false);
   const exportBtnRef = useRef<HTMLButtonElement | null>(null);
-  const changeVenue = (next: string) => {
-    if (requiresLiveConfirmation(status, venue, next) && !window.confirm("Switch this Link Group from paper to live trading?")) return;
-    selectVenue(next);
-  };
   const venueSelect = (
-    <select data-testid="acct-venue" className="ctl mono venue-selector" value={venue} title={venue || undefined} disabled={group === null} onChange={(e) => changeVenue(e.target.value)}
+    <select data-testid="acct-venue" aria-label="Execution Venue" className="ctl mono venue-selector" value={venue} title={venue || undefined} disabled={group === null} onChange={(e) => selectVenue(e.target.value)}
       style={{ padding: "2px 9px", margin: "1px 0" }}>
-      {group === null && <option value="">Choose a Link Group</option>}
+      <option value="" disabled>{placeholder}</option>
       {venues.map((v) => <option key={v} value={v}>{v}</option>)}
     </select>
   );

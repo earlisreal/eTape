@@ -1,3 +1,4 @@
+import { useLinkedVenue } from "../exec/venueSelection";
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type LogicalRange, type Coordinate, type MouseEventParams } from "lightweight-charts";
@@ -227,6 +228,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // live `group` state through as a prop; fall back to config.group so tests
   // that construct PanelProps directly (no `group` prop) keep working.
   const group = groupProp === undefined ? config.group : groupProp;
+  const venue = useLinkedVenue(group, linkGroups, stores.exec.status());
 
   // Config surfaces (timeframe + indicators) ARE low-rate chrome, so React state is
   // fine here (the hard rule is about market data, not per-chart config).
@@ -1334,8 +1336,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             onToggleHidden={toggleIndicatorHidden} onEditIndicator={setSettingsInstanceId} onRemoveIndicator={removeIndicator}
             onClosePane={closePane} onToggleCollapsePane={togglePaneCollapsed}
             legendRef={legendRef} />
-          <ChartOrderMarkers chrome={chrome} orders={execSnapshot.orders.values()} execStore={stores.exec} venue={linkGroups.venueFor(group) ?? ""} symbol={chartSymbol}
-            availableCash={execSnapshot.accounts.get(linkGroups.venueFor(group) ?? "")?.availableCash ?? 0} buyingPower={execSnapshot.accounts.get(linkGroups.venueFor(group) ?? "")?.buyingPower ?? 0}
+          <ChartOrderMarkers chrome={chrome} orders={execSnapshot.orders.values()} execStore={stores.exec} venue={venue} symbol={chartSymbol}
+            availableCash={execSnapshot.accounts.get(venue)?.availableCash ?? 0} buyingPower={execSnapshot.accounts.get(venue)?.buyingPower ?? 0}
             pinned={group === null} sendCommand={commands.sendCommand} hostRef={hostRef} facadeRef={facadeRef}
             rightAxisWidth={rightAxisWidth} layoutRef={orderMarkerLayoutRef} chooserOpenRef={orderChooserOpenRef} config={orderConfig.config} activeTool={alertArmed?"measure":activeTool} />
           <ChartConditionalOrderEntry chrome={chrome} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}

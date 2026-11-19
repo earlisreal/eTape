@@ -139,6 +139,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     // and revert on a rejecting ack instead of moving the group blind.
     const linkGroups = new LinkGroups(new BroadcastChannelBus(), (group, symbol) =>
       client.sendCommand("FocusGroup", { group, symbol }),
+      () => stores.exec.status(),
     );
     // Task 13: ReannounceGate defers DemandRegistry.reannounce() across a
     // session-mode boundary (e.g. live->demo) so a WS reconnect never

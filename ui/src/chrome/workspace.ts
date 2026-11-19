@@ -1,5 +1,4 @@
-import type { LinkGroup } from "./linkGroups";
-import type { VenueID } from "../wire/contract";
+import type { LinkGroup, SavedLinkVenues } from "./linkGroups";
 
 export interface PanelConfig {
   id: string;
@@ -32,9 +31,8 @@ export interface Workspace {
   // itself is rebuilt in-memory (empty) on every page load. Optional: absent in
   // any workspace doc saved before this field existed.
   groups?: Partial<Record<Exclude<LinkGroup, null>, string>>;
-  // Per-link-group focused venue (LinkGroups.focusedVenues), persisted beside
-  // `groups`. Optional: absent in any workspace doc saved before this field.
-  linkVenues?: Partial<Record<Exclude<LinkGroup, null>, VenueID>>;
+  // Selections by market, or a single legacy venue ID in older layouts.
+  linkVenues?: SavedLinkVenues;
   scannerSync?: ScannerSyncConfig;
 }
 

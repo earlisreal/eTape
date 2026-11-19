@@ -132,6 +132,18 @@ describe("LinkGroups", () => {
       expect(a.symbolFor("green")).toBe("US.AAPL");   // symbol untouched by the venue message
     });
 
+    it("carries the selected market on a venue message so it cannot overwrite another market", () => {
+      const hub = new FakeBusHub();
+      const a = new LinkGroups(new FakeBus(hub), () => {});
+      const b = new LinkGroups(new FakeBus(hub), () => {});
+      a.focusVenue("green", "alpaca-paper");
+      a.hydrate({ green: "PERP.MEXC.BTC_USDT" });
+      a.focusVenue("green", "mexc-paper");
+      expect(b.venueFor("green")).toBe("alpaca-paper");
+      b.focus("green", "PERP.MEXC.ETH_USDT");
+      expect(b.venueFor("green")).toBe("mexc-paper");
+    });
+
     it("hydrateVenues/snapshotVenues round-trip and skip falsy entries", () => {
       const lg = new LinkGroups(new FakeBus(new FakeBusHub()), () => {});
       lg.hydrateVenues({ green: "alpaca-paper", red: "" as never });

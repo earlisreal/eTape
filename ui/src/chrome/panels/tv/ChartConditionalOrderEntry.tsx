@@ -288,6 +288,10 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
         announce(snapshot.invalid ?? settingsAckInstruction(snapshot.args.venue, snapshot.template.type));
         return;
       }
+      const { linkGroups, group, stores } = latest.current;
+      const { venue, symbol } = gesture.snapshot.args;
+      if (venue !== snapshot.args.venue || symbol !== snapshot.args.symbol ||
+          !linkGroups.matchesOrderContext(group, symbol, venue, stores.exec.status())) { hide(); return; }
       announce(`Submitting ${snapshot.detail}`);
       void latest.current.sendCommand("SubmitOrder", snapshot.args).then((ack) => {
         if (ack.ambiguous) announce("Order outcome unknown. Verify Open Orders before retrying.", true);

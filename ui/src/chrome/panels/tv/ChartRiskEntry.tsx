@@ -358,6 +358,11 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             }
             if (draft !== current)
                 return;
+            const p = latest.current;
+            if (!p.linkGroups.matchesOrderContext(p.group, symbol, venue, p.stores.exec.status())) {
+                clear();
+                return;
+            }
             delete current.error;
             const error = invalid();
             const s = size();

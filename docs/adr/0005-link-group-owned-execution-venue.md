@@ -12,15 +12,22 @@ was using.
 
 ## Decision
 
-- Each colour Link Group owns one persisted execution venue. Grouped Account,
-  Order Ticket, locate, and hotkey actions resolve only that venue.
+- Each colour Link Group remembers an Execution Venue for stocks and for each
+  supported perpetual exchange. The focused symbol determines which selection
+  applies. Account, Order Ticket, chart, DOM Ladder, locate, and hotkey actions
+  share that context. The selector lists compatible accounts for that market.
+- A legacy single saved venue resolves only for the market supported by its
+  configured broker. A missing or incompatible selection leaves trading
+  unavailable for the focused market.
 - A pinned panel has no venue. It prompts the user to choose a Link Group and
   cannot submit or request venue-scoped work.
 - The legacy global venue value may remain in old configuration for migration,
   but runtime routing ignores it and never falls back to the first configured
   venue.
-- Changing a group from paper to live requires a lightweight confirmation.
-  Existing orders and positions remain attached to their original venue; the
+- Changing a group from paper to live requires confirmation. When a symbol
+  change would restore a live account after using paper, the group can browse
+  the market and only enables order entry after the account is reselected and
+  confirmed. Existing orders and positions belong to their original venue. The
   UI keeps a warning while working orders remain there.
 - The engine polls every configured live venue for risk and polls a paper (or
   otherwise non-risk) venue only while an Account panel or a grouped Chart Risk

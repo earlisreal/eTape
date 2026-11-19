@@ -4,7 +4,7 @@ import type { PanelProps } from "./registry";
 import type { LocateEligibility, LocateListResult, LocateQuote, LocateQuoteResult, LocateRecord } from "../../gen/wsmsg";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
-import { requiresLiveConfirmation, useVenueSelection } from "../exec/venueSelection";
+import { useVenueSelection } from "../exec/venueSelection";
 import { normalizeSymbol } from "../symbol";
 import { getTvChrome } from "../../render/chart/tvTheme";
 import { TVDialog } from "./tv/TVDialog";
@@ -63,7 +63,7 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
   const { palette, mode } = useTheme();
   const toast = useToasts();
   const group = groupProp === undefined ? config.group : groupProp;
-  const { venue, selectVenue } = useVenueSelection(group, linkGroups, stores);
+  const { venue, selectVenue, placeholder } = useVenueSelection(group, linkGroups, stores);
   const status = stores.exec.status();
   const rawSymbol = symbolProp ?? linkGroups.symbolFor(group) ?? (config.settings.symbol as string) ?? "";
   const symbol = rawSymbol ? normalizeSymbol(rawSymbol) : "";
@@ -299,13 +299,8 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
     <div data-testid="locates-panel" style={{ height: "100%", minWidth: 0, overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}`, background: palette.surface }}>
         <span style={{ color: palette.textMuted }}>Venue</span>
-        <select data-testid="locates-venue" className="ctl mono" value={selectorValue} disabled={group === null} onChange={(e) => {
-          const next = e.target.value;
-          if (requiresLiveConfirmation(status, venue, next) && !window.confirm("Switch this Link Group from paper to live trading?")) return;
-          selectVenue(next);
-        }}>
-          {group === null && <option value="">Choose a Link Group</option>}
-          {!selectedAlpaca && venue && <option value="" disabled>{venue}</option>}
+        <select data-testid="locates-venue" className="ctl mono" value={selectorValue} disabled={group === null} onChange={(e) => selectVenue(e.target.value)}>
+          <option value="" disabled>{venue || placeholder}</option>
           {alpacaVenues.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
       </div>

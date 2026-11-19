@@ -1,8 +1,27 @@
-import type { AckMsg, VenueID } from "../wire/contract";
+import type { AckMsg, ExecStatus, VenueID, VenueStatus } from "../wire/contract";
+import { cryptoBrokerExchange, cryptoExchange, type CryptoExchange } from "./cryptoScanner";
 import { CrosshairSync } from "./crosshairSync";
 
 export type LinkGroup = "red" | "green" | "blue" | "yellow" | null; // null = pinned
-export interface LinkMsg { group: LinkGroup; symbol?: string; venue?: VenueID }
+type VenueMarket = "stocks" | CryptoExchange;
+type VenueSelections = Partial<Record<VenueMarket, VenueID>> & { legacy?: VenueID; switchedFrom?: VenueID };
+export type SavedLinkVenues = Partial<Record<Exclude<LinkGroup, null>, VenueID | VenueSelections>>;
+export interface LinkMsg { group: LinkGroup; symbol?: string; venue?: VenueID; venueMarket?: VenueMarket }
+
+export function venueMarket(symbol: string | undefined): VenueMarket | undefined {
+  return symbol?.startsWith("PERP.") ? cryptoExchange(symbol.split(".")[1]) : "stocks";
+}
+
+export function venueSupportsMarket(venue: VenueStatus, market: VenueMarket | undefined): boolean {
+  if (market === "stocks") return ["alpaca", "tradezero", "moomoo", "sim"].includes(venue.broker);
+  return market !== undefined && cryptoBrokerExchange(venue.broker) === market;
+}
+
+function requiresLiveConfirmation(status: ExecStatus | null | undefined, current: VenueID | undefined, next: VenueID): boolean {
+  if (!current || current === next || !status) return false;
+  const env = (id: VenueID) => status.venues.find(v => v.venue === id)?.env?.toLowerCase();
+  return env(current) === "paper" && env(next) === "live";
+}
 export interface FocusTiming { symbol: string; startedAt: number; sequence: number }
 
 export interface LinkBus {
@@ -27,7 +46,7 @@ export class BroadcastChannelBus implements LinkBus {
 export class LinkGroups {
   readonly crosshairSync = new CrosshairSync();
   private readonly focused = new Map<Exclude<LinkGroup, null>, string>();
-  private readonly focusedVenues = new Map<Exclude<LinkGroup, null>, VenueID>();
+  private readonly focusedVenues = new Map<Exclude<LinkGroup, null>, VenueID | VenueSelections>();
   private readonly previousVenues = new Map<Exclude<LinkGroup, null>, VenueID>();
   private readonly focusTimings = new Map<Exclude<LinkGroup, null>, FocusTiming>();
   private focusTimingSequence = 0;
@@ -36,11 +55,12 @@ export class LinkGroups {
   constructor(
     private readonly bus: LinkBus,
     private readonly onEcho: (group: Exclude<LinkGroup, null>, symbol: string) => Promise<AckMsg> | void,
+    private readonly getExecStatus?: () => ExecStatus | null,
   ) {
     this.bus.onMessage((msg) => {
       if (!msg.group) return;
       if (msg.symbol !== undefined) this.setLocal(msg.group, msg.symbol);
-      if (msg.venue !== undefined) this.setLocalVenue(msg.group, msg.venue);
+      if (msg.venue !== undefined) this.setLocalVenue(msg.group, msg.venue, msg.venueMarket ?? venueMarket(this.symbolFor(msg.group)));
     });
   }
 
@@ -72,6 +92,13 @@ export class LinkGroups {
   }
 
   private setLocal(group: Exclude<LinkGroup, null>, symbol: string): void {
+    if (venueMarket(this.symbolFor(group)) !== venueMarket(symbol)) {
+      const status = this.getExecStatus?.();
+      const from = venueMarket(this.symbolFor(group));
+      // Remember the prior selection even if the engine snapshot is still loading.
+      const previous = status === null && from ? this.savedVenueFor(group, undefined, from) : this.venueFor(group, status);
+      if (previous) this.focusedVenues.set(group, { ...this.selections(group), switchedFrom: previous });
+    }
     this.focused.set(group, symbol);
     this.subs.forEach((cb) => cb());
   }
@@ -92,22 +119,61 @@ export class LinkGroups {
   // engine (the engine has no per-group venue concept). It publishes cross-window
   // and notifies subscribers so grouped panels re-render.
   focusVenue(group: Exclude<LinkGroup, null>, venue: VenueID): void {
-    this.setLocalVenue(group, venue);
-    this.bus.post({ group, venue });
+    const market = venueMarket(this.symbolFor(group));
+    if (!market) return;
+    this.setLocalVenue(group, venue, market);
+    this.bus.post({ group, venue, venueMarket: market });
   }
 
-  venueFor(group: LinkGroup): VenueID | undefined {
-    return group ? this.focusedVenues.get(group) : undefined;
+  private selections(group: Exclude<LinkGroup, null>): VenueSelections {
+    const saved = this.focusedVenues.get(group);
+    return typeof saved === "string" ? { legacy: saved } : saved ?? {};
+  }
+
+  private savedVenueFor(group: Exclude<LinkGroup, null>, status: ExecStatus | null | undefined, market: VenueMarket): VenueID | undefined {
+    const saved = this.selections(group);
+    const candidate = saved[market] ?? saved.legacy;
+    if (status === undefined) return candidate;
+    return status?.venues.find(venue => venue.venue === candidate && venueSupportsMarket(venue, market))?.venue;
+  }
+
+  venueFor(group: LinkGroup, status = this.getExecStatus?.()): VenueID | undefined {
+    const market = venueMarket(this.symbolFor(group));
+    if (!group || !market) return undefined;
+    const candidate = this.savedVenueFor(group, status, market);
+    return candidate && !requiresLiveConfirmation(status, this.selections(group).switchedFrom, candidate) ? candidate : undefined;
+  }
+
+  awaitingLiveConfirmation(group: LinkGroup, status: ExecStatus | null): boolean {
+    const market = venueMarket(this.symbolFor(group));
+    if (!group || !market) return false;
+    const saved = this.savedVenueFor(group, status, market);
+    return !!saved && requiresLiveConfirmation(status, this.selections(group).switchedFrom, saved);
+  }
+
+  needsLiveConfirmation(group: LinkGroup, venue: VenueID, status = this.getExecStatus?.()): boolean {
+    if (!group) return false;
+    return requiresLiveConfirmation(status, this.venueFor(group, status), venue) ||
+      requiresLiveConfirmation(status, this.selections(group).switchedFrom, venue);
+  }
+
+  matchesOrderContext(group: LinkGroup, symbol: string, venue: VenueID, status = this.getExecStatus?.()): boolean {
+    const focused = this.symbolFor(group);
+    return !!venue && venue === this.venueFor(group, status) && (!focused || symbol === focused);
   }
 
   previousVenueFor(group: LinkGroup): VenueID | undefined {
     return group ? this.previousVenues.get(group) : undefined;
   }
 
-  private setLocalVenue(group: Exclude<LinkGroup, null>, venue: VenueID): void {
-    const previous = this.focusedVenues.get(group);
+  private setLocalVenue(group: Exclude<LinkGroup, null>, venue: VenueID, market: VenueMarket | undefined): void {
+    if (!market) return;
+    const selections = this.selections(group);
+    const previous = this.savedVenueFor(group, this.getExecStatus?.(), market);
     if (previous && previous !== venue) this.previousVenues.set(group, previous);
-    this.focusedVenues.set(group, venue);
+    const next = { ...selections, [market]: venue };
+    if (market === venueMarket(this.symbolFor(group))) delete next.switchedFrom;
+    this.focusedVenues.set(group, next);
     this.subs.forEach((cb) => cb());
   }
 
@@ -134,14 +200,16 @@ export class LinkGroups {
   }
 
   /** Seed per-group focused venues from a persisted workspace doc (silent — see hydrate). */
-  hydrateVenues(map: Partial<Record<Exclude<LinkGroup, null>, VenueID>>): void {
-    for (const [group, venue] of Object.entries(map) as [Exclude<LinkGroup, null>, VenueID][]) {
+  hydrateVenues(map: SavedLinkVenues): void {
+    this.focusedVenues.clear();
+    this.previousVenues.clear();
+    for (const [group, venue] of Object.entries(map) as [Exclude<LinkGroup, null>, VenueID | VenueSelections][]) {
       if (venue) this.focusedVenues.set(group, venue);
     }
   }
 
   /** Plain-object snapshot of the focused-venue map, for the workspace doc's linkVenues key. */
-  snapshotVenues(): Partial<Record<Exclude<LinkGroup, null>, VenueID>> {
+  snapshotVenues(): SavedLinkVenues {
     return Object.fromEntries(this.focusedVenues);
   }
 }

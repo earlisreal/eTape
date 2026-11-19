@@ -18,9 +18,12 @@ immediately. Live trails reuse the existing account-held-stop acknowledgement.
 
 Order ticket, hotkeys, sizing, venue selection, and arm/disarm presentation.
 Inputs: user intent plus account/position stores; outputs: typed wire commands.
-UI never bypasses engine gates. Grouped panels resolve only their Link Group's
-persisted venue; pinned panels prompt for a Link Group and cannot submit. A
-paper-to-live group switch asks for confirmation, while existing orders remain
+Grouped panels use their Link Group's saved stock account or the saved account
+for the focused perpetual exchange. Choose a compatible account from the Order
+Ticket or Account panel header. A missing selection leaves the market available
+for browsing. Pinned panels need a Link Group before they can submit. A move
+from paper to live, including restoring a remembered live account, requires
+reselecting the live account and confirming. Existing orders remain
 owned by their original venue and are called out until they finish. Account
 panels publish panel-scoped account demand so the engine polls only displayed
 paper accounts in addition to its live risk venues. The Account strip exposes

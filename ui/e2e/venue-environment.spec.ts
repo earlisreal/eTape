@@ -2,12 +2,8 @@ import { test, expect } from "@playwright/test";
 import type { ClientMessage, ExecStatus } from "../src/wire/contract";
 import { WORKSPACE_LAYOUT_VERSION, type Workspace } from "../src/chrome/workspace";
 
-test("venue badges remain visible across themes, narrow headers, and workspace targets", async ({ page, context }, testInfo) => {
-  let environment = "live";
-  const publishers: Array<() => void> = [];
-  const longVenue = "a-very-long-venue-name-paper";
-  const workspace = `e2e-venue-badge-${Date.now()}`;
-  const seed: Workspace = {
+function venueWorkspace(workspace: string): Workspace {
+  return {
     name: workspace, layoutVersion: WORKSPACE_LAYOUT_VERSION,
     panels: [
       { id: "ticket", panelId: "order-ticket", group: "blue", settings: {} },
@@ -25,6 +21,14 @@ test("venue badges remain visible across themes, narrow headers, and workspace t
       }, activeGroup: "ticket",
     },
   };
+}
+
+test("venue badges remain visible across themes, narrow headers, and workspace targets", async ({ page, context }, testInfo) => {
+  let environment = "live";
+  const publishers: Array<() => void> = [];
+  const longVenue = "a-very-long-venue-name-paper";
+  const workspace = `e2e-venue-badge-${Date.now()}`;
+  const seed = venueWorkspace(workspace);
   // Only display metadata is changed. The isolated demo engine remains sim-only.
   await context.routeWebSocket("**/ws", (socket) => {
     const server = socket.connectToServer();
@@ -52,8 +56,8 @@ test("venue badges remain visible across themes, narrow headers, and workspace t
   await page.goto(`/?workspace=${workspace}`);
   await expect(page.getByTestId("acct-equity")).toBeVisible();
   await page.getByRole("tab", { name: "Watchlist", exact: true }).getByRole("button", { name: "Close tab" }).click();
-  const ticket = page.locator(".ledger-header", { hasText: "Order Ticket" });
-  const account = page.locator(".ledger-header", { hasText: "Account" });
+  const ticket = page.getByTestId("panel-tab-ticket").locator(".ledger-header");
+  const account = page.getByTestId("panel-tab-account").locator(".ledger-header");
   await page.getByTestId("venue").selectOption("sim-paper");
   await ticket.click();
   const cue = page.getByTestId("hotkey-target-cue");
@@ -97,4 +101,72 @@ test("venue badges remain visible across themes, narrow headers, and workspace t
   await expect(cue.getByTestId("venue-environment-badge")).toHaveText("SIM");
   await expect(other.getByTestId("hotkey-target-cue").getByTestId("venue-environment-badge")).toHaveText("SIM");
   await other.close();
+});
+
+test("linked panels recall the stock and exchange accounts", async ({ page, context }) => {
+  const workspace = "e2e-venue-market";
+  const seed = venueWorkspace(workspace);
+  await context.routeWebSocket("**/ws", socket => {
+    const server = socket.connectToServer();
+    socket.onMessage(raw => {
+      const message = JSON.parse(raw.toString());
+      if (message.name === "GetConfig" && message.args.key === "workspace." + workspace) {
+        socket.send(JSON.stringify({ kind: "ack", corrId: message.corrId, status: "accepted", value: seed }));
+      } else if (message.name === "FocusGroup" && message.args.symbol?.startsWith("PERP.")) {
+        socket.send(JSON.stringify({ kind: "ack", corrId: message.corrId, status: "accepted" }));
+      } else {
+        server.send(raw);
+      }
+    });
+    server.onMessage(raw => {
+      const frame = JSON.parse(raw.toString());
+      if (frame.topic === "exec.status") {
+        const status: ExecStatus = frame.payload;
+        status.masterArmed = false;
+        status.venues.push(
+          { ...status.venues[0], venue: "mexc-paper", broker: "mexc-sim", env: "paper" },
+          { ...status.venues[0], venue: "bingx-virtual", broker: "bingx-vst", env: "paper" },
+        );
+        socket.send(JSON.stringify(frame));
+      } else {
+        socket.send(raw);
+      }
+    });
+  });
+  await page.goto("/?workspace=" + workspace);
+  await page.getByRole("tab", { name: "Watchlist", exact: true }).getByRole("button", { name: "Close tab" }).click();
+  const ticket = page.getByTestId("panel-tab-ticket").locator(".ledger-header");
+  const select = page.getByTestId("venue");
+  const account = page.getByTestId("acct-venue");
+  const cue = page.getByTestId("hotkey-target-cue");
+  await expect(select).toHaveValue("sim-paper");
+  const load = async (symbol: string) => {
+    await ticket.getByTestId("panel-symbol").click();
+    await page.keyboard.type(symbol);
+    await page.keyboard.press("Enter");
+  };
+  await load("mexc.btc.usdt");
+  await expect(select).toHaveValue("");
+  await expect(select.locator("option:checked")).toHaveText("Choose a MEXC account");
+  await expect(select.locator("option[value='sim-paper']")).toHaveCount(0);
+  await select.selectOption("mexc-paper");
+  await expect(account).toHaveValue("mexc-paper");
+  await expect(cue).toContainText("mexc-paper");
+  await load("bingx.btc.usdt");
+  await expect(select.locator("option:checked")).toHaveText("Choose a BingX account");
+  await expect(account).toHaveValue("");
+  await expect(cue).not.toContainText("mexc-paper");
+  await select.selectOption("bingx-virtual");
+  await expect(account).toHaveValue("bingx-virtual");
+  await expect(cue).toContainText("bingx-virtual");
+  await load("binance.btc.usdt");
+  await expect(select.locator("option:checked")).toHaveText("Choose a Binance account");
+  await expect(select.locator("option")).toHaveCount(1);
+  await load("drgo");
+  await expect(select).toHaveValue("sim-paper");
+  await expect(account).toHaveValue("sim-paper");
+  await load("mexc.btc.usdt");
+  await expect(select).toHaveValue("mexc-paper");
+  await load("bingx.btc.usdt");
+  await expect(select).toHaveValue("bingx-virtual");
 });

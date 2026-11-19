@@ -41,7 +41,6 @@ import { NewWindowModal } from "./NewWindowModal";
 import { mutateWindows, readWindows } from "./catalogs";
 import { openWorkspaceWindow } from "./windows";
 import { planDemoEntry, planDemoRevert } from "./demoTransition";
-import { resolveVenue } from "./exec/venueSelection";
 import { PanelHeaderTab } from "./PanelHeaderTab";
 import { PanelHeaderHostProvider } from "./panels/headerSlot";
 import { CryptoScannerContext } from "./cryptoScanner";
@@ -382,11 +381,9 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   }), [stores.exec, toast]);
   // Subscribe only to shell-relevant execution state. Account/P&L updates stay
   // in AccountPanel's own subscription and must not re-render Dockview's owner.
-  useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => appShellExecSignature(stores));
+  const execSignature = useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => appShellExecSignature(stores));
   const execStatus = stores.exec.status();
   const armed = execStatus?.masterArmed ?? false;
-  const execStatusRef = useRef(execStatus);
-  execStatusRef.current = execStatus;
   const hotkeyTargetInputForPanel = useCallback((panelId: string): HotkeyTargetInput | null => {
     const panel = wsRef.current?.panels.find((p) => p.id === panelId);
     if (!panel) return null;
@@ -395,9 +392,9 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       panel: panel.id,
       group,
       ...(group ? { symbol: linkGroups.symbolFor(group) } : { symbol: panel.settings.symbol as string | undefined }),
-      venue: resolveVenue(group, linkGroups, undefined, execStatusRef.current),
+      venue: linkGroups.venueFor(group, stores.exec.status()) ?? "",
     };
-  }, [linkGroups]);
+  }, [linkGroups, stores]);
   const refreshOwnedTarget = useCallback(() => {
     const current = hotkeyCoordinator.snapshot();
     if (!current || current.ownerWindow !== windowId) return;
@@ -550,7 +547,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       refreshOwnedTarget();
     });
   }, [linkGroups, refreshOwnedTarget, workspaceStore]);
-  useEffect(() => { refreshOwnedTarget(); }, [refreshOwnedTarget, ws]);
+  useEffect(() => { refreshOwnedTarget(); }, [refreshOwnedTarget, ws, execSignature]);
   // Task 13: demo-mode entry/revert orchestration. `wsLoaded` (a derived
   // boolean, not raw `ws`) is the effect's second dependency below,
   // deliberately: it flips false->true exactly once (the workspace doc never

@@ -18,6 +18,7 @@ function mount(auto = false, preset = template, chartSymbol = preset.perpetual ?
     stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, venues: [{ venue: "sim", broker: chartSymbol === mexcSymbol ? "mexc-sim" : "sim", connected: true, positionDataReady: true }] } });
     stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { venue: "sim", buyingPower: 100000, availableCash: 100000, tsMs: Date.now() } });
     const linkGroups = new LinkGroups({ post: () => { }, onMessage: () => () => { }, close: () => { } }, () => { });
+    linkGroups.focus("green", chartSymbol);
     linkGroups.focusVenue("green", "sim");
     const host = document.createElement("div");
     document.body.append(host);
@@ -29,7 +30,10 @@ function mount(auto = false, preset = template, chartSymbol = preset.perpetual ?
     const element = (symbol = chartSymbol) => <ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol={symbol} contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [preset], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} layoutRef={layoutRef} sendCommand={sendCommand} sendQuery={sendQuery}/>;
     const result = render(element(), { container: host, wrapper: ({ children }) => <ThemeProvider><ToastProvider>{children}</ToastProvider></ThemeProvider> });
     sendCommand.mockClear();
-    return { ...result, host, sendCommand, sendQuery, facadeRef, layoutRef, stores, changeSymbol: (symbol: string) => result.rerender(element(symbol)) };
+    return { ...result, host, sendCommand, sendQuery, facadeRef, layoutRef, stores, changeSymbol: (symbol: string) => {
+        linkGroups.focus("green", symbol);
+        result.rerender(element(symbol));
+    } };
 }
 function seedMexcContract(stores: ReturnType<typeof makeStores>) {
     stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: { symbol: mexcSymbol, mark: 10, bid: 9.9, ask: 10.1, contract: {
@@ -575,10 +579,10 @@ it.each(["missing", "untrusted", "stale"])("auto-sends once with %s refreshed ma
 it.each(["buy", "sell"] as const)("auto-sends a completed %s correction only after a moved release", async endpoint => {
     const { host, stores, sendCommand, sendQuery } = mount(true);
     initiateChartRiskEntry(template);
-    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: false, venues: [{ venue: "sim", connected: true, positionDataReady: true }] } });
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: false, venues: [{ venue: "sim", broker: "sim", connected: true, positionDataReady: true }] } });
     placeRiskPair(host);
     await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe("Trading is locked. Arm the engine first."));
-    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, venues: [{ venue: "sim", connected: true, positionDataReady: true }] } });
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, venues: [{ venue: "sim", broker: "sim", connected: true, positionDataReady: true }] } });
     flushFrames();
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
     const pill = host.querySelector(`[data-risk-price='${endpoint}']`)!;
@@ -626,7 +630,7 @@ it("clears an earlier preview error after a successful refresh", async () => {
     sendQuery.mockRejectedValueOnce(new Error("offline"));
     initiateChartRiskEntry(template);
     await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe("Engine preview unavailable."));
-    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: false, venues: [{ venue: "sim", connected: true, positionDataReady: true }] } });
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: false, venues: [{ venue: "sim", broker: "sim", connected: true, positionDataReady: true }] } });
     placeRiskPair(host);
     await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe("Trading is locked. Arm the engine first."));
     expect(sendQuery).toHaveBeenCalledTimes(2);
@@ -666,7 +670,7 @@ it.each(["locked", "disconnected", "stale account"])("revalidates %s execution a
     if (blocker === "stale account") {
         stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { venue: "sim", buyingPower: 100000, availableCash: 100000, tsMs: Date.now() - 31000 } });
     } else {
-        stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: blocker !== "locked", venues: [{ venue: "sim", connected: blocker !== "disconnected", positionDataReady: true }] } });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: blocker !== "locked", venues: [{ venue: "sim", broker: "sim", connected: blocker !== "disconnected", positionDataReady: true }] } });
     }
     placeRiskPair(host);
     const reason = blocker === "locked" ? "Trading is locked. Arm the engine first." : blocker === "disconnected" ? "Venue or position data unavailable; reconcile first." : "Fresh account data required.";

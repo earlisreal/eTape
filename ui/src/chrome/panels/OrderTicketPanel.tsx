@@ -9,7 +9,7 @@ import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
 import type { PerpetualMarket } from "../../gen/wsmsg";
 import { cryptoBrokerExchange, preferredCryptoAccountKey, useCryptoPreference } from "../cryptoScanner";
-import { requiresLiveConfirmation, useVenueSelection } from "../exec/venueSelection";
+import { useVenueSelection } from "../exec/venueSelection";
 import { VenueEnvironmentBadge, venueEnvironment } from "../exec/VenueEnvironmentBadge";
 import { useOrderConfig } from "../exec/useOrderConfig";
 import { useThrottledQuote } from "../exec/useThrottledQuote";
@@ -73,12 +73,8 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   }, [linkGroups, group, symbolProp, configuredSymbol]);
 
   const quote = useThrottledQuote(stores.quote, symbol);
-  const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
+  const { venue, venues, selectVenue, placeholder } = useVenueSelection(group, linkGroups, stores);
   const preferredAccount = useCryptoPreference(commands, preferredCryptoAccountKey, symbol.startsWith("PERP."));
-  const pickVenue = (next: string) => {
-    if (requiresLiveConfirmation(stores.exec.status(), venue, next) && !window.confirm("Switch this Link Group from paper to live trading?")) return;
-    selectVenue(next);
-  };
   const status = stores.exec.status();
   const { config: orderConfig } = useOrderConfig();
   const extBufferPct = orderConfig.extHoursMarketBufferPct ?? 1;
@@ -96,6 +92,11 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const [price, setPrice] = useState("");
   const [stop, setStop] = useState("");
   const [conditionalRoute, setConditionalRoute] = useState<StopLimitRoutePreview | null>(null);
+
+  useEffect(() => {
+    setPrice("");
+    setStop("");
+  }, [symbol, venue]);
 
   useEffect(() => {
     if (type !== "STOP_LIMIT" && type !== "LIMIT_IF_TOUCHED") { setConditionalRoute(null); return; }
@@ -140,7 +141,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   };
 
   const submitManual = (side: Side) => {
-    if (venue === "") { toast.push({ level: "danger", text: "no execution venue — set one up in Settings › Venues & creds" }); return; }
+    if (!linkGroups.matchesOrderContext(group, symbol, venue, stores.exec.status())) { toast.push({ level: "danger", text: "The symbol or Execution Venue changed. Review the ticket and try again." }); return; }
     if (symbol === "") { toast.push({ level: "danger", text: "no symbol focused — type a symbol in the order ticket or a linked panel" }); return; }
     if(isTrail){
       if(side!=="SELL" && side!=="COVER")return;
@@ -216,8 +217,8 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           ···
         </span>
       )}
-      <select data-testid="venue" className="ctl mono venue-selector" value={venue} title={venue || undefined} disabled={group === null} onChange={(e) => pickVenue(e.target.value)}>
-        {group === null && <option value="">Choose a Link Group</option>}
+      <select data-testid="venue" aria-label="Execution Venue" className="ctl mono venue-selector" value={venue} title={venue || undefined} disabled={group === null} onChange={(e) => selectVenue(e.target.value)}>
+        <option value="" disabled>{placeholder}</option>
         {venues.map((v) => <option key={v} value={v}>{v}</option>)}
       </select>
       <VenueEnvironmentBadge environment={venueEnvironment(venueStatus)} />
@@ -251,7 +252,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
     };
     return <div style={{ display: "grid", gap: 6, padding: 6, color: palette.text, fontSize: 12 }}>
       {actionsSlot === undefined ? headerActions : actionsSlot ? createPortal(headerActions, actionsSlot) : null}
-      {usePreferred && <button className="ctl" type="button" onClick={() => pickVenue(preferred.venue)}>
+      {usePreferred && venues.includes(preferred.venue) && <button className="ctl" type="button" onClick={() => selectVenue(preferred.venue)}>
         Use preferred account ({preferred.venue}{preferred.env ? " · " + preferred.env : ""})
       </button>}
       {group !== null && preferredExchange && exchange !== preferredExchange &&
@@ -260,7 +261,9 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
         <PerpetualTicket key={`${venue}/${symbol}`} symbol={symbol} venue={venue} broker={venueStatus?.broker}
           routeReady={cryptoBrokerExchange(venueStatus?.broker) === exchange}
           positionReady={venueStatus?.positionDataReady ?? false}
-          quote={quote} positionQty={positionQty} submit={(args, label) => { void oc.submit(args, label); }} /> :
+          quote={quote} positionQty={positionQty} submit={(args, label) => {
+            if (linkGroups.matchesOrderContext(group, args.symbol, args.venue, stores.exec.status())) void oc.submit(args, label);
+          }} /> :
         <span>{symbol.split(".")[1]} perpetuals are available for market data.</span>}
     </div>;
   }
@@ -349,7 +352,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       {/* Strip 4 — action row: each button submits its side directly */}
       <div style={{ display: "flex", gap: 3 }}>
         {(isTrail?SIDES.filter(s=>s==="SELL"||s==="COVER"):SIDES).map((s) => (
-          <button key={s} type="button" data-testid={`side-${s}`} className={sideTone(s)} onClick={() => submitManual(s)}>{s}</button>
+          <button key={s} type="button" data-testid={`side-${s}`} className={sideTone(s)} disabled={!venue} onClick={() => submitManual(s)}>{s}</button>
         ))}
       </div>
       {/* Strip 5 — embedded Hotkey Deck (Settings › Orders & hotkeys).
