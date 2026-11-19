@@ -6,7 +6,7 @@ import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testi
 import { AppShell } from "./AppShell";
 import { collectPanelIds } from "./backup";
 import { WorkspaceStore, type Workspace } from "./workspace";
-import { buildMonitoringWorkspace } from "./presets";
+import { buildCryptoMonitoringWorkspace, buildMonitoringWorkspace } from "./presets";
 import { makeStores } from "../data/registry";
 import { LinkGroups, BroadcastChannelBus } from "./linkGroups";
 import { DemandRegistry } from "../wire/DemandRegistry";
@@ -85,12 +85,12 @@ class TargetChannel implements HotkeyTargetChannel {
 
 const scannerShortInterestDefaults = { turnover: null, sessionVolume: null, shortInterest: null, shortInterestAsOf: null } as const;
 
-function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApplied?: () => void; onRender?: () => void; hotkeyTargetChannel?: HotkeyTargetChannel; stores?: ReturnType<typeof makeStores> }) {
+function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApplied?: () => void; onRender?: () => void; hotkeyTargetChannel?: HotkeyTargetChannel; stores?: ReturnType<typeof makeStores>; commandValue?: (name: string) => unknown }) {
   const stores = opts?.stores ?? makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const commands = {
-    sendCommand: vi.fn(async () => ({ kind: "ack" as const, corrId: "c", status: "accepted" as const, value: undefined })),
+    sendCommand: vi.fn(async (name: string) => ({ kind: "ack" as const, corrId: "c", status: "accepted" as const, value: opts?.commandValue?.(name) })),
     sendQuery: vi.fn(async () => []),
   };
   const demandRegistry = new DemandRegistry({ sendCommand: commands.sendCommand, onState: () => {} });
@@ -453,6 +453,43 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
     act(() => { linkGroups.focus("green", "US.NVDA"); });
 
     await waitFor(() => expect(saved.some((w) => w.groups?.green === "US.NVDA")).toBe(true));
+  });
+});
+
+describe("Crypto Monitoring Scanner Sync", () => {
+  it("follows exact perpetuals independently of stock Monitoring and persists OFF", async () => {
+    const crypto = mount(buildCryptoMonitoringWorkspace(), {
+      workspaceName: "crypto-monitoring",
+      commandValue: name => name === "GetCryptoScanner" ? {
+        asOfMs: Date.now(), warming: false,
+        rows: [
+          { symbol: "PERP.MEXC.BTC_USDT", base: "BTC", last: 12000, changePct: 8, turnover: 3000000, spreadBps: 1 },
+          { symbol: "PERP.MEXC.ETH_USDT", base: "ETH", last: 500, changePct: -2, turnover: 2000000, spreadBps: 1 },
+        ],
+      } : undefined,
+    });
+    const stock = mount(buildMonitoringWorkspace(), { workspaceName: "monitoring" });
+    const cryptoUI = within(crypto.container);
+    const stockUI = within(stock.container);
+    await waitFor(() => expect(crypto.commands.sendCommand).toHaveBeenCalledWith("GetCryptoScanner", { exchange: "MEXC" }));
+    await waitFor(() => expect(cryptoUI.getByRole("table", { name: "MEXC crypto Scanner results" })).toBeTruthy());
+    await waitFor(() => expect(cryptoUI.getByText("BTC/USDT")).toBeTruthy());
+    expect(cryptoUI.queryByText("ETH/USDT")).toBeNull();
+    fireEvent.click(cryptoUI.getByRole("button", { name: "Enable Scanner Sync" }));
+    fireEvent.click(stockUI.getByRole("button", { name: "Use this Scanner as Monitoring Source" }));
+    act(() => stock.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      scannerId: "monitoring/m-scanner", session: "rth", status: "ready", refreshedAt: new Date().toISOString(),
+      rows: [{ ...scannerShortInterestDefaults, symbol: "US.AAPL", last: 100, changePct: 3, floatShares: 1, volume: 1 }],
+    } }));
+    const firstChart = (saved: Workspace[]) => saved.at(-1)?.panels.find(panel => panel.id === "m-chart-red")?.settings.symbol;
+    await waitFor(() => {
+      expect(firstChart(crypto.saved)).toBe("PERP.MEXC.BTC_USDT");
+      expect(firstChart(stock.saved)).toBe("US.AAPL");
+    });
+    fireEvent.click(cryptoUI.getByRole("button", { name: "Disable Scanner Sync" }));
+    await waitFor(() => expect(crypto.saved.at(-1)?.scannerSync?.enabled).toBe(false));
+    expect(firstChart(crypto.saved)).toBe("PERP.MEXC.BTC_USDT");
+    expect(stockUI.getByRole("button", { name: "Disable Scanner Sync" })).toBeTruthy();
   });
 });
 

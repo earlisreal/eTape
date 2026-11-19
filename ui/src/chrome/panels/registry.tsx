@@ -11,6 +11,7 @@ import { SmokePainterPanel } from "./SmokePainterPanel";
 import { ChartPanel } from "./ChartPanel";
 import { LadderPanel } from "./LadderPanel";
 import { TapePanel } from "./TapePanel";
+import { CryptoScannerPanel } from "./CryptoScannerPanel";
 import { ScannerPanel } from "./ScannerPanel";
 import { WatchlistPanel } from "./WatchlistPanel";
 import { StockInfoPanel } from "./StockInfoPanel";
@@ -163,6 +164,14 @@ export const PANELS: Record<string, PanelDef> = {
     symbolBearing: false,
     headerControls: true,
   },
+  "crypto-scanner": {
+    component: CryptoScannerPanel,
+    topics: [],
+    title: "Crypto Scanner",
+    glyph: "%",
+    description: "USDT perpetual movers and turnover",
+    symbolBearing: false,
+  },
   "watchlist": {
     component: WatchlistPanel,
     topics: ["watchlist.rows"],
@@ -239,7 +248,7 @@ export const PANELS: Record<string, PanelDef> = {
 export const DEV_PANELS = new Set(["smoke-painter"]);
 export const isDevPanel = (panelId: string): boolean => DEV_PANELS.has(panelId);
 
-const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "watchlist", "stock-info", "locates",
+const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "crypto-scanner", "watchlist", "stock-info", "locates",
   "account", "order-ticket", "alerts", "connection-status"];
 // "account-bar", "positions", and (as of Task 8) "open-orders" all stay
 // registered in PANELS (above) as back-compat aliases for saved workspace docs,

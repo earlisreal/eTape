@@ -1,3 +1,4 @@
+import { cryptoBrokerExchange, preferredCryptoAccountKey, useCryptoPreference } from "../cryptoScanner";
 // Venues & credentials editor. Edits are FILE-ONLY: SetVenueSetup rewrites
 // config.toml and PutCredential/DeleteCredential rewrite credentials.json;
 // nothing here arms a venue or changes the running gate — changes apply at the
@@ -138,6 +139,7 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
   // moomoo's own probe result, session-local (never persisted) — null until
   // "Check OpenD" is clicked, or after Enable materializes the venue.
   const [moomooProbe, setMoomooProbe] = useState<TestConnectionResult | null>(null);
+  const preferredAccount = useCryptoPreference(commands, preferredCryptoAccountKey, engineState === "open" || engineState === undefined);
   const [futuresKey, setFuturesKey] = useState("");
   const [futuresSecret, setFuturesSecret] = useState("");
   const [futuresTest, setFuturesTest] = useState<TestState>({ status: "idle" });
@@ -599,6 +601,21 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
               onUpdateCap={(cap, value) => updateCap(perpetualPaperKey, cap, value)}
               currency="USDT" fieldWrap={fieldWrap} groupLabel={groupLabel} testIdPrefix="mexc-paper" />}
           </>}
+        </div>
+      </div>
+      <div className="broker-card">
+        <CardHeader title="Preferred crypto account" />
+        <div style={{ padding: 12 }}>
+          <label style={fieldWrap}>Account
+            <select className="field" value={preferredAccount.value} onChange={event => void preferredAccount.save(event.target.value)}>
+              <option value="">None</option>
+              {preferredAccount.value && !setup?.file.venues.some(venue => venue.id === preferredAccount.value && cryptoBrokerExchange(venue.broker)) &&
+                <option value={preferredAccount.value} disabled>{preferredAccount.value} (unavailable)</option>}
+              {setup?.file.venues.filter(venue => cryptoBrokerExchange(venue.broker)).map(venue =>
+                <option key={venue.id} value={venue.id}>{venue.id} ({venue.env})</option>)}
+            </select>
+          </label>
+          {preferredAccount.error && <p role="alert">{preferredAccount.error}</p>}
         </div>
       </div>
       <div className="broker-card" data-testid="futures-api-check">

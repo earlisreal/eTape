@@ -18,7 +18,14 @@ import (
 
 func TestBothPerpetualCatalogsAndCandleHistory(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		now := time.Now().UnixMilli()
 		switch r.URL.Path {
+		case "/fapi/v1/ticker/24hr":
+			fmt.Fprintf(w, `[{"symbol":"BTCUSDT","lastPrice":"100","quoteVolume":"12345","closeTime":%d}]`, now)
+		case "/fapi/v1/ticker/bookTicker":
+			fmt.Fprintf(w, `[{"symbol":"BTCUSDT","bidPrice":"99.9","askPrice":"100.1","time":%d}]`, now)
+		case "/openApi/swap/v2/quote/ticker":
+			fmt.Fprintf(w, `{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"100","quoteVolume":"12345","bidPrice":"99.9","askPrice":"100.1","closeTime":%d}]}`, now)
 		case "/fapi/v1/exchangeInfo":
 			fmt.Fprint(w, `{"symbols":[
 				{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","status":"TRADING","underlyingType":"COIN"},
@@ -61,6 +68,12 @@ func TestBothPerpetualCatalogsAndCandleHistory(t *testing.T) {
 		}
 		if err := c.Validate(ctx, symbol); err != nil {
 			t.Fatal(err)
+		}
+		scanner, err := c.CryptoScanner(ctx)
+		if err != nil || len(scanner.Rows) != 1 || scanner.Rows[0].Symbol != symbol ||
+			scanner.Rows[0].Turnover == nil || *scanner.Rows[0].Turnover != 12345 || scanner.Rows[0].SpreadBps == nil ||
+			*scanner.Rows[0].SpreadBps < 19.99 || *scanner.Rows[0].SpreadBps > 20.01 {
+			t.Fatalf("%s scanner %+v, %v", c.exchange, scanner, err)
 		}
 		bars, err := c.History(ctx, symbol, feed.Res1m)
 		if err != nil || len(bars) == 0 || bars[0].BucketMs != 1795060500000 ||

@@ -21,3 +21,13 @@ Session Volume is published as a nullable sortable row field and remains indepen
 Reported Short Interest is a board-only asynchronous 3249 enrichment. The worker requests one US symbol at a time, paces requests at least one second apart, keeps a process-local 24-hour cache, and preserves the provider's raw `sharesShort` plus `timestampStr` report date without split adjustment. Missing or failed refreshes stay unavailable or retain the last successful value; enrichment never blocks rank polling and successful results republish the complete `scanner.rank` payload.
 
 Test: `go test ./internal/scan`.
+
+## Crypto Scanner
+
+The perpetual-feed router serves Crypto Scanner snapshots on demand. Each exchange
+shares one five-second snapshot cache per engine across all windows. The cache
+joins bulk tickers with the active crypto contract catalog, rejects out-of-date
+observations and derives five-minute percentage changes from exchange timestamps.
+It retains only the rolling baseline window and publishes USDT turnover and
+nullable top-of-book spread. The browser applies each panel's filters and sort to
+its exchange's snapshot. Crypto Monitoring follows that same ranked view.

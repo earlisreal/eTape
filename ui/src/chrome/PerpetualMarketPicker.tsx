@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PerpetualMarket } from "../gen/wsmsg";
 import type { PanelProps } from "./panels/registry";
+import { cryptoExchange, cryptoExchangeKey, cryptoExchangeLabel, defaultCryptoExchange, useCryptoPreference } from "./cryptoScanner";
 import { Button } from "./controls/Button";
 import { Dialog } from "./controls/Dialog";
 
@@ -10,6 +11,9 @@ export function PerpetualMarketPicker({ commands, onPick, onClose, onOpenVenues 
   onClose: () => void;
   onOpenVenues?: () => void;
 }): JSX.Element {
+  const preference = useCryptoPreference(commands, cryptoExchangeKey);
+  const marketExchange = cryptoExchange(preference.value) ?? defaultCryptoExchange;
+  const [selectedExchange, setSelectedExchange] = useState<string>();
   const [markets, setMarkets] = useState<PerpetualMarket[]>();
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -35,7 +39,9 @@ export function PerpetualMarketPicker({ commands, onPick, onClose, onOpenVenues 
   }, [commands, attempt]);
 
   const search = filter.trim().toUpperCase().replace(/[ :./_-]/g, "");
-  const results = markets?.filter(m => `${m.exchange}${m.base}${m.settlement}`.includes(search));
+  const exchange = selectedExchange ?? marketExchange;
+  const exchanges = [...new Set([marketExchange, ...(markets?.map(m => m.exchange) ?? [])])];
+  const results = markets?.filter(m => m.exchange === exchange && `${m.exchange}${m.base}${m.settlement}`.includes(search));
 
   return <Dialog title="USDT perpetuals" onClose={onClose} width={420}
     footer={onOpenVenues && <Button onClick={onOpenVenues}>Configure crypto venues</Button>}>
@@ -43,6 +49,13 @@ export function PerpetualMarketPicker({ commands, onPick, onClose, onOpenVenues 
       event.preventDefault();
       if (results?.length === 1) onPick(results[0].symbol);
     }}>
+      {exchanges.length > 1 && <label>Exchange <select className="field" value={exchange} onChange={event => {
+        setSelectedExchange(event.target.value);
+        setLimit(60);
+      }}>{exchanges.map(value => {
+        const known = cryptoExchange(value);
+        return <option key={value} value={value}>{known ? cryptoExchangeLabel[known] : value}</option>;
+      })}</select></label>}
       <input ref={input} aria-label="Search USDT perpetuals" type="search" className="field" placeholder="Search coin, pair or exchange"
         value={filter} onChange={event => { setFilter(event.target.value); setLimit(60); }} style={{ width: "100%" }} />
       {error ? <p role="status">{error} <Button type="button" onClick={() => {

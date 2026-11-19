@@ -258,6 +258,19 @@ export interface SubmitRiskEntryArgs {
   buyCushion: LimitCushion;
   sellCushion: LimitCushion;
 }
+export interface CryptoScannerRow {
+  symbol: string;
+  base: string;
+  last: number /* float64 */;
+  changePct: number | null;
+  turnover: number | null;
+  spreadBps: number | null;
+}
+export interface CryptoScannerSnapshot {
+  asOfMs: number /* int64 */;
+  warming: boolean;
+  rows: CryptoScannerRow[];
+}
 export interface PerpetualMarket {
   symbol: string;
   exchange: string;

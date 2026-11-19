@@ -7,6 +7,8 @@ import type { Side, OrderType, TIF, OrderSession, StopLimitRoutePreview, SubmitO
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
+import type { PerpetualMarket } from "../../gen/wsmsg";
+import { cryptoBrokerExchange, preferredCryptoAccountKey, useCryptoPreference } from "../cryptoScanner";
 import { requiresLiveConfirmation, useVenueSelection } from "../exec/venueSelection";
 import { VenueEnvironmentBadge, venueEnvironment } from "../exec/VenueEnvironmentBadge";
 import { useOrderConfig } from "../exec/useOrderConfig";
@@ -72,6 +74,11 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
 
   const quote = useThrottledQuote(stores.quote, symbol);
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
+  const preferredAccount = useCryptoPreference(commands, preferredCryptoAccountKey, symbol.startsWith("PERP."));
+  const pickVenue = (next: string) => {
+    if (requiresLiveConfirmation(stores.exec.status(), venue, next) && !window.confirm("Switch this Link Group from paper to live trading?")) return;
+    selectVenue(next);
+  };
   const status = stores.exec.status();
   const { config: orderConfig } = useOrderConfig();
   const extBufferPct = orderConfig.extHoursMarketBufferPct ?? 1;
@@ -209,11 +216,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           ···
         </span>
       )}
-      <select data-testid="venue" className="ctl mono venue-selector" value={venue} title={venue || undefined} disabled={group === null} onChange={(e) => {
-        const next = e.target.value;
-        if (requiresLiveConfirmation(status, venue, next) && !window.confirm("Switch this Link Group from paper to live trading?")) return;
-        selectVenue(next);
-      }}>
+      <select data-testid="venue" className="ctl mono venue-selector" value={venue} title={venue || undefined} disabled={group === null} onChange={(e) => pickVenue(e.target.value)}>
         {group === null && <option value="">Choose a Link Group</option>}
         {venues.map((v) => <option key={v} value={v}>{v}</option>)}
       </select>
@@ -227,8 +230,32 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   );
 
   if (symbol.startsWith("PERP.")) {
+    const preferred = status?.venues.find(candidate => candidate.venue === preferredAccount.value);
+    const preferredExchange = cryptoBrokerExchange(preferred?.broker);
+    const exchange = symbol.split(".")[1];
+    const usePreferred = group !== null && preferred && preferred.venue !== venue && preferredExchange && exchange === preferredExchange;
+    const openOnPreferredExchange = async () => {
+      if (group === null || !preferredExchange) return;
+      try {
+        const ack = await commands.sendCommand("ListPerpetualMarkets", {});
+        if (ack.status !== "accepted" || !Array.isArray(ack.value)) throw new Error("Could not load perpetual markets.");
+        const markets = ack.value as PerpetualMarket[];
+        const selected = markets.find(market => market.symbol === symbol);
+        const match = selected && markets.find(market =>
+          market.exchange === preferredExchange && market.base === selected.base && market.settlement === selected.settlement);
+        if (!match) throw new Error("No matching contract on " + preferredExchange + ".");
+        if (linkGroups.symbolFor(group) === symbol) linkGroups.focus(group, match.symbol);
+      } catch (error) {
+        toast.push({ level: "danger", text: error instanceof Error ? error.message : "Could not open the matching contract." });
+      }
+    };
     return <div style={{ display: "grid", gap: 6, padding: 6, color: palette.text, fontSize: 12 }}>
       {actionsSlot === undefined ? headerActions : actionsSlot ? createPortal(headerActions, actionsSlot) : null}
+      {usePreferred && <button className="ctl" type="button" onClick={() => pickVenue(preferred.venue)}>
+        Use preferred account ({preferred.venue}{preferred.env ? " · " + preferred.env : ""})
+      </button>}
+      {group !== null && preferredExchange && exchange !== preferredExchange &&
+        <button className="ctl" type="button" onClick={() => void openOnPreferredExchange()}>Open on {preferredExchange}</button>}
       {symbol.startsWith("PERP.MEXC.") ?
         <PerpetualTicket key={`${venue}/${symbol}`} symbol={symbol} venue={venue} routeReady={venueStatus?.broker === "mexc-sim"}
           quote={quote} positionQty={positionQty} submit={(args, label) => { void oc.submit(args, label); }} /> :

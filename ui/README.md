@@ -68,6 +68,25 @@ Named workspaces are cataloged in engine config (`windows.v1`) by stable UUID; `
 
 React/Vite shell around imperative market-data stores and renderers. Wire messages enter `src/wire`, route into `src/data`, then panels/controllers schedule chart or canvas work. The Account panel keeps live Open Orders and the read-only Closed Orders projection in the imperative execution store; the upper tab is session-local while each table's sort preference is persisted. Time & Sales ticks retain the engine-stamped Significant Print level in the imperative tape ring; the separate `md.tape.status` read model feeds read-only settings text. React owns layout/settings, never high-frequency payload state.
 
+**New window → Crypto Monitoring** opens four pinned charts and a Crypto Scanner.
+You can also add a **Crypto Scanner** to any workspace. Choose MEXC, Binance or
+BingX, then rank USDT perpetuals by 5-minute gain, 5-minute loss or 24-hour
+USDT turnover. Each Scanner saves its exchange, filters, sort and sound settings.
+Double-click a row to focus its exact exchange contract in a Link Group.
+
+Use **Sync to Following** to fill the pinned charts in Crypto Monitoring.
+**Use this Scanner** selects a different Crypto Scanner as its source. Stock
+Monitoring and Crypto Monitoring can follow their own source at the same time.
+Charts retain their symbols when sync is turned off or data goes stale.
+A five-minute ranking needs recent samples before it can admit a market.
+
+Set **Default crypto exchange** in **Settings → Data & storage**. The market
+picker and Crypto Scanners set to **App default** follow this preference.
+**Settings → Venues & creds → Preferred crypto account** adds an explicit
+**Use preferred account** action to a compatible linked Order Ticket.
+For a contract on a different exchange, **Open on** loads the matching contract
+on the preferred account's exchange. The account selection is a separate action.
+
 Each Scanner Panel persists its own filters with its workspace document and
 keeps a separate sticky board, sorting, seen state and sound eligibility in
 `ScannerStore`. The engine shares discovery and request budgets across panels.

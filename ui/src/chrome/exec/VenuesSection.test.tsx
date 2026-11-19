@@ -685,10 +685,10 @@ describe("VenuesSection — stale-draft reload guard", () => {
     wrap(commands, { health });
     await waitFor(() => expect(screen.getByTestId("save-venues")).toBeTruthy());
     // Baseline established (no reaction) — GetVenueSetup only called once so far.
-    expect(commands.sendCommand).toHaveBeenCalledTimes(1);
+    expect(commands.sendCommand.mock.calls.filter(([command]) => command === "GetVenueSetup")).toHaveLength(1);
 
     act(() => pushVenueSeeded(health, 1));
-    await waitFor(() => expect(commands.sendCommand).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(commands.sendCommand.mock.calls.filter(([command]) => command === "GetVenueSetup")).toHaveLength(2));
     expect(screen.queryByTestId("stale-draft-banner")).toBeNull();
   });
 
@@ -715,6 +715,6 @@ describe("VenuesSection — stale-draft reload guard", () => {
     health.apply({ kind: "snapshot", topic: "sys.events", payload: [{ seq: 1, ts: "t", kind: "venue.seeded", detail: "old", level: "info" }] });
     wrap(commands, { health });
     await waitFor(() => expect(screen.getByTestId("save-venues")).toBeTruthy());
-    expect(commands.sendCommand).toHaveBeenCalledTimes(1); // no extra refresh from the pre-existing history
+    expect(commands.sendCommand.mock.calls.filter(([command]) => command === "GetVenueSetup")).toHaveLength(1); // no extra refresh from the pre-existing history
   });
 });

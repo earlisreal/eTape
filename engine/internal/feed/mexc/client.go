@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/feed/cryptoscanner"
 	"github.com/earlisreal/eTape/engine/internal/instrument"
 )
 
@@ -40,6 +41,7 @@ type Contract struct {
 	MinLeverage  int         `json:"minLeverage"`
 	MaxLeverage  int         `json:"maxLeverage"`
 	TakerFee     json.Number `json:"takerFeeRate"`
+	TypeLabel    *int        `json:"typeLabel"`
 	State        int         `json:"state"`
 	APIAllowed   bool        `json:"apiAllowed"`
 }
@@ -71,6 +73,7 @@ type Client struct {
 	marketsUntil time.Time
 	funding      map[string]fundingTime
 	nextRequest  time.Time
+	scanner      cryptoscanner.Cache
 }
 
 type fundingTime struct {
@@ -192,7 +195,7 @@ func (c *Client) PerpetualMarkets(ctx context.Context) ([]instrument.PerpetualMa
 			continue
 		}
 		c.cache[symbol] = cachedContract{value: item, until: until}
-		markets = append(markets, instrument.PerpetualMarket{ID: id, Base: item.Base, Settlement: item.Settlement, TradingEnabled: item.APIAllowed})
+		markets = append(markets, instrument.PerpetualMarket{ID: id, Base: item.Base, Settlement: item.Settlement, TradingEnabled: item.APIAllowed, CryptoUnderlying: item.TypeLabel != nil && *item.TypeLabel == 0})
 	}
 	sort.Slice(markets, func(i, j int) bool { return markets[i].ID.Native < markets[j].ID.Native })
 	c.markets, c.marketsUntil = markets, until

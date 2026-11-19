@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/store"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
+	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
 type perpetualAPI interface {
@@ -65,6 +67,20 @@ func (r perpetualFeedRouter) PerpetualMarkets(ctx context.Context) ([]instrument
 		return nil, errors.Join(failures...)
 	}
 	return markets, nil
+}
+
+func (r perpetualFeedRouter) CryptoScanner(ctx context.Context, exchange string) (wsmsg.CryptoScannerSnapshot, error) {
+	for _, source := range r.sources {
+		if source.exchange == exchange {
+			scanner, ok := source.api.(interface {
+				CryptoScanner(context.Context) (wsmsg.CryptoScannerSnapshot, error)
+			})
+			if ok {
+				return scanner.CryptoScanner(ctx)
+			}
+		}
+	}
+	return wsmsg.CryptoScannerSnapshot{}, fmt.Errorf("unsupported crypto Scanner exchange %q", exchange)
 }
 
 func (r perpetualFeedRouter) Validate(ctx context.Context, symbol string) error {

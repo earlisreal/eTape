@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { Button } from "./controls/Button";
+import { cryptoExchangeKey, cryptoExchanges, cryptoExchangeLabel, useCryptoPreference } from "./cryptoScanner";
 import { SettingsActions } from "./SettingsActions";
 import type { HealthStore } from "../data/HealthStore";
 import type { SessionStore } from "../data/SessionStore";
@@ -53,6 +54,7 @@ export function DataSettingsSection({ commands, engineState, session, health }: 
   health?: HealthStore | undefined;
 }): JSX.Element {
   const formId = useId();
+  const cryptoDefault = useCryptoPreference(commands, cryptoExchangeKey, engineState === "open" || engineState === undefined);
   const mode = useSyncExternalStore((cb) => session?.subscribe(cb) ?? (() => {}), () => session?.getSnapshot().mode);
   const healthState = useSyncExternalStore((cb) => health?.subscribe(cb) ?? (() => {}), () => health?.getSnapshot());
   const [setup, setSetup] = useState<DataSettingsSetup | null>(null);
@@ -141,6 +143,15 @@ export function DataSettingsSection({ commands, engineState, session, health }: 
       </div>}
       {error && <div role="alert" style={{ color: "var(--danger)", marginBottom: 12 }}>{error} <Button type="button" onClick={() => void reload()}>Reload</Button></div>}
 
+      <div className="settings-group">
+        <label style={{ display: "grid", gap: 5, maxWidth: 250 }}>Default crypto exchange
+          <select className="field" value={cryptoDefault.value || ""} onChange={event => void cryptoDefault.save(event.target.value)}>
+            <option value="">Automatic ({cryptoExchanges[0]})</option>
+            {cryptoExchanges.map(exchange => <option key={exchange} value={exchange}>{cryptoExchangeLabel[exchange]}</option>)}
+          </select>
+        </label>
+        {cryptoDefault.error && <p role="alert">{cryptoDefault.error}</p>}
+      </div>
       <div className="settings-group">
         <div className="col-head serif" style={{ marginBottom: 10 }}>Chart history</div>
         <div style={grid}>

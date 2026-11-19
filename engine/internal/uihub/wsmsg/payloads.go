@@ -165,6 +165,21 @@ type SubmitRiskEntryArgs struct {
 	SellCushion   LimitCushion `json:"sellCushion"`
 }
 
+type CryptoScannerRow struct {
+	Symbol    string   `json:"symbol"`
+	Base      string   `json:"base"`
+	Last      float64  `json:"last"`
+	ChangePct *float64 `json:"changePct" tstype:"number | null,required"`
+	Turnover  *float64 `json:"turnover" tstype:"number | null,required"`
+	SpreadBps *float64 `json:"spreadBps" tstype:"number | null,required"`
+}
+
+type CryptoScannerSnapshot struct {
+	AsOfMs  int64              `json:"asOfMs"`
+	Warming bool               `json:"warming"`
+	Rows    []CryptoScannerRow `json:"rows"`
+}
+
 type PerpetualMarket struct {
 	Symbol         string `json:"symbol"`
 	Exchange       string `json:"exchange"`

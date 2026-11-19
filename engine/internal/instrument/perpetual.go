@@ -26,10 +26,11 @@ type Perpetual struct {
 }
 
 type PerpetualMarket struct {
-	ID             Perpetual
-	Base           string
-	Settlement     string
-	TradingEnabled bool
+	ID               Perpetual
+	Base             string
+	Settlement       string
+	CryptoUnderlying bool
+	TradingEnabled   bool
 }
 
 func (p Perpetual) String() string {

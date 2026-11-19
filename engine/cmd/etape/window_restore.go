@@ -26,7 +26,7 @@ type windowCatalogDocument struct {
 // state deliberately degrades to main-only startup.
 func restoredWindowSpecs(st windowRestoreStore, addr string, debug bool) []openbrowser.WindowSpec {
 	log := slog.Default()
-	allowed := map[string]bool{"main": true, "monitoring": true}
+	allowed := map[string]bool{"main": true, "monitoring": true, "crypto-monitoring": true}
 	if raw, ok, err := st.GetConfig("windows.v1"); err != nil {
 		log.Warn("load workspace catalog for window restore", "err", err)
 	} else if ok {

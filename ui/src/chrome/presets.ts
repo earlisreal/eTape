@@ -1,5 +1,5 @@
 import type { PanelConfig } from "./workspace";
-import { MONITORING_WORKSPACE_ID, WORKSPACE_LAYOUT_VERSION, type Workspace } from "./workspace";
+import { CRYPTO_MONITORING_WORKSPACE_ID, MONITORING_WORKSPACE_ID, WORKSPACE_LAYOUT_VERSION, type Workspace } from "./workspace";
 import type { SerializedDockview } from "dockview";
 import { CHART_INDICATOR_MODEL_VERSION, defaultVolumeIndicator } from "../render/chart/indicatorSeries";
 
@@ -84,6 +84,23 @@ function chartSettings(id: string, timeframe: string, indicators: object[]): Rec
     indicators: [defaultVolumeIndicator(id), ...indicators],
     chartIndicatorModelVersion: CHART_INDICATOR_MODEL_VERSION,
     chartSettings: { sessionShading: true, grid: true, volume: false, watermark: false, barCloseTimer: true },
+  };
+}
+
+export function buildCryptoMonitoringWorkspace(): Workspace {
+  const workspace = buildMonitoringWorkspace();
+  const layout = structuredClone(MONITORING_LAYOUT);
+  const root = layout.grid.root;
+  const right = Array.isArray(root.data) ? root.data[1] : undefined;
+  if (Array.isArray(right?.data)) right.data.splice(1);
+  delete layout.panels["m-news"];
+  layout.panels["m-scanner"] = { ...layout.panels["m-scanner"]!, title: "Crypto Scanner" };
+  return {
+    ...workspace, name: CRYPTO_MONITORING_WORKSPACE_ID,
+    panels: workspace.panels.filter(panel => panel.panelId !== "stock-info").map(panel =>
+      panel.panelId === "scanner" ? { ...panel, panelId: "crypto-scanner" } : panel),
+    layout,
+    scannerSync: { enabled: false, sourceWorkspaceId: CRYPTO_MONITORING_WORKSPACE_ID, sourcePanelId: "m-scanner" },
   };
 }
 

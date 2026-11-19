@@ -234,6 +234,33 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		return ack, false
 	}
 	switch name {
+	case "GetCryptoScanner":
+		var query struct {
+			Exchange string `json:"exchange"`
+		}
+		if json.Unmarshal(args, &query) != nil || query.Exchange == "" {
+			return blocked("Select a crypto exchange."), false
+		}
+		if cd.feed == nil {
+			return blocked("Crypto Scanner is unavailable in this workspace mode."), false
+		}
+		source, ok := cd.feed().(interface {
+			CryptoScanner(context.Context, string) (wsmsg.CryptoScannerSnapshot, error)
+		})
+		if !ok {
+			return blocked("Crypto Scanner is unavailable in this workspace mode."), false
+		}
+		go func() {
+			request, cancel := context.WithTimeout(ctx, 8*time.Second)
+			defer cancel()
+			snapshot, err := source.CryptoScanner(request, query.Exchange)
+			if err != nil {
+				reply(blocked(err.Error()))
+				return
+			}
+			reply(wsmsg.AckMsg{Status: wsmsg.AckAccepted, Value: snapshot})
+		}()
+		return wsmsg.AckMsg{}, true
 	case "ListPerpetualMarkets":
 		if cd.feed == nil {
 			return blocked("Crypto markets are unavailable in this workspace mode."), false

@@ -11,11 +11,11 @@ import "./fonts.css";
 import "./global.css";
 import { App } from "./App";
 import { parseWorkspaceName, workspaceWindowTarget } from "./chrome/windows";
-import { MONITORING_WORKSPACE_ID } from "./chrome/workspace";
+import { isMonitoringWorkspace, MONITORING_WORKSPACE_ID, CRYPTO_MONITORING_WORKSPACE_ID } from "./chrome/workspace";
 
 const workspaceName = parseWorkspaceName(location.search);
-if (workspaceName === "main" || workspaceName === MONITORING_WORKSPACE_ID) window.name = workspaceWindowTarget(workspaceName);
-else if (window.name === workspaceWindowTarget(MONITORING_WORKSPACE_ID)) window.name = "";
+if (workspaceName === "main" || isMonitoringWorkspace(workspaceName)) window.name = workspaceWindowTarget(workspaceName);
+else if ([MONITORING_WORKSPACE_ID, CRYPTO_MONITORING_WORKSPACE_ID].some(id => window.name === workspaceWindowTarget(id))) window.name = "";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

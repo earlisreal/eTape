@@ -4,7 +4,7 @@ import { themeDark, themeLight } from "dockview";
 // dockview's stylesheet is imported in main.tsx (ahead of global.css) so our
 // theme overrides always win the cascade — see the comment there.
 import { PanelFrame } from "./PanelFrame";
-import { isCurrentWorkspace, MONITORING_WORKSPACE_ID, MONITORING_WORKSPACE_NAME, type PanelConfig, type ScannerSyncConfig, type Workspace } from "./workspace";
+import { CRYPTO_MONITORING_WORKSPACE_ID, CRYPTO_MONITORING_WORKSPACE_NAME, isMonitoringWorkspace, isCurrentWorkspace, MONITORING_WORKSPACE_ID, MONITORING_WORKSPACE_NAME, type PanelConfig, type ScannerSyncConfig, type Workspace } from "./workspace";
 import { WorkspaceStore } from "./workspace";
 import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
@@ -14,7 +14,7 @@ import type { DemandRegistry } from "../wire/DemandRegistry";
 import type { ScannerFilters } from "../wire/contract";
 import type { ConnState } from "../wire/WsClient";
 import { PANELS, dockviewPanelConstraints, type PanelProps } from "./panels/registry";
-import { buildMonitoringWorkspace, PRESETS } from "./presets";
+import { buildCryptoMonitoringWorkspace, buildMonitoringWorkspace, PRESETS } from "./presets";
 import { TopBar, targetCueFor } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
 import { BootStatusBanner } from "./BootStatusBanner";
@@ -44,6 +44,8 @@ import { planDemoEntry, planDemoRevert } from "./demoTransition";
 import { resolveVenue } from "./exec/venueSelection";
 import { PanelHeaderTab } from "./PanelHeaderTab";
 import { PanelHeaderHostProvider } from "./panels/headerSlot";
+import { CryptoScannerContext } from "./cryptoScanner";
+import { useCryptoFollowing } from "./useCryptoFollowing";
 import { PanelSymbolRuntime, planScannerSync, rankScannerRows, readScannerSort, ScannerSyncRuntime, type ScannerSyncPanelState, type ScannerSyncPlan } from "./scannerSync";
 import { DEFAULT_SCANNER_FILTERS, scannerFiltersFromSettings } from "./scannerFilters";
 
@@ -253,7 +255,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     setWs(null);
     setSourceWorkspace(null);
     if (workspaceName === MONITORING_WORKSPACE_ID) observeScannerSync(undefined);
-    void workspaceStore.load(workspaceName, workspaceName === MONITORING_WORKSPACE_ID ? buildMonitoringWorkspace() : undefined)
+    void workspaceStore.load(workspaceName, workspaceName === MONITORING_WORKSPACE_ID ? buildMonitoringWorkspace() : workspaceName === CRYPTO_MONITORING_WORKSPACE_ID ? buildCryptoMonitoringWorkspace() : undefined)
       .then(async (loaded) => {
         const migrated = await migrateScannerSettings(loaded, commands);
         if (migrated !== loaded) workspaceStore.save(migrated);
@@ -316,6 +318,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   useEffect(() => {
     if (workspaceName === "main") { setWorkspaceLabel("main"); return; }
     if (workspaceName === MONITORING_WORKSPACE_ID) { setWorkspaceLabel(MONITORING_WORKSPACE_NAME); return; }
+    if (workspaceName === CRYPTO_MONITORING_WORKSPACE_ID) { setWorkspaceLabel(CRYPTO_MONITORING_WORKSPACE_NAME); return; }
     const refresh = () => void readWindows(commands).then((c) => setWorkspaceLabel(c.entries.find((e) => e.id === workspaceName)?.name ?? workspaceName));
     refresh(); const channel = new BroadcastChannel("etape.window-catalog"); channel.onmessage = refresh;
     return () => channel.close();
@@ -866,6 +869,15 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     apiRef.current?.getPanel(id)?.api.close();
   }, [alertNavigation, hotkeyCoordinator, workspaceStore]);
 
+  const applyCryptoWorkspace = useCallback((next: Workspace) => {
+    wsRef.current = next;
+    setWs(next);
+  }, []);
+  const { runtime: cryptoSyncRuntime, data: cryptoScannerData } = useCryptoFollowing({
+    name: workspaceName, workspace: ws, current: wsRef, apply: applyCryptoWorkspace, store: workspaceStore,
+    commands, connected: engineState === "open", symbols: panelSymbols, orderedIds: orderedPanelIds,
+  });
+
   // Dockview forces layout when its component map changes, restoring pre-drag
   // proportions mid-resize. Only change the map when panel identities change.
   const componentIds = JSON.stringify(ws?.panels.map((p) => p.id) ?? []);
@@ -879,12 +891,12 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         onConfigChange={(settings) => onConfigChange(p.id, settings)}
         onGroupChange={(group) => onGroupChange(p.id, group)}
         onClose={() => removePanel(p.id)}
-        monitoring={workspaceName === MONITORING_WORKSPACE_ID}
-        scannerSyncRuntime={scannerSyncRuntime} panelSymbols={panelSymbols}
+        monitoring={isMonitoringWorkspace(workspaceName)}
+        scannerSyncRuntime={p.panelId === "crypto-scanner" ? cryptoSyncRuntime : scannerSyncRuntime} panelSymbols={panelSymbols}
         api={panelProps.api} />,
     ]),
   ), [componentIds, workspaceName, stores, scheduler, linkGroups, demandRegistry, commands,
-    onConfigChange, onGroupChange, removePanel, scannerSyncRuntime, panelSymbols]);
+    onConfigChange, onGroupChange, removePanel, scannerSyncRuntime, cryptoSyncRuntime, panelSymbols]);
 
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
@@ -1108,6 +1120,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   };
 
   return (
+    <CryptoScannerContext.Provider value={cryptoScannerData}>
     <OpenSettingsProvider value={{
       openOrderSettings: () => setSettings({ open: true, section: "orders" }),
       openVenueSettings: () => setSettings({ open: true, section: "venues" }),
@@ -1167,5 +1180,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} onTryDemo={onTryDemo} />}
       </div>
     </OpenSettingsProvider>
+    </CryptoScannerContext.Provider>
   );
 }

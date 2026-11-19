@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/feed/cryptoscanner"
 	"github.com/earlisreal/eTape/engine/internal/instrument"
 )
 
@@ -34,6 +35,7 @@ type Client struct {
 	mu       sync.Mutex
 	markets  map[string]instrument.PerpetualMarket
 	until    time.Time
+	scanner  cryptoscanner.Cache
 }
 
 func NewBinance() *Client {
@@ -114,7 +116,7 @@ func (c *Client) loadMarkets(ctx context.Context) (map[string]instrument.Perpetu
 		if _, ok := instrument.ParsePerpetual(id.String()); !ok || base == "" {
 			return
 		}
-		markets[symbol] = instrument.PerpetualMarket{ID: id, Base: base, Settlement: "USDT"}
+		markets[symbol] = instrument.PerpetualMarket{ID: id, Base: base, Settlement: "USDT", CryptoUnderlying: true}
 	}
 	if c.exchange == Binance {
 		var data struct {

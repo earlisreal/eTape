@@ -15,6 +15,12 @@ export interface ScannerSyncConfig {
 export const WORKSPACE_LAYOUT_VERSION = 8;
 export const MONITORING_WORKSPACE_ID = "monitoring";
 export const MONITORING_WORKSPACE_NAME = "Monitoring";
+export const CRYPTO_MONITORING_WORKSPACE_ID = "crypto-monitoring";
+export const CRYPTO_MONITORING_WORKSPACE_NAME = "Crypto Monitoring";
+
+export function isMonitoringWorkspace(id: string): boolean {
+  return id === MONITORING_WORKSPACE_ID || id === CRYPTO_MONITORING_WORKSPACE_ID;
+}
 
 export interface Workspace {
   name: string;
