@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import type { CommandClient } from "./catalogs";
-import { cryptoExchange, cryptoExchangeKey, defaultCryptoExchange, rankCryptoScanner, readCryptoScanner, useCryptoPreference, useCryptoScannerData } from "./cryptoScanner";
+import { binanceDemoExchange, cryptoExchange, cryptoExchangeKey, defaultCryptoExchange, rankCryptoScanner, readCryptoScanner, useCryptoPreference, useCryptoScannerData } from "./cryptoScanner";
 import { buildCryptoMonitoringWorkspace } from "./presets";
 import { planScannerSync, ScannerSyncRuntime, type PanelSymbolRuntime, type ScannerSyncPanelState } from "./scannerSync";
 import { CRYPTO_MONITORING_WORKSPACE_ID as targetId, type Workspace, type WorkspaceStore } from "./workspace";
@@ -48,9 +48,12 @@ export function useCryptoFollowing({ name, workspace, current, apply, store, com
   if (isTarget && sync?.enabled && source) requested.add(sourceExchange);
   const mexc = useCryptoScannerData(commands, connected, requested.has("MEXC"), "MEXC");
   const binance = useCryptoScannerData(commands, connected, requested.has("BINANCE"), "BINANCE");
+  const binanceDemo = useCryptoScannerData(commands, connected, requested.has(binanceDemoExchange), binanceDemoExchange);
   const bingx = useCryptoScannerData(commands, connected, requested.has("BINGX"), "BINGX");
-  const data = useMemo(() => ({ defaultExchange: exchange, byExchange: { MEXC: mexc, BINANCE: binance, BINGX: bingx } }),
-    [exchange, mexc, binance, bingx]);
+  const data = useMemo(() => ({
+    defaultExchange: exchange,
+    byExchange: { MEXC: mexc, BINANCE: binance, [binanceDemoExchange]: binanceDemo, BINGX: bingx },
+  }), [exchange, mexc, binance, binanceDemo, bingx]);
   const sourceSnapshot = data.byExchange[sourceExchange].snapshot;
 
   const save = useCallback((next: Workspace) => { apply(next); store.save(next); }, [apply, store]);

@@ -16,6 +16,7 @@ export function CryptoScannerPanel({ config, scannerSync, group, linkGroups, onC
   const filters = useMemo(() => readCryptoScanner(settings), [settings]);
   const exchange = filters.exchange ?? defaultExchange;
   const { snapshot, error } = byExchange[exchange];
+  const exchangeLabel = cryptoExchangeLabel[exchange];
   const muted = settings.scannerSoundMuted === true;
   const rows = useMemo(() => rankCryptoScanner(snapshot?.rows ?? [], filters), [snapshot, filters]);
   const previous = useRef<{ settings: Record<string, unknown>; symbols: Set<string> } | null>(null);
@@ -71,7 +72,7 @@ export function CryptoScannerPanel({ config, scannerSync, group, linkGroups, onC
       <p role="status" style={{ margin: 6, color: "var(--text-muted)" }}>{error ||
         (!snapshot ? "Loading markets…" : snapshot.warming && filters.mode !== "Most Active" ? "Collecting a 5-minute baseline…" : "No markets match your filters.")}</p>}
     <div style={{ minHeight: 0, overflow: "auto" }}>
-      <table aria-label={`${exchange} crypto Scanner results`} className="mono" style={{ width: "100%", borderCollapse: "collapse", textAlign: "right" }}>
+      <table aria-label={`${exchangeLabel} crypto Scanner results`} className="mono" style={{ width: "100%", borderCollapse: "collapse", textAlign: "right" }}>
         <thead><tr>{cryptoColumns.map(({ key, label }) => <th key={key} scope="col"
           style={{ textAlign: key === "base" ? "left" : "right", position: "sticky", top: 0, background: "var(--surface)" }}
           aria-sort={filters.sort.col === key ? filters.sort.dir === "asc" ? "ascending" : "descending" : "none"}>
@@ -79,7 +80,7 @@ export function CryptoScannerPanel({ config, scannerSync, group, linkGroups, onC
         </th>)}</tr></thead>
         <tbody>{rows.map(row => <tr key={row.symbol} onDoubleClick={() => linkGroups.focus(group ?? "green", row.symbol)}
           style={{ borderBottom: "1px solid var(--border)" }}>
-          <td style={{ textAlign: "left" }}><Button variant="quiet" title={`Open ${row.base}/USDT on ${exchange}`}
+          <td style={{ textAlign: "left" }}><Button variant="quiet" title={`Open ${row.base}/USDT on ${exchangeLabel}`}
             onClick={() => linkGroups.focus(group ?? "green", row.symbol)}>{row.base}/USDT</Button></td>
           <td>{price.format(row.last)}</td><td>{decimal(row.changePct)}</td>
           <td>{row.turnover === null ? "—" : turnover.format(row.turnover)}</td><td>{decimal(row.spreadBps)}</td>

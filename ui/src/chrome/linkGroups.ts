@@ -1,15 +1,15 @@
 import type { AckMsg, ExecStatus, VenueID, VenueStatus } from "../wire/contract";
-import { cryptoBrokerExchange, perpetualExchange, type PerpetualExchange } from "./cryptoScanner";
+import { cryptoBrokerExchange, cryptoExchange, type CryptoExchange } from "./cryptoScanner";
 import { CrosshairSync } from "./crosshairSync";
 
 export type LinkGroup = "red" | "green" | "blue" | "yellow" | null; // null = pinned
-type VenueMarket = "stocks" | PerpetualExchange;
+type VenueMarket = "stocks" | CryptoExchange;
 type VenueSelections = Partial<Record<VenueMarket, VenueID>> & { legacy?: VenueID; switchedFrom?: VenueID };
 export type SavedLinkVenues = Partial<Record<Exclude<LinkGroup, null>, VenueID | VenueSelections>>;
 export interface LinkMsg { group: LinkGroup; symbol?: string; venue?: VenueID; venueMarket?: VenueMarket }
 
 export function venueMarket(symbol: string | undefined): VenueMarket | undefined {
-  return symbol?.startsWith("PERP.") ? perpetualExchange(symbol.split(".")[1]) : "stocks";
+  return symbol?.startsWith("PERP.") ? cryptoExchange(symbol.split(".")[1]) : "stocks";
 }
 
 export function venueSupportsMarket(venue: VenueStatus, market: VenueMarket | undefined): boolean {

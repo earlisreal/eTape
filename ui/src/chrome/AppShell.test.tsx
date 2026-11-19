@@ -85,12 +85,12 @@ class TargetChannel implements HotkeyTargetChannel {
 
 const scannerShortInterestDefaults = { turnover: null, sessionVolume: null, shortInterest: null, shortInterestAsOf: null } as const;
 
-function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApplied?: () => void; onRender?: () => void; hotkeyTargetChannel?: HotkeyTargetChannel; stores?: ReturnType<typeof makeStores>; commandValue?: (name: string) => unknown }) {
+function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApplied?: () => void; onRender?: () => void; hotkeyTargetChannel?: HotkeyTargetChannel; stores?: ReturnType<typeof makeStores>; commandValue?: (name: string, args: unknown) => unknown }) {
   const stores = opts?.stores ?? makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const commands = {
-    sendCommand: vi.fn(async (name: string) => ({ kind: "ack" as const, corrId: "c", status: "accepted" as const, value: opts?.commandValue?.(name) })),
+    sendCommand: vi.fn(async (name: string, args: unknown) => ({ kind: "ack" as const, corrId: "c", status: "accepted" as const, value: opts?.commandValue?.(name, args) })),
     sendQuery: vi.fn(async () => []),
   };
   const demandRegistry = new DemandRegistry({ sendCommand: commands.sendCommand, onState: () => {} });
@@ -457,6 +457,44 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
 });
 
 describe("Crypto Monitoring Scanner Sync", () => {
+  it("saves Binance Futures Demo and follows the demo contract with the same ticker as production", async () => {
+    const seed = buildCryptoMonitoringWorkspace();
+    const scanner = seed.panels.find(panel => panel.panelId === "crypto-scanner")!;
+    scanner.settings = { ...scanner.settings, cryptoExchange: "BINANCE" };
+    const demoSymbol = "PERP.BINANCE-DEMO.BTCUSDT";
+    const crypto = mount(seed, {
+      workspaceName: "crypto-monitoring",
+      commandValue: (name, args) => {
+        if (name !== "GetCryptoScanner") return undefined;
+        const exchange = (args as { exchange: string }).exchange;
+        return {
+          asOfMs: Date.now(), warming: false,
+          rows: [{ symbol: `PERP.${exchange}.BTCUSDT`, base: "BTC", last: 62000, changePct: 6, turnover: 3000000, spreadBps: 1 }],
+        };
+      },
+    });
+    const ui = within(crypto.container);
+    const exchange = await ui.findByRole("combobox", { name: "Crypto Scanner exchange" }) as HTMLSelectElement;
+    expect(exchange.value).toBe("BINANCE");
+    const production = ui.getByRole("table", { name: "Binance crypto Scanner results" });
+    await within(production).findByRole("button", { name: "BTC/USDT" });
+    expect(crypto.commands.sendCommand).not.toHaveBeenCalledWith("GetCryptoScanner", { exchange: "BINANCE-DEMO" });
+
+    fireEvent.change(exchange, { target: { value: "BINANCE-DEMO" } });
+    expect(exchange.selectedOptions[0]?.textContent).toBe("Binance Futures Demo");
+    const demo = ui.getByRole("table", { name: "Binance Futures Demo crypto Scanner results" });
+    fireEvent.click(await within(demo).findByRole("button", { name: "BTC/USDT" }));
+    expect(crypto.linkGroups.symbolFor(scanner.group ?? "green")).toBe(demoSymbol);
+    expect(crypto.commands.sendCommand).toHaveBeenCalledWith("GetCryptoScanner", { exchange: "BINANCE-DEMO" });
+
+    fireEvent.click(ui.getByRole("button", { name: "Enable Scanner Sync" }));
+    await waitFor(() => {
+      const saved = crypto.saved.at(-1);
+      expect(saved?.panels.find(panel => panel.id === scanner.id)?.settings.cryptoExchange).toBe("BINANCE-DEMO");
+      expect(saved?.panels.find(panel => panel.id === "m-chart-red")?.settings.symbol).toBe(demoSymbol);
+    });
+  });
+
   it("follows exact perpetuals independently of stock Monitoring and persists OFF", async () => {
     const crypto = mount(buildCryptoMonitoringWorkspace(), {
       workspaceName: "crypto-monitoring",

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PerpetualMarket } from "../gen/wsmsg";
 import type { PanelProps } from "./panels/registry";
-import { binanceDemoExchange, cryptoExchange, cryptoExchangeKey, cryptoExchangeLabel, defaultCryptoExchange, perpetualExchange, useCryptoPreference } from "./cryptoScanner";
+import { binanceDemoExchange, cryptoExchange, cryptoExchangeKey, cryptoExchangeLabel, defaultCryptoExchange, useCryptoPreference } from "./cryptoScanner";
 import { Button } from "./controls/Button";
 import { Dialog } from "./controls/Dialog";
 
@@ -53,7 +53,7 @@ export function PerpetualMarketPicker({ commands, onPick, onClose, onOpenVenues 
         setSelectedExchange(event.target.value);
         setLimit(60);
       }}>{exchanges.map(value => {
-        const known = perpetualExchange(value);
+        const known = cryptoExchange(value);
         return <option key={value} value={value}>{known ? cryptoExchangeLabel[known] : value}</option>;
       })}</select></label>}
       <input ref={input} aria-label="Search USDT perpetuals" type="search" className="field" placeholder="Search coin, pair or exchange"

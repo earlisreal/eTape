@@ -2,18 +2,14 @@ import { createContext, useEffect, useState } from "react";
 import type { CryptoScannerRow, CryptoScannerSnapshot } from "../gen/wsmsg";
 import type { CommandClient } from "./catalogs";
 
-export const cryptoExchanges = ["MEXC", "BINANCE", "BINGX"] as const;
+export const binanceDemoExchange = "BINANCE-DEMO";
+export const cryptoExchanges = ["MEXC", "BINANCE", binanceDemoExchange, "BINGX"] as const;
 export type CryptoExchange = typeof cryptoExchanges[number];
 export const defaultCryptoExchange = cryptoExchanges[0];
-export const binanceDemoExchange = "BINANCE-DEMO";
-export type PerpetualExchange = CryptoExchange | typeof binanceDemoExchange;
-export const cryptoExchangeLabel: Record<PerpetualExchange, string> = {
+export const cryptoExchangeLabel: Record<CryptoExchange, string> = {
   MEXC: "MEXC", BINANCE: "Binance", BINGX: "BingX", [binanceDemoExchange]: "Binance Futures Demo",
 };
 
-export function perpetualExchange(value: unknown): PerpetualExchange | undefined {
-  return value === binanceDemoExchange ? value : cryptoExchange(value);
-}
 export const cryptoExchangeKey = "crypto.exchange.v1";
 export const preferredCryptoAccountKey = "crypto.account.v1";
 
@@ -53,7 +49,7 @@ export function useCryptoPreference(commands: CommandClient, key: string, enable
   return { value, error, save };
 }
 
-export function cryptoBrokerExchange(broker: string | undefined): PerpetualExchange | undefined {
+export function cryptoBrokerExchange(broker: string | undefined): CryptoExchange | undefined {
   if (broker === "binance-demo") return binanceDemoExchange;
   if (broker === "bingx-vst") return "BINGX";
   return broker === "mexc-sim" || broker === "mexc" ? "MEXC" : undefined;
@@ -114,7 +110,12 @@ export interface CryptoScannerBoards {
 
 export const CryptoScannerContext = createContext<CryptoScannerBoards>({
   defaultExchange: defaultCryptoExchange,
-  byExchange: { MEXC: { exchange: "MEXC" }, BINANCE: { exchange: "BINANCE" }, BINGX: { exchange: "BINGX" } },
+  byExchange: {
+    MEXC: { exchange: "MEXC" },
+    BINANCE: { exchange: "BINANCE" },
+    [binanceDemoExchange]: { exchange: binanceDemoExchange },
+    BINGX: { exchange: "BINGX" },
+  },
 });
 
 export function useCryptoScannerData(commands: CommandClient, connected: boolean, needed: boolean, exchange: CryptoExchange): CryptoScannerData {
