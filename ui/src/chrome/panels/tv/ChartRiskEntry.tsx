@@ -86,11 +86,19 @@ export function ChartRiskEntry(props: Props): JSX.Element {
         let frame: number | null = null;
         let hover: PointerEvent | null = null;
         let lastPoint: PointerEvent | null = null;
+        const perpetualSide = () => {
+            const perp = draft?.template.perpetual;
+            if (!perp || !draft) return undefined;
+            if (!draft.template.auto || draft.complete) return perp.side;
+            if (draft.buy === undefined || draft.sell === undefined || draft.buy === draft.sell) return undefined;
+            return draft.sell > draft.buy ? "SHORT" : "BUY";
+        };
+        const short = () => perpetualSide() === "SHORT";
         const cursor = (endpoint: "buy" | "sell" | null) => {
             if (!endpoint && host.dataset.orderEntryMode !== "risk") return;
             if (endpoint) host.dataset.orderEntryMode = "risk";
             else if (host.dataset.orderEntryMode === "risk") delete host.dataset.orderEntryMode;
-            const color = endpoint ? (endpoint === "buy") !== (draft?.template.perpetual?.side === "SHORT") ? latest.current.chrome.up : latest.current.chrome.down : null;
+            const color = endpoint ? (endpoint === "buy") !== short() ? latest.current.chrome.up : latest.current.chrome.down : null;
             if (endpoint && hover) latest.current.facadeRef.current?.setOrderCrosshair?.(color, hover);
             else latest.current.facadeRef.current?.setOrderCrosshair?.(color);
             if (!endpoint) { host.title = ""; host.style.cursor = ""; }
@@ -108,8 +116,10 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             const rules = draft?.template.perpetual ? contract() : undefined;
             return rules ? perpetualTick(value, rules) : snapOrderMarkerPrice(value);
         };
-        const short = () => draft?.template.perpetual?.side === "SHORT";
-        const leg = (endpoint: "buy" | "sell") => endpoint === "buy" ? short() ? "SHORT" : "BUY" : short() ? "COVER" : "SELL";
+        const leg = (endpoint: "buy" | "sell") => {
+            if (draft?.template.auto && draft.template.perpetual && !perpetualSide()) return endpoint === "buy" ? "Entry" : "Stop";
+            return endpoint === "buy" ? short() ? "SHORT" : "BUY" : short() ? "COVER" : "SELL";
+        };
         const pxText = (price: number) => draft?.template.perpetual ? String(price) : price.toFixed(price < 1 ? 4 : 2);
         const protection = () => {
             const p = latest.current;
@@ -123,8 +133,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
         };
         const size = () => {
             const a = latest.current.stores.exec.accounts().find(a => a.venue === venue);
-            if (draft?.template.perpetual)
-                return perpetualRiskSize(draft.template, contract(), draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0);
+            if (draft?.template.perpetual) {
+                const side = perpetualSide();
+                if (!side) return null;
+                const template = { ...draft.template, perpetual: { ...draft.template.perpetual, side } };
+                return perpetualRiskSize(template, contract(), draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0);
+            }
             const context = protection();
             return draft && riskEntrySize(riskEntryAddTemplate(draft.template, context.owner, context.stop), draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0);
         };
@@ -136,8 +150,9 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (!Number.isFinite(draft.template.value) || draft.template.value <= 0 || (draft.template.mode !== "Dollar" && draft.template.value > 100))
                 return "Positive risk value required (percentages at most 100).";
             if (draft.buy !== undefined && draft.sell !== undefined) {
+                if (draft.template.auto && draft.sell === draft.buy) return "Choose a stop at a different price from the entry.";
                 if (short() ? draft.sell <= draft.buy : draft.sell >= draft.buy)
-                    return short() ? "Choose a stop above the short entry." : "Sell trigger must be below buy trigger.";
+                    return short() ? "Choose a stop above the short entry." : draft.template.perpetual ? "Choose a stop below the long entry." : "Sell trigger must be below buy trigger.";
                 if (!size()?.qty || (draft.complete && !draft.maxQty))
                     return draft.template.perpetual ? "Review the contract size, leverage and USDT risk." : "Risk or funding budget rounds to zero shares.";
             }
@@ -186,6 +201,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 bar.style.right = `${(facade?.priceScaleWidth() ?? 60) + 8}px`;
             }
             const s = size(), error = invalid();
+            const { up, down } = latest.current.chrome;
+            const isShort = short();
             const qty = s ? draft.complete ? Math.min(draft.maxQty, s.qty) : s.qty : 0;
             const paneHeight = facade?.paneHeights()[0] ?? host.clientHeight;
             const rect = host.getBoundingClientRect();
@@ -215,11 +232,15 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 const headY = sellY - direction * Math.min(6, Math.abs(sellY - buyY));
                 arrow.style.width = `${plotWidth}px`;
                 arrow.style.height = `${paneHeight}px`;
-                arrow.querySelector("path")?.setAttribute("d", `M ${x} ${buyY} V ${sellY} M ${x - 4} ${headY} L ${x} ${sellY} L ${x + 4} ${headY}`);
+                const path = arrow.querySelector("path");
+                path?.setAttribute("d", `M ${x} ${buyY} V ${sellY} M ${x - 4} ${headY} L ${x} ${sellY} L ${x + 4} ${headY}`);
+                path?.setAttribute("stroke", isShort ? up : down);
                 const amount = s?.qty ? s.risk * qty / s.qty : 0;
                 const unit = draft.template.perpetual ? "contracts" : "shares";
                 readout.textContent = sizingError() || !s ? `— ${unit} · Est. risk —` :
                     `${qty.toLocaleString("en-US")} ${unit} · Est. risk ${draft.template.perpetual ? `${amount.toFixed(2)} USDT · ${draft.template.perpetual.leverage}×` : amount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
+                if (draft.template.auto && (perpetualSide() || (!draft.template.perpetual && draft.sell! < draft.buy!)))
+                    readout.textContent = `${isShort ? "Short" : "Long"} · ${readout.textContent}`;
                 const context = protection();
                 if (context.stop) readout.textContent += `\n${context.qty.toLocaleString("en-US")} existing + ${qty.toLocaleString("en-US")} added = ${(context.qty + qty).toLocaleString("en-US")} total\nShared stop ${context.stop.stopPrice.toFixed(context.stop.stopPrice < 1 ? 4 : 2)} → ${draft.sell!.toFixed(draft.sell! < 1 ? 4 : 2)} on first fill · ${context.stop.held?.trail ? "trailing mode retained" : "Fixed"}`;
                 readout.style.whiteSpace = "pre-line";
@@ -233,15 +254,18 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             for (const side of ["buy", "sell"] as const) {
                 const line = rootRef.current.querySelector<HTMLElement>(`[data-risk-${side}]`);
                 const chip = rootRef.current.querySelector<HTMLElement>(`[data-risk-chip='${side}']`);
+                const color = (side === "buy") !== isShort ? up : down;
                 const price = draft[side], y = !endpoints.includes(side) || price === undefined ? null : facade?.priceToCoordinate(price);
                 const lineY = side === endpoint && previewVisible ? candidateY : y;
                 if (line) {
                     line.style.display = lineY == null || lineY < 0 || lineY >= paneHeight ? "none" : "block";
                     line.style.top = `${lineY}px`;
                     line.style.right = `${facade?.priceScaleWidth() ?? 60}px`;
-                    line.style.borderColor = (side === "buy") !== short() ? latest.current.chrome.up : latest.current.chrome.down;
+                    line.style.borderColor = color;
                 }
                 if (chip) {
+                    chip.style.color = color;
+                    chip.style.borderColor = color;
                     chip.style.display = y == null ? "none" : "flex";
                     chip.style.top = `${chipYs[endpoints.indexOf(side)]}px`;
                     const button = chip.querySelector<HTMLButtonElement>("[data-risk-price]");
@@ -266,11 +290,13 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     label.textContent = pxText(candidate);
                     label.style.top = `${Math.max(10.5, Math.min(candidateY!, paneHeight - 10.5))}px`;
                     label.style.left = `calc(100% - ${facade?.priceScaleWidth() ?? 60}px)`;
-                    label.style.background = (endpoint === "buy") !== short() ? latest.current.chrome.up : latest.current.chrome.down;
+                    label.style.background = (endpoint === "buy") !== isShort ? up : down;
                     label.style.maxWidth = `${facade?.priceScaleWidth() ?? 60}px`;
                 }
             }
-            message(draft.template.perpetual ? (draft.buy === undefined ? `Click ${leg("buy")} entry, then stop; or drag. Esc cancel.` :
+            message(draft.template.auto && draft.template.perpetual ? (draft.buy === undefined ? "Click entry, then stop, or drag. Esc cancel." :
+                !draft.complete ? "Stop below for long or above for short. Esc cancel." : "") :
+                draft.template.perpetual ? (draft.buy === undefined ? `Click ${leg("buy")} entry, then stop; or drag. Esc cancel.` :
                 !draft.complete ? `Choose the stop ${short() ? "above" : "below"} the entry. Esc cancel.` : "") :
                 draft.buy === undefined ? "Click BUY, then SELL; or drag. Esc cancel." : !draft.complete ? "Choose SELL below BUY. Esc cancel." : "");
             cursor(previewVisible ? endpoint : null);
@@ -382,17 +408,24 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             detail.handled = true;
             if (draft?.busy || draft?.unknown)
                 return;
-            if (p.symbol.startsWith("PERP.") !== !!detail.template.perpetual) {
+            let template = detail.template;
+            const isPerpetual = p.symbol.startsWith("PERP.");
+            if (!template.auto && isPerpetual !== !!template.perpetual) {
                 push({ level: "warn", text: "Choose a Chart Risk Entry preset for the chart's instrument type." });
                 return;
             }
-            if (detail.template.perpetual && !p.symbol.startsWith("PERP.MEXC.")) {
+            if (isPerpetual && !p.symbol.startsWith("PERP.MEXC.")) {
                 push({ level: "warn", text: "Chart Risk Entry is available for MEXC paper perpetuals." });
                 return;
             }
+            if (template.auto) {
+                template = isPerpetual
+                    ? { ...template, perpetual: { side: "BUY", leverage: template.auto.leverage }, protection: undefined }
+                    : { ...template, perpetual: undefined };
+            }
             clear();
             hover = lastPoint;
-            draft = { template: detail.template, sharedEntryId: protection().owner?.id ?? "", complete: false, busy: false, unknown: false, maxQty: 0 };
+            draft = { template, sharedEntryId: protection().owner?.id ?? "", complete: false, busy: false, unknown: false, maxQty: 0 };
             host.dataset.riskEntryActive = "true";
             p.facadeRef.current?.setPanZoomEnabled?.(false);
             paint();
@@ -410,6 +443,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             } });
         };
         const priceAt = (e: PointerEvent) => {
+            if (draft?.template.auto && draft.template.perpetual && !contract()) return null;
             const rect = host.getBoundingClientRect(), facade = latest.current.facadeRef.current, x = e.clientX - rect.left, y = e.clientY - rect.top;
             if (!facade || x < 0 || y < 0 || x >= rect.width - facade.priceScaleWidth() || y >= (facade.paneHeights()[0] ?? 0))
                 return null;
@@ -437,11 +471,19 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             const facade = latest.current.facadeRef.current;
             const selected = (["buy", "sell"] as const).filter(endpoint => draft![endpoint] !== undefined && (endpoint === "buy" || draft!.complete))
                 .map(endpoint => ({ endpoint, price: draft![endpoint]! }));
-            const hits = chip ? [] : nearestPriceLines(selected, e.clientY - host.getBoundingClientRect().top, p => facade?.priceToCoordinate(p) ?? null);
+            const pickingAutoStop = draft.template.auto && !draft.complete && draft.buy !== undefined;
+            const hits = chip || pickingAutoStop ? [] : nearestPriceLines(selected, e.clientY - host.getBoundingClientRect().top, p => facade?.priceToCoordinate(p) ?? null);
             if (hits.length > 1) {
                 consume(e);
                 const chooser = rootRef.current?.querySelector<HTMLElement>("[data-risk-chooser]");
-                if (chooser) { chooser.style.display = "flex"; chooser.style.top = `${e.clientY - host.getBoundingClientRect().top}px`; }
+                if (chooser) {
+                    for (const endpoint of ["buy", "sell"] as const) {
+                        const choice = chooser.querySelector(`[data-risk-choice='${endpoint}']`);
+                        if (choice) choice.textContent = leg(endpoint);
+                    }
+                    chooser.style.display = "flex";
+                    chooser.style.top = `${e.clientY - host.getBoundingClientRect().top}px`;
+                }
                 latest.current.chooserOpenRef.current = true;
                 return;
             }
@@ -478,7 +520,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             const facade = latest.current.facadeRef.current;
             const raw = pointer?.axis ? facade?.coordinateToPrice((facade.priceToCoordinate(pointer.price) ?? pointer.y - host.getBoundingClientRect().top) + e.clientY - pointer.y) : priceAt(e);
             const price = raw != null && Number.isFinite(raw) && raw > 0 ? snap(raw) : null;
-            if (price == null) { cursor(null); schedule(); return; }
+            if (price == null) {
+                if (draft.template.auto && !draft.complete && !pointer?.editing) delete draft.sell;
+                cursor(null);
+                schedule();
+                return;
+            }
             if (pointer) {
                 consume(e);
                 if (Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) >= 3)
@@ -493,7 +540,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 draft.sell = price;
                 draft.sellX = e.clientX - host.getBoundingClientRect().left;
             }
-            if (!pointer) {
+            if (!pointer && (!draft.template.auto || draft.complete)) {
                 const hits = nearestPriceLines((["buy", "sell"] as const).filter(endpoint => draft![endpoint] !== undefined && (endpoint === "buy" || draft!.complete)).map(endpoint => ({ price: draft![endpoint]! })),
                     e.clientY - host.getBoundingClientRect().top, p => facade?.priceToCoordinate(p) ?? null);
                 host.style.cursor = hits.length ? "ns-resize" : "";
@@ -507,9 +554,21 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             consume(e);
             const completed = !pointer.editing && (pointer.second || pointer.moved);
             const corrected = pointer.editing && pointer.moved && draft.complete && draft[pointer.endpoint] !== pointer.price;
+            if (completed && draft.template.auto) {
+                hover = e;
+                const stop = priceAt(e);
+                if (stop === null) delete draft.sell;
+                else {
+                    draft.sell = stop;
+                    draft.sellX = e.clientX - host.getBoundingClientRect().left;
+                }
+            }
             if (pointer.editing) hover = null;
             pointer = null;
-            if (completed && draft.sell !== undefined) {
+            if (completed && draft.sell !== undefined && (!draft.template.auto || draft.buy !== draft.sell)) {
+                const side = perpetualSide();
+                if (draft.template.auto && draft.template.perpetual && side)
+                    draft.template.perpetual.side = side;
                 draft.complete = true;
             }
             draft.maxQty = size()?.qty ?? 0;

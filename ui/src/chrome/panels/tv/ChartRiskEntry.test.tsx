@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, it, expect, vi } from "vitest";
-import { render, fireEvent, cleanup, waitFor, screen } from "@testing-library/react";
+import { act, render, fireEvent, cleanup, waitFor, screen } from "@testing-library/react";
 import { makeStores } from "../../../data/registry";
 import { LinkGroups } from "../../linkGroups";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
@@ -11,9 +11,11 @@ import { ThemeProvider } from "../../ThemeProvider";
 import { ToastProvider } from "../../Toast";
 import type { AckMsg, Order, StopLimitRoutePreview } from "../../../wire/contract";
 const template: RiskEntryTemplate = { kind: "risk", id: "r", label: "Risk", mode: "Dollar", value: 100, buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
-function mount(auto = false, preset = template) {
+const mexcSymbol = "PERP.MEXC.BTC_USDT";
+const autoPreset: RiskEntryTemplate = { ...template, auto: { leverage: 5 }, value: 1 };
+function mount(auto = false, preset = template, chartSymbol = preset.perpetual ? mexcSymbol : "AAPL") {
     const stores = makeStores();
-    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, venues: [{ venue: "sim", broker: preset.perpetual ? "mexc-sim" : "sim", connected: true, positionDataReady: true }] } });
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, venues: [{ venue: "sim", broker: chartSymbol === mexcSymbol ? "mexc-sim" : "sim", connected: true, positionDataReady: true }] } });
     stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { venue: "sim", buyingPower: 100000, availableCash: 100000, tsMs: Date.now() } });
     const linkGroups = new LinkGroups({ post: () => { }, onMessage: () => () => { }, close: () => { } }, () => { });
     linkGroups.focusVenue("green", "sim");
@@ -24,19 +26,21 @@ function mount(auto = false, preset = template) {
     const sendCommand = vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { void name; void args; return { kind: "ack", corrId: "1", status: "accepted", orderId: "E1" }; });
     const sendQuery = vi.fn(async (): Promise<StopLimitRoutePreview> => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "RTH", deadlineMs: Date.now() + 100000, hasTrustedEligiblePrint: true, lastEligiblePrice: 9, lastEligibleTsMs: Date.now() }));
     const layoutRef = { current: () => {} };
-    const element = (symbol = preset.perpetual ? "PERP.MEXC.BTC_USDT" : "AAPL") => <ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol={symbol} contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [preset], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} layoutRef={layoutRef} sendCommand={sendCommand} sendQuery={sendQuery}/>;
+    const element = (symbol = chartSymbol) => <ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol={symbol} contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [preset], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} layoutRef={layoutRef} sendCommand={sendCommand} sendQuery={sendQuery}/>;
     const result = render(element(), { container: host, wrapper: ({ children }) => <ThemeProvider><ToastProvider>{children}</ToastProvider></ThemeProvider> });
     sendCommand.mockClear();
     return { ...result, host, sendCommand, sendQuery, facadeRef, layoutRef, stores, changeSymbol: (symbol: string) => result.rerender(element(symbol)) };
 }
-it.each(["BUY", "SHORT"] as const)("submits a %s perpetual chart preset with contracts and leverage", async side => {
-    const preset: RiskEntryTemplate = { ...template, perpetual: { side, leverage: 5 }, value: 1 };
-    const { host, sendCommand, sendQuery, stores } = mount(false, preset);
-    const symbol = "PERP.MEXC.BTC_USDT";
-    stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: { symbol, mark: 10, bid: 9.9, ask: 10.1, contract: {
+function seedMexcContract(stores: ReturnType<typeof makeStores>) {
+    stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: { symbol: mexcSymbol, mark: 10, bid: 9.9, ask: 10.1, contract: {
         base: "BTC", settlement: "USDT", priceTick: "0.1", multiplier: "0.1", quantityStep: 1,
         minimum: 1, maximum: 1000, minLeverage: 1, maxLeverage: 10, takerFee: "0.001", tradingEnabled: true,
     } } });
+}
+it.each(["BUY", "SHORT"] as const)("submits a %s perpetual chart preset with contracts and leverage", async side => {
+    const preset: RiskEntryTemplate = { ...template, perpetual: { side, leverage: 5 }, value: 1 };
+    const { host, sendCommand, sendQuery, stores } = mount(false, preset);
+    seedMexcContract(stores);
     initiateChartRiskEntry(preset);
     fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 100, clientY: side === "BUY" ? 220 : 180 });
@@ -44,7 +48,7 @@ it.each(["BUY", "SHORT"] as const)("submits a %s perpetual chart preset with con
     expect(host.querySelector("[data-risk-readout]")?.textContent).toContain("contracts");
     fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.objectContaining({
-        symbol, side, trigger: 10, stop: side === "BUY" ? 9.8 : 10.2, leverage: 5, maxQty: 45,
+        symbol: mexcSymbol, side, trigger: 10, stop: side === "BUY" ? 9.8 : 10.2, leverage: 5, maxQty: 45,
     })));
     expect(sendQuery).not.toHaveBeenCalled();
 });
@@ -54,6 +58,74 @@ function flushFrames() {
     frames.clear();
     pending.forEach(cb => cb(0));
 }
+
+it("previews both sides on the perpetual chart and locks the short side after the second click", async () => {
+    const { host, stores, sendCommand } = mount(false, autoPreset, mexcSymbol);
+    seedMexcContract(stores);
+    initiateChartRiskEntry(autoPreset);
+    fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 100, clientY: 200 });
+    const readout = host.querySelector("[data-risk-readout]");
+    fireEvent.pointerMove(window, { clientX: 100, clientY: 220 });
+    flushFrames();
+    expect(readout?.textContent).toContain("Long · 45 contracts");
+    fireEvent.pointerMove(window, { clientX: 100, clientY: 180 });
+    flushFrames();
+    expect(readout?.textContent).toContain("Short · 45 contracts");
+    fireEvent.pointerDown(host, { pointerId: 2, button: 0, clientX: 100, clientY: 180 });
+    fireEvent.pointerUp(window, { pointerId: 2, clientX: 100, clientY: 180 });
+    const cover = screen.getByRole("button", { name: /COVER trigger/ });
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(cover, { key: "ArrowDown" });
+    expect(readout?.textContent).toContain("Short");
+    expect(host.querySelector("[data-risk-status]")?.textContent).toContain("Choose a stop above the short entry.");
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.anything());
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(cover, { key: "ArrowUp" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.objectContaining({
+        symbol: mexcSymbol, side: "SHORT", trigger: 10, stop: 10.2, leverage: 5, maxQty: 45,
+    })));
+});
+
+it("auto-sends only after an in-chart release at a different contract tick", async () => {
+    const { host, stores, sendCommand } = mount(true, autoPreset, mexcSymbol);
+    seedMexcContract(stores);
+    for (const release of [{ clientX: 140, clientY: 202 }, { clientX: 490, clientY: 220 }]) {
+        initiateChartRiskEntry(autoPreset);
+        fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
+        fireEvent.pointerMove(window, { pointerId: 1, clientX: 140, clientY: 180 });
+        fireEvent.pointerUp(window, { pointerId: 1, ...release });
+        fireEvent.keyDown(window, { key: "Enter" });
+        expect(sendCommand).not.toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.anything());
+    }
+    fireEvent.keyDown(window, { key: "Escape" });
+    initiateChartRiskEntry(autoPreset);
+    fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 140, clientY: 220 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 140, clientY: 220 });
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.objectContaining({
+        symbol: mexcSymbol, side: "BUY", trigger: 10, stop: 9.8, leverage: 5, maxQty: 45,
+    })));
+});
+
+it("keeps an Auto stock entry long and blocks a stop above it", async () => {
+    const { host, sendCommand } = mount(true, autoPreset);
+    initiateChartRiskEntry(autoPreset);
+    fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 100, clientY: 180 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 100, clientY: 180 });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Sell trigger must be below buy trigger."));
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.anything());
+});
+
+it("blocks an Auto entry on a perpetual chart outside MEXC", () => {
+    const { sendQuery } = mount(false, autoPreset, "PERP.BINANCE.BTCUSDT");
+    act(() => { initiateChartRiskEntry(autoPreset); });
+    expect(screen.getByRole("alert").textContent).toContain("available for MEXC paper perpetuals");
+    expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
+    expect(sendQuery).not.toHaveBeenCalled();
+});
 function placeRiskPair(host: HTMLElement, gesture: "drag" | "click" = "drag") {
     fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
     if (gesture === "click") {

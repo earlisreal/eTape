@@ -252,10 +252,12 @@ leverage. It offers separate open and close actions for each direction. The
 simulator uses live MEXC depth and maintains a separate USDT ledger. The chart
 and ticket request depth automatically for the selected perpetual.
 
-In Orders & hotkeys, create a **Chart Risk Entry** preset and choose Perpetual
-long or Perpetual short. Set the leverage and USDT loss budget, focus the
-contract's linked chart, and select the entry trigger followed by the protective
-stop. eTape waits for the last trade to trigger a price-capped IOC entry. The
+In Orders & hotkeys, create a **Chart Risk Entry** preset and choose **Auto
+(chart and gesture)**, **Perpetual long**, or **Perpetual short**. Set the
+leverage and risk budget, focus the contract's linked chart, and select the entry
+trigger followed by the protective stop. With Auto, drag or click down for a
+long and up for a short. eTape previews the side and locks it when you complete
+the gesture. eTape waits for the last trade to trigger a price-capped IOC entry. The
 simulator holds a fair-price stop for the filled contracts. Paper positions and
 stops are stored alongside the local eTape database for restart recovery.
 Simulated funding uses the last observed rate and the published settlement time.

@@ -484,6 +484,7 @@ try {
     await productionPage.mouse.move(cursor.x + 40, hostBox.y + hostBox.height * 0.50);
     await productionPage.waitForFunction(() => document.querySelector("[data-risk-readout]").innerText.includes("shares · Est. risk $"));
     const moving = await checkRisk();
+    assert(moving.readout.text.startsWith("Long · "), "Auto must preview the long side on the stock chart before completion");
     assert.equal(moving.chips.length,1,"Live risk sizing must appear before selecting SELL");
     assert(moving.label.visible && moving.label.buttons === 0 && moving.label.background === "rgb(242, 54, 69)","SELL must preview a plain red price while retaining the selected BUY pill");
     assert(Math.abs(moving.lineYs[1] - hostBox.height * 0.50) <= 3,"The moving SELL line must follow its snapped trigger during both placement gestures");

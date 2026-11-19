@@ -32,7 +32,7 @@ stores.exec.apply({ kind: "snapshot", topic: "exec.account", key: "sim", payload
   venue: "sim", equity: 10000, buyingPower: 10000, availableCash: 10000, sodEquity: 10000,
   realized: 0, dayPnl: 0, leverage: 1, tsMs: Date.now(), cycleStartMs: 0, cycleRealized: 0,
 } });
-const riskTemplate = { kind: "risk", id: "risk", label: "Chart Risk Entry", mode: "Dollar", value: 100,
+const riskTemplate = { kind: "risk", id: "risk", label: "Chart Risk Entry", mode: "Dollar", value: 100, auto: { leverage: 1 },
   buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
 const config = { activeVenue: "sim", templates: [{ kind: "place", id: "stop", label: "Stop", side: "BUY", type: "STOP_LIMIT",
   tif: "DAY", session: "EXTENDED", priceSource: "Last", priceOffset: 0, limitCushion: 0.05, limitCushionUnit: "$",

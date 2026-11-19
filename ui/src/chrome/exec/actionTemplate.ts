@@ -35,6 +35,7 @@ export const MANAGEMENT_ACTIONS = ["CancelLast", "CancelAllFocused", "CancelAllE
 export type ManagementAction = typeof MANAGEMENT_ACTIONS[number];
 export interface ManagementTemplate { kind: "manage"; id: string; label: string; action: ManagementAction; hotkey?: string; deck?: boolean; deckColor?: DeckColor }
 export interface RiskEntryTemplate {
+  auto?: { leverage: number } | undefined;
   perpetual?: { side: "BUY" | "SHORT"; leverage: number } | undefined;
 	protection?: TrailConfig | undefined;
   kind: "risk"; id: string; label: string; hotkey?: string; deck?: boolean; deckColor?: DeckColor;
@@ -85,7 +86,8 @@ function normalizeTemplate(t: ActionTemplate): ActionTemplate {
   if (t.kind === "risk") {
     const cushion = (c: LimitCushion | undefined): LimitCushion => ({value: Number.isFinite(c?.value) ? Math.max(0,c!.value) : 0, unit: c?.unit === "%" ? "%" : "$"});
     const sellCushion=cushion(t.sellCushion);
-    return {...t, mode: t.mode === "CashPct" || t.mode === "BuyingPowerPct" ? t.mode : "Dollar",
+    const mode = t.mode === "CashPct" || t.mode === "BuyingPowerPct" ? t.mode : "Dollar";
+    return {...t, mode: t.auto && mode === "BuyingPowerPct" ? "CashPct" : mode,
       value: Number.isFinite(t.value) ? Math.max(0, t.mode === "Dollar" ? t.value : Math.min(100,t.value)) : 0,
       buyCushion: cushion(t.buyCushion), sellCushion,
       ...(t.protection?{protection:normalizeTrail(t.protection,{...newTrailConfig(),pricing:"CUSHION",cushion:sellCushion})}:{})};

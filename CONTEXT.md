@@ -244,7 +244,7 @@ _Avoid_: Previous extended-session close
 ## Order Entry
 
 **Chart Risk Entry**:
-A long entry sized to a loss budget from two chart-selected prices, with a linked protective sell stop governed by its Protection Mode.
+An entry sized to a loss budget from two chart-selected prices, with a linked protective stop. Stocks support long entries with the selected Protection Mode. MEXC paper perpetuals support long and short entries with fixed protection. An Auto preset takes the instrument from the chart and resolves the direction from the entry and stop prices within those supported sides.
 _Avoid_: Risk confirmation, bracket (when referring to this entry tool)
 
 **Protection Mode**:

@@ -125,8 +125,14 @@ crosshair and Native Crosshair Price Label, while vertical/time feedback stays
 normal. Blockers and uncertain outcomes remain visible.
 
 Settings → Orders & hotkeys → Add → Chart Risk Entry creates a risk preset and
-hotkey. Focus a grouped chart, press the hotkey, then click the buy trigger and
-sell stop or drag between them. Only brief setup instructions and actionable
+hotkey. Choose **Auto (chart and gesture)** under Instrument and direction to
+use one preset on stock charts and MEXC paper perpetual charts. Focus a grouped
+chart, press the hotkey, then click the entry trigger and protective stop or
+drag between them. A lower stop gives a long. A higher stop gives a short on
+MEXC paper perpetuals. The preview shows the side, which locks on release or
+the second click. Auto uses a fixed risk amount in USD or USDT or a percentage
+of cash or collateral. Leverage applies to perpetuals and the selected
+Protection Mode applies to stocks. Only brief setup instructions and actionable
 warnings float over the bottom Volume area. The two axis chips expose planned
 shares, execution limits, custody, expiry and Enter/Escape shortcuts on hover.
 On a fully protected Chart Risk Entry long position, the same two points create
