@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/perps"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/instrument"
 )
@@ -210,26 +211,78 @@ func (a *apiClient) Observe(ctx context.Context, req exec.OrderRequest) (exec.Pe
 	if err != nil {
 		return exec.PerpetualObservation{}, err
 	}
+	digits := lotDigits(req)
+	filled, valid := filledLots(req, o, status, digits)
+	if !valid {
+		return exec.PerpetualObservation{}, fmt.Errorf("invalid %s order quantity", a.env.label)
+	}
+	return a.readFills(ctx, o, status, digits, filled, o.Time-1000, a.clock.Now().UnixMilli())
+}
+
+func lotDigits(req exec.OrderRequest) int {
 	// Use the admitted lot quantum even if exchange precision later changes.
 	quantum := strconv.FormatFloat(req.Perpetual.Multiplier, 'f', -1, 64)
 	_, fraction, _ := strings.Cut(quantum, ".")
-	digits := len(fraction)
-	qty, valid := lots(o.Quantity, digits)
+	return len(fraction)
+}
+
+func filledLots(req exec.OrderRequest, o order, status exec.OrderStatus, digits int) (float64, bool) {
+	qty, validQty := lots(o.Quantity, digits)
 	filled, validFill := lots(o.Filled, digits)
-	if !valid || !validFill || qty != req.Qty || filled < 0 || filled > qty || status == exec.StatusFilled && filled != qty {
-		return exec.PerpetualObservation{}, fmt.Errorf("invalid %s order quantity", a.env.label)
+	return filled, validQty && validFill && qty == req.Qty && filled >= 0 && filled <= qty &&
+		(status != exec.StatusFilled || filled == qty)
+}
+
+// ObserveFill uses the stream's order identity and cumulative quantity to
+// fetch the exact executions in one read. The journal and REST recovery remain
+// the sources of order ownership and missing execution history.
+func (a *apiClient) ObserveFill(ctx context.Context, req exec.OrderRequest, submittedMs int64, hint perps.FillHint) (exec.PerpetualObservation, error) {
+	buy := req.Side == exec.SideBuy || req.Side == exec.SideCover
+	if submittedMs <= 0 || req.Perpetual.LocalProtection || !validID(hint.BrokerOrderID) ||
+		hint.ClientOrderID != req.ClientOrderID || hint.Symbol != orderIdentity(req).Get("symbol") ||
+		hint.Type != req.Type.String() || hint.Side != "BUY" && hint.Side != "SELL" || buy != (hint.Side == "BUY") ||
+		hint.TimeMs < submittedMs-5000 {
+		return a.Observe(ctx, req)
 	}
+	o := order{ID: json.Number(hint.BrokerOrderID), Symbol: hint.Symbol, Side: hint.Side,
+		Quantity: hint.Quantity, Filled: hint.Filled}
+	digits := lotDigits(req)
+	filled, valid := filledLots(req, o, hint.Status, digits)
+	if !valid || filled == 0 {
+		return a.Observe(ctx, req)
+	}
+	endMs := max(hint.TimeMs, a.clock.Now().UnixMilli())
+	report, err := a.readFills(ctx, o, hint.Status, digits, filled, submittedMs-5000, endMs)
+	var mismatch fillQuantityMismatch
+	if errors.As(err, &mismatch) && mismatch.actual > filled {
+		// History has already overtaken this event. A signed order read can
+		// confirm the newer cumulative quantity and terminal status.
+		return a.Observe(ctx, req)
+	}
+	return report, err
+}
+
+type fillQuantityMismatch struct {
+	label  string
+	actual float64
+}
+
+func (e fillQuantityMismatch) Error() string {
+	return fmt.Sprintf("%s fills do not yet reconcile with the order", e.label)
+}
+
+func (a *apiClient) readFills(ctx context.Context, o order, status exec.OrderStatus, digits int, filled float64, startMs, endMs int64) (exec.PerpetualObservation, error) {
 	report := exec.PerpetualObservation{BrokerOrderID: o.id(), Status: status}
 	if filled == 0 {
 		return report, nil
 	}
 	var reply list[tradeFill]
 	reply.Key = "fill_orders"
-	if o.Time <= 0 {
+	if startMs <= 0 || endMs < startMs {
 		return report, fmt.Errorf("missing %s order time", a.env.label)
 	}
 	params := url.Values{"tradingUnit": {"COIN"}, "currency": {"USDT"}, "orderId": {o.id()},
-		"startTs": {strconv.FormatInt(o.Time-1000, 10)}, "endTs": {strconv.FormatInt(a.clock.Now().UnixMilli(), 10)}}
+		"startTs": {strconv.FormatInt(startMs, 10)}, "endTs": {strconv.FormatInt(endMs, 10)}}
 	if err := a.request(ctx, http.MethodGet, "/openApi/swap/v2/trade/allFillOrders", params, true, &reply); err != nil {
 		return report, err
 	}
@@ -246,7 +299,7 @@ func (a *apiClient) Observe(ctx context.Context, req exec.OrderRequest) (exec.Pe
 		report.Fills = append(report.Fills, execution)
 	}
 	if sum != filled {
-		return report, fmt.Errorf("%s fills do not yet reconcile with the order", a.env.label)
+		return report, fillQuantityMismatch{label: a.env.label, actual: sum}
 	}
 	report.PositionID = positionID(o.PositionID)
 	slices.SortFunc(report.Fills, func(a, b exec.PerpetualFill) int {

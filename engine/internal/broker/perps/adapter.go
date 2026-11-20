@@ -27,8 +27,9 @@ type API interface {
 }
 
 type pending struct {
-	Request   exec.OrderRequest
-	Rejection string
+	Request     exec.OrderRequest
+	Rejection   string
+	SubmittedMs int64 `json:",omitempty"`
 }
 
 type journal struct {
@@ -148,7 +149,7 @@ func (a *Adapter) SubmitOrder(ctx context.Context, req exec.OrderRequest) (exec.
 	if err := ctx.Err(); err != nil {
 		return reject(err)
 	}
-	p := pending{Request: req}
+	p := pending{Request: req, SubmittedMs: a.clock.Now().UnixMilli()}
 	a.journal.Pending[req.ClientOrderID] = p
 	if err := a.save(); err != nil {
 		delete(a.journal.Pending, req.ClientOrderID)
@@ -214,6 +215,11 @@ func (a *Adapter) snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Po
 	if err != nil {
 		return account, nil, nil, err
 	}
+	account, positions, orders = a.filterSnapshot(account, positions, orders)
+	return account, positions, orders, nil
+}
+
+func (a *Adapter) filterSnapshot(account exec.AccountSnapshot, positions []exec.Position, orders []exec.Order) (exec.AccountSnapshot, []exec.Position, []exec.Order) {
 	account.Venue, account.TsMs = a.venue, a.clock.Now().UnixMilli()
 	external := orders[:0]
 	for _, order := range orders {
@@ -227,7 +233,7 @@ func (a *Adapter) snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Po
 	for i := range positions {
 		positions[i].Venue = a.venue
 	}
-	return account, positions, external, nil
+	return account, positions, external
 }
 
 func (a *Adapter) emit(ctx context.Context, ev exec.BrokerEvent) bool {
@@ -240,7 +246,11 @@ func (a *Adapter) emit(ctx context.Context, ev exec.BrokerEvent) bool {
 }
 
 func (a *Adapter) Run(ctx context.Context) {
-	tick := time.NewTicker(3 * time.Second)
+	if stream, ok := a.api.(OrderStream); ok {
+		a.runWithOrderStream(ctx, stream)
+		return
+	}
+	tick := time.NewTicker(accountPollInterval)
 	defer tick.Stop()
 	connected := false
 	for {
@@ -273,25 +283,39 @@ func (a *Adapter) poll(ctx context.Context, connected bool) bool {
 	account, positions, orders, err := a.snapshot(ctx)
 	a.mu.Unlock()
 	for _, report := range reports {
-		report.Persisted = make(chan bool, 1)
-		if !a.emit(ctx, report) {
-			return false
-		}
-		select {
-		case confirmed := <-report.Persisted:
-			if confirmed && report.Terminal() {
-				a.mu.Lock()
-				p := a.journal.Pending[report.OrderID]
-				delete(a.journal.Pending, report.OrderID)
-				if a.save() != nil {
-					a.journal.Pending[report.OrderID] = p
-				}
-				a.mu.Unlock()
-			}
-		case <-ctx.Done():
+		a.persistObservation(ctx, report)
+		if ctx.Err() != nil {
 			return false
 		}
 	}
+	return a.publishSnapshot(ctx, connected, account, positions, orders, err)
+}
+
+func (a *Adapter) persistObservation(ctx context.Context, report exec.PerpetualObservation) bool {
+	report.Persisted = make(chan bool, 1)
+	if !a.emit(ctx, report) {
+		return false
+	}
+	select {
+	case confirmed := <-report.Persisted:
+		if !confirmed || !report.Terminal() {
+			return confirmed
+		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		p := a.journal.Pending[report.OrderID]
+		delete(a.journal.Pending, report.OrderID)
+		if a.save() != nil {
+			a.journal.Pending[report.OrderID] = p
+			return false
+		}
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (a *Adapter) publishSnapshot(ctx context.Context, connected bool, account exec.AccountSnapshot, positions []exec.Position, orders []exec.Order, err error) bool {
 	if err != nil {
 		a.emit(ctx, exec.BrokerConnDown{V: a.venue, Note: err.Error()})
 		return false

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/broker/perps"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/creds"
@@ -27,12 +28,12 @@ import (
 )
 
 type environment struct {
-	base, broker, label, currency string
+	base, stream, broker, label, currency string
 }
 
 var (
-	virtual = environment{"https://open-api-vst.bingx.com", "bingx-vst", "BingX Virtual", "VST"}
-	live    = environment{"https://open-api.bingx.com", "bingx-live", "BingX Live", "USDT"}
+	virtual = environment{"https://open-api-vst.bingx.com", "wss://vst-open-api-ws.bingx.com/swap-market", "bingx-vst", "BingX Virtual", "VST"}
+	live    = environment{"https://open-api.bingx.com", "wss://open-api-swap.bingx.com/swap-market", "bingx-live", "BingX Live", "USDT"}
 )
 
 type Adapter struct {
@@ -49,6 +50,8 @@ type apiClient struct {
 	catalogMu    sync.RWMutex
 	catalog      map[string]contract
 	catalogUntil time.Time
+	orderReads   *netx.TokenBucket
+	fillReads    *netx.TokenBucket
 }
 
 type contract struct {
@@ -86,10 +89,13 @@ func newAdapter(env environment, venue exec.VenueID, cr creds.Pair, clk clock.Cl
 }
 
 func newAPI(env environment, cr creds.Pair, clk clock.Clock) *apiClient {
-	return &apiClient{env: env, clock: clk, creds: cr, http: &http.Client{
-		Timeout:       5 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}}
+	return &apiClient{env: env, clock: clk, creds: cr,
+		orderReads: netx.NewTokenBucket(clock.System{}, 30, 1),
+		fillReads:  netx.NewTokenBucket(clock.System{}, 5, 1),
+		http: &http.Client{
+			Timeout:       5 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}}
 }
 
 // VerifyVirtual checks account access and one-way mode with read-only VST requests.
@@ -117,7 +123,7 @@ type apiError struct {
 
 func (e apiError) Error() string { return fmt.Sprintf("%s API code %d", e.label, e.code) }
 
-func (a *apiClient) request(ctx context.Context, method, path string, params url.Values, signed bool, into any) error {
+func (a *apiClient) newRequest(ctx context.Context, method, path string, params url.Values, signed bool) (*http.Request, error) {
 	if params == nil {
 		params = make(url.Values)
 	}
@@ -137,10 +143,32 @@ func (a *apiClient) request(ctx context.Context, method, path string, params url
 	}
 	req, err := http.NewRequestWithContext(ctx, method, target, nil)
 	if err != nil {
-		return fmt.Errorf("could not build %s request", a.env.label)
+		return nil, fmt.Errorf("could not build %s request", a.env.label)
 	}
 	if signed {
 		req.Header.Set("X-BX-APIKEY", a.creds.KeyID)
+	}
+	return req, nil
+}
+
+func (a *apiClient) request(ctx context.Context, method, path string, params url.Values, signed bool, into any) error {
+	var budget *netx.TokenBucket
+	if method == http.MethodGet {
+		switch path {
+		case "/openApi/swap/v2/trade/order":
+			budget = a.orderReads
+		case "/openApi/swap/v2/trade/allFillOrders":
+			budget = a.fillReads
+		}
+	}
+	if budget != nil {
+		if err := budget.Take(ctx); err != nil {
+			return err
+		}
+	}
+	req, err := a.newRequest(ctx, method, path, params, signed)
+	if err != nil {
+		return err
 	}
 	res, err := a.http.Do(req)
 	if err != nil {
@@ -149,6 +177,9 @@ func (a *apiClient) request(ctx context.Context, method, path string, params url
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
+		if budget != nil && res.StatusCode == http.StatusTooManyRequests {
+			a.deferRateLimited(budget, res.Header.Get("Retry-After"))
+		}
 		return fmt.Errorf("%s returned HTTP %d", a.env.label, res.StatusCode)
 	}
 	var response struct {
@@ -163,12 +194,26 @@ func (a *apiClient) request(ctx context.Context, method, path string, params url
 		return fmt.Errorf("invalid %s response status", a.env.label)
 	}
 	if code != 0 {
+		if budget != nil && code == 100410 {
+			a.deferRateLimited(budget, res.Header.Get("Retry-After"))
+		}
 		return apiError{a.env.label, code}
 	}
 	if len(response.Data) == 0 || bytes.Equal(response.Data, []byte("null")) || json.Unmarshal(response.Data, into) != nil {
 		return fmt.Errorf("invalid %s data", a.env.label)
 	}
 	return nil
+}
+
+func (a *apiClient) deferRateLimited(budget *netx.TokenBucket, retryAfter string) {
+	now := time.Now()
+	until := now.Add(time.Second)
+	if seconds, err := strconv.ParseInt(retryAfter, 10, 32); err == nil && seconds > 1 {
+		until = now.Add(time.Duration(seconds) * time.Second)
+	} else if reset, err := http.ParseTime(retryAfter); err == nil && reset.After(until) {
+		until = reset
+	}
+	budget.DeferUntil(until)
 }
 
 func (a *apiClient) refreshCatalog(ctx context.Context) error {

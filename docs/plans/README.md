@@ -4,6 +4,7 @@ Create one focused Markdown file per approved change. Name `YYYY-MM-DD-short-fea
 
 Implemented:
 
+- [BingX private order updates](2026-11-20-bingx-fill-websocket.md)
 - [DOM Ladder stripes for Engine-Held Stop-Limits](2026-11-13-dom-ladder-engine-held-stop-limit.md)
 - [Chart Risk Entry position adds](2026-11-05-chart-risk-position-adds.md)
 - [Volume Overlap](2026-11-03-volume-overlap.md)

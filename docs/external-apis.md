@@ -182,6 +182,26 @@ generic Binance and BingX Futures API checks use their production read-only
 endpoints. [BingX API environments](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/base-urls.md)
 · [Swap orders and fills](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md)
 
+Each BingX execution venue uses its own authenticated order WebSocket. An
+execution update for a journaled order triggers an immediate, order-filtered
+REST fill-history read. The stream's exchange order ID and cumulative
+quantity let eTape skip the separate order-detail request when the event and
+journal provide enough evidence. `TRADE_UPDATE` and `ORDER_TRADE_UPDATE`
+notifications for the same order and cumulative fill are coalesced. eTape
+persists the REST execution records once, after their quantities reconcile.
+Incomplete history is retried with backoff. Order-detail and fill-history reads
+are paced at BingX's documented 30 and 5 requests per second per UID,
+respectively. The adapter honors rate-limit cooldowns.
+
+The account snapshot continues to refresh equity, buying power and positions
+every three seconds. Startup, reconnect, and discrepancies in working orders
+use signed order-detail and fill-history recovery. While the private stream is
+unavailable, the three-second order poll still reconciles pending orders.
+Orders that require verified position ownership use signed order-detail
+lookup. [BingX private order updates](https://bingx-api.github.io/docs-v3/#/en/Swap/Websocket%20Account%20Data/Order%20update%20push)
+· [Order-detail limit](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#9-query-order-details)
+· [Fill-history limit](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#13-trade-fill-history)
+
 BingX order and position reads preserve the exchange's exact position IDs
 when present. Chart Risk Entry is unavailable on BingX Virtual and Live. A
 Virtual one-way BTC-USDT test confirmed the filled IOC's order detail and
