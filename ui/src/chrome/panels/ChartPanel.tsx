@@ -638,7 +638,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       // Pinning detaches from the bus without changing the symbol currently on
       // screen. PanelFrame persists that snapshot for the next workspace load.
       const linkedSymbol = linkGroups.symbolFor(groupRef.current);
-      if (linkedSymbol) ownSymbolRef.current = linkedSymbol;
+      if (linkedSymbol !== undefined) ownSymbolRef.current = linkedSymbol;
       const nextSymbol = linkedSymbol ?? ownSymbolRef.current;
       const nextTimeframe = tfRef.current;
       const symbolChanged = nextSymbol !== lastOpenedSymbol;

@@ -18,11 +18,13 @@ immediately. Live trails reuse the existing account-held-stop acknowledgement.
 
 Order ticket, hotkeys, sizing, venue selection, and arm/disarm presentation.
 Inputs: user intent plus account/position stores; outputs: typed wire commands.
-Grouped panels use their Link Group's saved stock account or the saved account
-for the focused perpetual exchange. Choose a compatible account from the Order
-Ticket or Account panel header. A missing selection leaves the market available
-for browsing. Pinned panels need a Link Group before they can submit. Returning
-to stocks restores the saved stock account. Selecting a live account from paper
+Grouped panels use the account saved for the Link Group's selected market.
+Select Stocks or Crypto in Account, then choose a perpetual exchange in Crypto
+mode. An explicit symbol selection also changes the group's market as needed.
+Choose a compatible account from the Order Ticket or Account panel header.
+Symbol-specific entry requires a focused symbol. Pinned panels need a Link
+Group before they can submit. Returning to stocks restores the saved stock
+symbol and account. Selecting a live account from paper
 or returning from paper to a saved live perpetual account requires confirmation.
 Existing orders stay with their original venue and are called out until they
 finish. Account panels publish panel-scoped demand so the engine polls only displayed

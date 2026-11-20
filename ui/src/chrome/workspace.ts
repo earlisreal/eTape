@@ -1,4 +1,4 @@
-import type { LinkGroup, SavedLinkVenues } from "./linkGroups";
+import type { LinkGroup, SavedLinkMarkets, SavedLinkVenues } from "./linkGroups";
 
 export interface PanelConfig {
   id: string;
@@ -31,6 +31,7 @@ export interface Workspace {
   // itself is rebuilt in-memory (empty) on every page load. Optional: absent in
   // any workspace doc saved before this field existed.
   groups?: Partial<Record<Exclude<LinkGroup, null>, string>>;
+  linkMarkets?: SavedLinkMarkets;
   // Selections by market, or a single legacy venue ID in older layouts.
   linkVenues?: SavedLinkVenues;
   scannerSync?: ScannerSyncConfig;

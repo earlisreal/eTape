@@ -27,7 +27,7 @@ test("stock and crypto Following windows run independently", async ({ context, p
   ]);
   await expect(crypto.getByRole("table", { name: "MEXC crypto Scanner results" })).toContainText("BTC/USDT");
   await crypto.getByRole("button", { name: "Enable Scanner Sync" }).click();
-  await expect(crypto.getByText("Following 1/4")).toBeVisible();
+  await expect(crypto.getByTitle("Following 1/4")).toBeVisible();
   await crypto.getByRole("button", { name: "Disable Scanner Sync" }).click();
   await expect(crypto.getByRole("button", { name: "Enable Scanner Sync" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Disable Scanner Sync" })).toBeVisible();

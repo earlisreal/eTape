@@ -29,10 +29,13 @@ export function structuralWorkspace(workspace: Workspace): Workspace {
     delete settings.symbol;
     return { ...panel, settings };
   });
+  const linkMarkets = structuredClone(workspace.linkMarkets);
+  for (const memory of Object.values(linkMarkets ?? {})) delete memory.symbols;
   return {
     ...workspace,
     panels,
     ...(workspace.groups === undefined ? {} : { groups: {} }),
+    ...(linkMarkets === undefined ? {} : { linkMarkets }),
     ...(workspace.scannerSync === undefined ? {} : { scannerSync: { enabled: workspace.scannerSync.enabled } }),
   };
 }

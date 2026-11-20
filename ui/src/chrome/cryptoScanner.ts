@@ -12,6 +12,7 @@ export const cryptoExchangeLabel: Record<CryptoExchange, string> = {
 
 export const cryptoExchangeKey = "crypto.exchange.v1";
 export const preferredCryptoAccountKey = "crypto.account.v1";
+export const followAccountExchange = "follow-account";
 
 export function cryptoExchange(value: unknown): CryptoExchange | undefined {
   return cryptoExchanges.find(exchange => exchange === value);
@@ -75,10 +76,20 @@ export function readCryptoScanner(settings: Record<string, unknown>) {
     (saved.dir === "asc" || saved.dir === "desc") ? { col: saved.col, dir: saved.dir } :
     mode === "Most Active" ? { col: "turnover", dir: "desc" } :
       { col: "changePct", dir: mode === "5m Losers" ? "asc" : "desc" };
+  const exchange: CryptoExchange | typeof followAccountExchange | undefined =
+    settings.cryptoExchange === followAccountExchange ? followAccountExchange : cryptoExchange(settings.cryptoExchange);
   return {
-    mode, sort, exchange: cryptoExchange(settings.cryptoExchange),
+    mode, sort, exchange,
     minMove: numeric(settings.minMove), minTurnover: numeric(settings.minTurnover), maxSpread: numeric(settings.maxSpread),
   };
+}
+
+export function resolveScannerExchange(
+  selection: ReturnType<typeof readCryptoScanner>["exchange"],
+  groupMarket: string | undefined,
+  appDefault: CryptoExchange,
+): CryptoExchange | undefined {
+  return selection === followAccountExchange ? cryptoExchange(groupMarket) : selection ?? appDefault;
 }
 
 export function rankCryptoScanner(rows: readonly CryptoScannerRow[], settings: ReturnType<typeof readCryptoScanner>): CryptoScannerRow[] {

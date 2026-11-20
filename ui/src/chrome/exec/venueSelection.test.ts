@@ -74,8 +74,9 @@ describe("Link Group venue resolution", () => {
     const lg = new LinkGroups(new BroadcastChannelBus(), () => {}, () => st);
     lg.hydrateVenues({ green: { stocks: "alpaca-paper", MEXC: "mexc-live" } });
 
-    lg.focus("green", "PERP.BINGX.BTC_USDT");
-    lg.focus("green", "PERP.MEXC.BTC_USDT");
+    lg.focusMarket("green", "BINGX");
+    lg.focusMarket("green", "MEXC");
+    expect(lg.symbolFor("green")).toBe("");
     expect(lg.venueFor("green")).toBeUndefined();
     expect(lg.awaitingLiveConfirmation("green", st)).toBe(true);
     expect(lg.needsLiveConfirmation("green", "mexc-live")).toBe(true);

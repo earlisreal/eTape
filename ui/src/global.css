@@ -208,6 +208,16 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 .chip-neutral { color: var(--text-muted); border-color: var(--border-strong); background: transparent; }
 .venue-environment-badge { flex: 0 0 auto; white-space: nowrap; font-family: "IBM Plex Sans", system-ui, sans-serif; }
 .venue-selector { min-width: 0; }
+.account-market {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+  padding: 4px 8px; flex-shrink: 0; border-bottom: 1px solid var(--border);
+}
+.account-market-switch { display: inline-flex; }
+.account-market-switch button { cursor: pointer; }
+.account-market-switch button:first-child { border-radius: 4px 0 0 4px; }
+.account-market-switch button:last-child { border-radius: 0 4px 4px 0; margin-left: -1px; }
+.account-market-switch button[aria-pressed="true"] { color: var(--accent); background: var(--surface); font-weight: 600; }
+.account-market select { max-width: 100%; }
 /* Tinted header for a LIVE venue's card (same wash as .chip-live's background,
    applied to a wider area) — venue-card header row, VenuesSection. */
 .venue-card-header-live { background: rgba(168,30,48,.06); }

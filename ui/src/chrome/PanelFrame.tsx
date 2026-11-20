@@ -237,7 +237,7 @@ export function PanelFrame(
   const props: PanelProps = { config, stores, scheduler, width: size.width, height: size.height,
     linkGroups, commands, onConfigChange, active, onGroupChange, group,
     ...(config.panelId === "scanner" ? { scannerId: `${workspaceId ?? "legacy"}/${config.id}` } : {}),
-    ...(monitoring === undefined ? {} : { monitoring }), ...(scannerSync ? { scannerSync } : {}), ...(rawSymbol ? { symbol: rawSymbol } : {}) };
+    ...(monitoring === undefined ? {} : { monitoring }), ...(scannerSync ? { scannerSync } : {}), ...(rawSymbol === undefined ? {} : { symbol: rawSymbol }) };
   useEffect(() => { symbolRef.current = rawSymbol; }, [rawSymbol]);
 
   // On-demand subscription. When this panel declares a demand profile, ask the

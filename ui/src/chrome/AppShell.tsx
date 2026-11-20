@@ -266,7 +266,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       // starts as soon as `ws` goes non-null below (a grouped panel would
       // otherwise mount without its saved focused symbol because LinkGroups
       // itself is rebuilt empty on every page load).
-      linkGroups.hydrate(w.groups ?? {});
+      linkGroups.hydrate(w.groups ?? {}, w.linkMarkets);
       linkGroups.hydrateVenues(w.linkVenues ?? {});
       if (workspaceName === MONITORING_WORKSPACE_ID) {
         monitoringWorkspaceRef.current = w;
@@ -288,7 +288,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       monitoringWorkspaceRef.current = w;
       observeScannerSync(w.scannerSync);
       if (workspaceName === MONITORING_WORKSPACE_ID) {
-        linkGroups.hydrate(w.groups ?? {});
+        linkGroups.hydrate(w.groups ?? {}, w.linkMarkets);
         linkGroups.hydrateVenues(w.linkVenues ?? {});
         wsRef.current = w;
         setWs(w);
@@ -539,7 +539,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     return linkGroups.subscribe(() => {
       const current = wsRef.current;
       if (current) {
-        const next = { ...current, groups: linkGroups.snapshot(), linkVenues: linkGroups.snapshotVenues() };
+        const next = { ...current, groups: linkGroups.snapshot(), linkMarkets: linkGroups.snapshotMarkets(), linkVenues: linkGroups.snapshotVenues() };
         wsRef.current = next;
         setWs(next);
         workspaceStore.save(next);
@@ -944,7 +944,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     if (currentTarget?.ownerWindow === windowId && !next.panels.some((p) => p.id === currentTarget.panel)) {
       hotkeyCoordinator.clearOwned(currentTarget.panel);
     }
-    linkGroups.hydrate(next.groups ?? {});
+    linkGroups.hydrate(next.groups ?? {}, next.linkMarkets);
     linkGroups.hydrateVenues(next.linkVenues ?? {});
     if (workspaceName === MONITORING_WORKSPACE_ID) {
       monitoringWorkspaceRef.current = next;

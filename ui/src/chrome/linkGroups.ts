@@ -3,13 +3,24 @@ import { cryptoBrokerExchange, cryptoExchange, type CryptoExchange } from "./cry
 import { CrosshairSync } from "./crosshairSync";
 
 export type LinkGroup = "red" | "green" | "blue" | "yellow" | null; // null = pinned
-type VenueMarket = "stocks" | CryptoExchange;
+type Group = Exclude<LinkGroup, null>;
+export type VenueMarket = "stocks" | CryptoExchange;
+type MarketMemory = {
+  emptyMarket?: VenueMarket;
+  lastCrypto?: CryptoExchange;
+  symbols?: Partial<Record<VenueMarket, string>>;
+};
+export type SavedLinkMarkets = Partial<Record<Group, MarketMemory>>;
 type VenueSelections = Partial<Record<VenueMarket, VenueID>> & { legacy?: VenueID; switchedFrom?: VenueID };
 export type SavedLinkVenues = Partial<Record<Exclude<LinkGroup, null>, VenueID | VenueSelections>>;
-export interface LinkMsg { group: LinkGroup; symbol?: string; venue?: VenueID; venueMarket?: VenueMarket }
+export interface LinkMsg { group: LinkGroup; symbol?: string; market?: VenueMarket; venue?: VenueID; venueMarket?: VenueMarket }
 
 export function venueMarket(symbol: string | undefined): VenueMarket | undefined {
   return symbol?.startsWith("PERP.") ? cryptoExchange(symbol.split(".")[1]) : "stocks";
+}
+
+export function savedLinkMarket(symbol: string | undefined, emptyMarket: unknown): VenueMarket | undefined {
+  return symbol ? venueMarket(symbol) : cryptoExchange(emptyMarket) ?? "stocks";
 }
 
 export function venueSupportsMarket(venue: VenueStatus, market: VenueMarket | undefined): boolean {
@@ -46,6 +57,7 @@ export class BroadcastChannelBus implements LinkBus {
 export class LinkGroups {
   readonly crosshairSync = new CrosshairSync();
   private readonly focused = new Map<Exclude<LinkGroup, null>, string>();
+  private readonly markets = new Map<Group, MarketMemory>();
   private readonly focusedVenues = new Map<Exclude<LinkGroup, null>, VenueID | VenueSelections>();
   private readonly previousVenues = new Map<Exclude<LinkGroup, null>, VenueID>();
   private readonly focusTimings = new Map<Exclude<LinkGroup, null>, FocusTiming>();
@@ -59,15 +71,29 @@ export class LinkGroups {
   ) {
     this.bus.onMessage((msg) => {
       if (!msg.group) return;
-      if (msg.symbol !== undefined) this.setLocal(msg.group, msg.symbol);
-      if (msg.venue !== undefined) this.setLocalVenue(msg.group, msg.venue, msg.venueMarket ?? venueMarket(this.symbolFor(msg.group)));
+      if (msg.symbol !== undefined) {
+        this.focusTimings.delete(msg.group);
+        this.setLocal(msg.group, msg.symbol, msg.market);
+      }
+      if (msg.venue !== undefined) this.setLocalVenue(msg.group, msg.venue, msg.venueMarket ?? this.marketFor(msg.group));
     });
   }
 
   focus(group: Exclude<LinkGroup, null>, symbol: string): void {
+    this.focusTimings.delete(group);
     this.setLocal(group, symbol);
     this.bus.post({ group, symbol });
     this.onEcho(group, symbol);
+  }
+
+  focusMarket(group: Group, market: VenueMarket): void {
+    if (market === this.marketFor(group)) return;
+    const remembered = this.markets.get(group)?.symbols?.[market];
+    const symbol = remembered && venueMarket(remembered) === market ? remembered : "";
+    this.focusTimings.delete(group);
+    this.setLocal(group, symbol, market);
+    this.bus.post({ group, symbol, market });
+    if (symbol) this.onEcho(group, symbol);
   }
 
   /**
@@ -82,8 +108,9 @@ export class LinkGroups {
     this.focusTimings.set(group, timing);
     const ackP = this.onEcho(group, symbol);
     const ack = ackP ? await ackP : { status: "accepted" as const };
+    if (this.focusTimings.get(group) !== timing) return { ok: false, reason: "Symbol selection superseded" };
     if (ack.status !== "accepted") {
-      if (this.focusTimings.get(group)?.sequence === timing.sequence) this.focusTimings.delete(group);
+      this.focusTimings.delete(group);
       return { ok: false, reason: ack.reason ?? "symbol rejected" };
     }
     this.setLocal(group, symbol);
@@ -91,20 +118,46 @@ export class LinkGroups {
     return { ok: true };
   }
 
-  private setLocal(group: Exclude<LinkGroup, null>, symbol: string): void {
-    if (venueMarket(this.symbolFor(group)) !== venueMarket(symbol)) {
+  private setLocal(group: Group, symbol: string, emptyMarket?: VenueMarket): void {
+    const from = this.marketFor(group);
+    const market = savedLinkMarket(symbol, emptyMarket);
+    const oldSymbol = this.symbolFor(group);
+    const memory = { ...this.markets.get(group) };
+    if (from !== market) {
       const status = this.getExecStatus?.();
-      const from = venueMarket(this.symbolFor(group));
       // Remember the prior selection even if the engine snapshot is still loading.
       const previous = status === null && from ? this.savedVenueFor(group, undefined, from) : this.venueFor(group, status);
-      if (previous) this.focusedVenues.set(group, { ...this.selections(group), switchedFrom: previous });
+      if (previous) {
+        this.focusedVenues.set(group, { ...this.selections(group), switchedFrom: previous });
+        this.previousVenues.set(group, previous);
+      }
+      if (from && oldSymbol) memory.symbols = { ...memory.symbols, [from]: oldSymbol };
     }
-    this.focused.set(group, symbol);
+    const latestCrypto = cryptoExchange(market) ?? cryptoExchange(from);
+    if (latestCrypto) memory.lastCrypto = latestCrypto;
+    if (symbol) {
+      this.focused.set(group, symbol);
+      delete memory.emptyMarket;
+    } else {
+      this.focused.delete(group);
+      memory.emptyMarket = market ?? "stocks";
+    }
+    this.markets.set(group, memory);
     this.subs.forEach((cb) => cb());
   }
 
   symbolFor(group: LinkGroup): string | undefined {
-    return group ? this.focused.get(group) : undefined;
+    // An explicitly cleared focus suppresses the panel's legacy symbol fallback.
+    return group ? this.focused.get(group) ?? (this.markets.get(group)?.emptyMarket ? "" : undefined) : undefined;
+  }
+
+  marketFor(group: LinkGroup): VenueMarket | undefined {
+    return group ? savedLinkMarket(this.focused.get(group), this.markets.get(group)?.emptyMarket) : undefined;
+  }
+
+  lastCryptoFor(group: Group): CryptoExchange | undefined {
+    const market = this.marketFor(group);
+    return market && market !== "stocks" ? market : cryptoExchange(this.markets.get(group)?.lastCrypto);
   }
 
   // Temporary cold-chart diagnostic. ChartPanel reads this after group focus
@@ -119,7 +172,7 @@ export class LinkGroups {
   // engine (the engine has no per-group venue concept). It publishes cross-window
   // and notifies subscribers so grouped panels re-render.
   focusVenue(group: Exclude<LinkGroup, null>, venue: VenueID): void {
-    const market = venueMarket(this.symbolFor(group));
+    const market = this.marketFor(group);
     if (!market) return;
     this.setLocalVenue(group, venue, market);
     this.bus.post({ group, venue, venueMarket: market });
@@ -138,7 +191,7 @@ export class LinkGroups {
   }
 
   venueFor(group: LinkGroup, status = this.getExecStatus?.()): VenueID | undefined {
-    const market = venueMarket(this.symbolFor(group));
+    const market = this.marketFor(group);
     if (!group || !market) return undefined;
     const candidate = this.savedVenueFor(group, status, market);
     if (market !== "stocks" && candidate && requiresLiveConfirmation(status, this.selections(group).switchedFrom, candidate)) {
@@ -148,7 +201,7 @@ export class LinkGroups {
   }
 
   awaitingLiveConfirmation(group: LinkGroup, status: ExecStatus | null): boolean {
-    const market = venueMarket(this.symbolFor(group));
+    const market = this.marketFor(group);
     if (!group || !market || market === "stocks") return false;
     const saved = this.savedVenueFor(group, status, market);
     return !!saved && requiresLiveConfirmation(status, this.selections(group).switchedFrom, saved);
@@ -162,7 +215,7 @@ export class LinkGroups {
 
   matchesOrderContext(group: LinkGroup, symbol: string, venue: VenueID, status = this.getExecStatus?.()): boolean {
     const focused = this.symbolFor(group);
-    return !!venue && venue === this.venueFor(group, status) && (!focused || symbol === focused);
+    return !!venue && venue === this.venueFor(group, status) && (focused === undefined || symbol === focused);
   }
 
   previousVenueFor(group: LinkGroup): VenueID | undefined {
@@ -175,7 +228,7 @@ export class LinkGroups {
     const previous = this.savedVenueFor(group, this.getExecStatus?.(), market);
     if (previous && previous !== venue) this.previousVenues.set(group, previous);
     const next = { ...selections, [market]: venue };
-    if (market === venueMarket(this.symbolFor(group))) delete next.switchedFrom;
+    if (market === this.marketFor(group)) delete next.switchedFrom;
     this.focusedVenues.set(group, next);
     this.subs.forEach((cb) => cb());
   }
@@ -191,10 +244,20 @@ export class LinkGroups {
    * trigger the persistence subscriber that would otherwise immediately
    * re-save (and race) the very doc it was just read from.
    */
-  hydrate(map: Partial<Record<Exclude<LinkGroup, null>, string>>): void {
+  hydrate(map: Partial<Record<Group, string>>, markets: SavedLinkMarkets = {}): void {
+    this.focused.clear();
+    this.markets.clear();
+    this.focusTimings.clear();
+    for (const [group, memory] of Object.entries(markets) as [Group, MarketMemory][]) {
+      if (memory) this.markets.set(group, memory);
+    }
     for (const [group, symbol] of Object.entries(map) as [Exclude<LinkGroup, null>, string][]) {
       if (symbol) this.focused.set(group, symbol);
     }
+  }
+
+  snapshotMarkets(): SavedLinkMarkets {
+    return Object.fromEntries(this.markets);
   }
 
   /** Plain-object snapshot of the focused map, for persisting into the workspace doc. */

@@ -1,8 +1,9 @@
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { soundEngine } from "../../sound/SoundEngine";
 import { Button } from "../controls/Button";
 import { useDismissibleLayer } from "../controls/useDismissibleLayer";
-import { CryptoScannerContext, cryptoColumns, cryptoExchanges, cryptoExchangeLabel, cryptoModes, rankCryptoScanner, readCryptoScanner } from "../cryptoScanner";
+import { CryptoScannerContext, cryptoColumns, cryptoExchange, cryptoExchanges, cryptoExchangeLabel, cryptoModes, followAccountExchange, rankCryptoScanner, readCryptoScanner, resolveScannerExchange } from "../cryptoScanner";
+import { venueMarket } from "../linkGroups";
 import { sortIndicator, toggleSort } from "../sortColumns";
 import { PanelHeaderSlotContext } from "./headerSlot";
 import type { PanelProps } from "./registry";
@@ -23,7 +24,7 @@ function formatMove(value: number | null): string {
   return `${sign}${Math.abs(value).toFixed(2)}%`;
 }
 
-export function CryptoScannerPanel({ config, scannerSync, group, linkGroups, onConfigChange }: PanelProps): JSX.Element {
+export function CryptoScannerPanel({ config, scannerSync, group: groupProp, linkGroups, onConfigChange }: PanelProps): JSX.Element {
   const headerSlot = useContext(PanelHeaderSlotContext);
   const [settings, setSettings] = useState(config.settings);
   const [draft, setDraft] = useState<FilterDraft | null>(null);
@@ -34,9 +35,15 @@ export function CryptoScannerPanel({ config, scannerSync, group, linkGroups, onC
 
   const { defaultExchange, byExchange } = useContext(CryptoScannerContext);
   const filters = useMemo(() => readCryptoScanner(settings), [settings]);
-  const exchange = filters.exchange ?? defaultExchange;
-  const { snapshot, error } = byExchange[exchange];
-  const exchangeLabel = cryptoExchangeLabel[exchange];
+  const group = groupProp === undefined ? config.group : groupProp;
+  const groupMarket = useSyncExternalStore((cb) => linkGroups.subscribe(cb), () => linkGroups.marketFor(group));
+  const followsAccount = filters.exchange === followAccountExchange;
+  const exchange = resolveScannerExchange(filters.exchange, groupMarket, defaultExchange);
+  const data = exchange ? byExchange[exchange] : undefined;
+  const snapshot = data?.snapshot;
+  const exchangeLabel = exchange ? cryptoExchangeLabel[exchange] : undefined;
+  const groupLabel = group ? group.charAt(0).toUpperCase() + group.slice(1) : "";
+  const context = [exchangeLabel, followsAccount && (group ? `Follows ${groupLabel}` : "Follow Account")].filter(Boolean).join(" · ");
   const muted = settings.scannerSoundMuted === true;
   const rows = useMemo(() => rankCryptoScanner(snapshot?.rows ?? [], filters), [snapshot, filters]);
   const warming = snapshot?.warming && filters.mode !== "Most Active";
@@ -72,18 +79,23 @@ export function CryptoScannerPanel({ config, scannerSync, group, linkGroups, onC
     setDraft(null);
     filterTriggerRef.current?.focus();
   };
-  const openMarket = (symbol: string) => linkGroups.focus(group ?? "green", symbol);
+  const openMarket = (symbol: string) => {
+    if (followsAccount && (!group || linkGroups.marketFor(group) !== venueMarket(symbol))) return;
+    linkGroups.focus(group ?? "green", symbol);
+  };
   const summary = [
     filters.mode,
     filters.minMove > 0 && `move ≥ ${filters.minMove}%`,
     filters.minTurnover > 0 && `turnover ≥ ${turnover.format(filters.minTurnover)} USDT`,
     filters.maxSpread > 0 && `spread ≤ ${filters.maxSpread} bps`,
   ].filter(Boolean).join(" · ");
-  const status = error || (!snapshot ? "Loading markets…" : warming ? "Collecting a 5-minute baseline…" : null);
+  const status = !exchange
+    ? group ? `Paused while ${groupLabel} is on Stocks` : "Choose a Link Group to follow Account"
+    : data?.error || (!snapshot ? "Loading markets…" : warming ? "Collecting a 5-minute baseline…" : null);
 
   return (
     <section className="scanner-panel">
-      <ScannerHeader title="Crypto Scanner" context={exchangeLabel} muted={muted} onMute={() => update({ scannerSoundMuted: !muted })}
+      <ScannerHeader title="Crypto Scanner" context={context} muted={muted} onMute={() => update({ scannerSoundMuted: !muted })}
         filtersOpen={draft !== null} onFilters={() => setDraft(draft ? null : filters)} filterTriggerRef={filterTriggerRef} />
       {draft && (
         <div ref={filtersRef} className="popover crypto-scanner-filters"
@@ -91,8 +103,12 @@ export function CryptoScannerPanel({ config, scannerSync, group, linkGroups, onC
           <form onSubmit={event => { event.preventDefault(); applyFilters(draft); }}>
             <label>Exchange
               <select aria-label="Crypto Scanner exchange" value={draft.exchange ?? ""}
-                onChange={event => setDraft({ ...draft, exchange: cryptoExchanges.find(value => value === event.target.value) })}>
+                onChange={event => {
+                  const selected = event.target.value;
+                  setDraft({ ...draft, exchange: selected === followAccountExchange ? followAccountExchange : cryptoExchange(selected) });
+                }}>
                 <option value="">App default ({cryptoExchangeLabel[defaultExchange]})</option>
+                <option value={followAccountExchange} disabled={!group}>Follow Account</option>
                 {cryptoExchanges.map(value => <option key={value} value={value}>{cryptoExchangeLabel[value]}</option>)}
               </select>
             </label>
@@ -118,7 +134,7 @@ export function CryptoScannerPanel({ config, scannerSync, group, linkGroups, onC
       {scannerSync && <ScannerSyncControl sync={scannerSync} sourceLabel="Crypto Monitoring source" />}
       <div className="mono scanner-summary scanner-truncate" data-testid="scanner-filter-summary" title={summary}>{summary}</div>
       {status && <div className="scanner-status" role="status">{status}</div>}
-      <div className="scanner-results">
+      {exchange && <div className="scanner-results">
         <table aria-label={`${exchangeLabel} crypto Scanner results`} className="scanner-table">
           <thead><tr>{cryptoColumns.map(({ key, label, title }) => {
             const sorted = filters.sort.col === key;
@@ -151,7 +167,7 @@ export function CryptoScannerPanel({ config, scannerSync, group, linkGroups, onC
             )}
           </tbody>
         </table>
-      </div>
+      </div>}
     </section>
   );
 }

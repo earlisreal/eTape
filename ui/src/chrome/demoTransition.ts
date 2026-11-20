@@ -92,6 +92,10 @@ export function planDemoRevert(ctx: DemoContext, current: Workspace): Workspace 
     }
     next.groups = groups;
   }
+  for (const memory of Object.values(next.linkMarkets ?? {})) {
+    const stock = memory.symbols?.stocks;
+    if (stock && universe.has(stock)) memory.symbols = { ...memory.symbols, stocks: DEFAULT_SEED_SYMBOL };
+  }
 
   return next;
 }

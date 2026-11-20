@@ -32,6 +32,48 @@ describe("LinkGroups", () => {
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
+  it("remembers exact markets across symbol-free switches, windows and reloads", () => {
+    const hub = new FakeBusHub();
+    const echo = vi.fn();
+    const a = new LinkGroups(new FakeBus(hub), echo);
+    const b = new LinkGroups(new FakeBus(hub), () => {});
+    a.hydrate({ green: "US.AAPL", red: "US.NVDA" });
+    b.hydrate(a.snapshot());
+    a.focusVenue("green", "stock-paper");
+
+    a.focusMarket("green", "BINANCE-DEMO");
+    expect(b.marketFor("green")).toBe("BINANCE-DEMO");
+    expect(b.symbolFor("green")).toBe("");
+    expect(b.symbolFor("red")).toBe("US.NVDA");
+    expect(echo).not.toHaveBeenCalled();
+    a.focusVenue("green", "demo");
+    expect(a.matchesOrderContext("green", "PERP.BINANCE-DEMO.BTCUSDT", "demo")).toBe(false);
+    b.focus("green", "PERP.BINANCE-DEMO.BTCUSDT");
+    a.focusMarket("green", "stocks");
+    expect(b.symbolFor("green")).toBe("US.AAPL");
+    expect(b.lastCryptoFor("green")).toBe("BINANCE-DEMO");
+    expect(a.venueFor("green")).toBe("stock-paper");
+
+    const reopened = new LinkGroups(new FakeBus(new FakeBusHub()), () => {});
+    reopened.hydrate(a.snapshot(), a.snapshotMarkets());
+    reopened.hydrateVenues(a.snapshotVenues());
+    reopened.focusMarket("green", "BINANCE-DEMO");
+    expect(reopened.symbolFor("green")).toBe("PERP.BINANCE-DEMO.BTCUSDT");
+    expect(reopened.venueFor("green")).toBe("demo");
+    reopened.focusMarket("green", "BINANCE");
+    expect(reopened.symbolFor("green")).toBe("");
+    expect(reopened.venueFor("green")).toBeUndefined();
+  });
+
+  it("remembers the exchange of a legacy workspace first opened on a perpetual", () => {
+    const lg = new LinkGroups(new FakeBus(new FakeBusHub()), () => {});
+    lg.hydrate({ green: "PERP.BINGX.ETH-USDT" });
+    lg.focusMarket("green", "stocks");
+    expect(lg.lastCryptoFor("green")).toBe("BINGX");
+    lg.focusMarket("green", "BINGX");
+    expect(lg.symbolFor("green")).toBe("PERP.BINGX.ETH-USDT");
+  });
+
   describe("focusChecked", () => {
     it("moves the group and broadcasts on an accepting ack", async () => {
       const hub = new FakeBusHub();
@@ -56,6 +98,20 @@ describe("LinkGroups", () => {
       expect(r).toEqual({ ok: false, reason: "unknown symbol" });
       expect(lg.symbolFor("blue")).toBe("US.AAPL"); // unchanged
       expect(cb).not.toHaveBeenCalled(); // no spurious broadcast on reject
+    });
+
+    it("keeps an Account market switch made while a symbol check was pending", async () => {
+      let accept!: () => void;
+      const ack = new Promise<{ kind: "ack"; corrId: string; status: "accepted" }>(resolve => {
+        accept = () => resolve({ kind: "ack", corrId: "c", status: "accepted" });
+      });
+      const lg = new LinkGroups(new FakeBus(new FakeBusHub()), () => ack);
+      const pending = lg.focusChecked("green", "US.AAPL");
+      lg.focusMarket("green", "BINGX");
+      accept();
+      expect(await pending).toMatchObject({ ok: false });
+      expect(lg.marketFor("green")).toBe("BINGX");
+      expect(lg.symbolFor("green")).toBe("");
     });
 
     it("falls back to a generic reason when the ack omits one", async () => {
