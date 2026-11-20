@@ -234,6 +234,13 @@ export interface Order {
   riskEntry?: RiskEntry;
   riskEntryId?: string;
   pendingProtectionPrice?: number /* float64 */;
+  perpetualRisk?: PerpetualRiskTerms;
+}
+export interface PerpetualRiskTerms {
+  budget: number /* float64 */;
+  leverage: number /* int */;
+  autoLeverage?: boolean;
+  entryCushion: LimitCushion;
 }
 export interface LimitCushion {
   value: number /* float64 */;
@@ -300,6 +307,7 @@ export interface SubmitPerpetualRiskEntryArgs {
   collateralPct: boolean;
 }
 export interface HeldOrder {
+  perpetualTriggered?: boolean;
   trail?: TrailState;
   phase: string;
   deadlineMs: number /* int64 */;
@@ -767,6 +775,9 @@ export interface AcknowledgeHeldLimitIfTouchedArgs {
   venue: string;
 }
 export interface ReplaceOrderArgs {
+  expectedStopPrice?: number /* float64 */;
+  expectedProtectionPrice?: number /* float64 */;
+  pendingProtection?: boolean;
   expectedRiskEntryPhase?: string;
   expectedHeldPhase?: string;
   venue: string;

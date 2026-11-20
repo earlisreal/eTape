@@ -278,6 +278,12 @@ with a buffer. If margin or risk tiers limit the entry, the preview shows the
 smaller size. eTape waits for the last trade to trigger a price-capped IOC. The
 simulator holds a fair-price stop for the filled contracts. Paper positions and
 stops are stored alongside the local eTape database for restart recovery.
+On MEXC paper and live, drag either pending chart line or use the price pill's
+arrow keys. The entry and stop must stay in the original long or short
+direction. eTape recalculates contract quantity using the original risk budget
+and admitted leverage. You can also adjust the fixed stop after a fill.
+MEXC Chart Risk Entry starts from flat and uses fixed fair-price protection.
+Stock Chart Risk Entry also supports trailing protection and shared-stop adds.
 Simulated funding uses the last observed rate and the published settlement time.
 **Futures API Check** in Settings verifies USDT balance access and position mode
 for MEXC, Binance and BingX. MEXC also reports counts for open positions, working
@@ -308,7 +314,8 @@ must match the effective isolated leverage on MEXC. The chart preview shows
 limit entry. A breakout long can have its stop between the current fair price
 and the entry trigger. At activation, the entry pauses if fair price is already
 at or through the stop. The chart and Account show the planned stop as pending
-while the entry is working. After the entry settles, eTape sizes the stop from
+while the entry is working. Pending prices lock when the IOC is sent. After
+the entry settles, eTape sizes the stop from
 confirmed fills and binds it to the MEXC position. A fair-price crossing sends
 a reduce-only market close. eTape needs to stay running and receive fresh market and account
 data. Use **Account → Open Orders → Resume** after restarting or after a feed

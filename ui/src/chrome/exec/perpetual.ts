@@ -17,7 +17,7 @@ export function perpetualTick(price: number, contract: PerpetualContract, roundi
 }
 
 export function perpetualRiskSize(
-  template: RiskEntryTemplate, contract: PerpetualContract | undefined, trigger: number, stop: number, collateral: number,
+  template: Pick<RiskEntryTemplate, "perpetual" | "mode" | "value" | "buyCushion">, contract: PerpetualContract | undefined, trigger: number, stop: number, collateral: number,
   maxQty = Infinity,
 ) {
   const p = template.perpetual;
@@ -25,7 +25,8 @@ export function perpetualRiskSize(
       (p.side === "BUY" ? stop >= trigger : stop <= trigger)) return null;
   const long = p.side === "BUY";
   const cushion = template.buyCushion.unit === "%" ? trigger * template.buyCushion.value / 100 : template.buyCushion.value;
-  const limit = perpetualTick(trigger + (long ? cushion : -cushion), contract, long ? Math.ceil : Math.floor);
+  const limit = perpetualTick(trigger + (long ? cushion : -cushion), contract, long ?
+    value => Math.ceil(value - 1e-9) : value => Math.floor(value + 1e-9));
   if (limit <= 0) return null;
   const unit = Number(contract.multiplier), fee = Number(contract.takerFee);
   const fees = (limit + stop) * unit * fee;

@@ -1336,7 +1336,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             onToggleHidden={toggleIndicatorHidden} onEditIndicator={setSettingsInstanceId} onRemoveIndicator={removeIndicator}
             onClosePane={closePane} onToggleCollapsePane={togglePaneCollapsed}
             legendRef={legendRef} />
-          <ChartOrderMarkers chrome={chrome} orders={execSnapshot.orders.values()} execStore={stores.exec} venue={venue} symbol={chartSymbol}
+          <ChartOrderMarkers chrome={chrome} orders={execSnapshot.orders.values()} execStore={stores.exec} quoteStore={stores.quote} venue={venue} symbol={chartSymbol}
             availableCash={execSnapshot.accounts.get(venue)?.availableCash ?? 0} buyingPower={execSnapshot.accounts.get(venue)?.buyingPower ?? 0}
             pinned={group === null} sendCommand={commands.sendCommand} hostRef={hostRef} facadeRef={facadeRef}
             rightAxisWidth={rightAxisWidth} layoutRef={orderMarkerLayoutRef} chooserOpenRef={orderChooserOpenRef} config={orderConfig.config} activeTool={alertArmed?"measure":activeTool} />

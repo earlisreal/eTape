@@ -19,8 +19,8 @@ import { browserRaf } from "../../src/render/surface";
 import "../../src/global.css";
 
 // This harness never creates a socket, broker adapter, or engine connection.
-const mexcLive = location.search === "?mexc-live";
-const autoLeverage = mexcLive || location.search === "?auto-leverage";
+const mexcLive = location.search.startsWith("?mexc-live");
+const autoLeverage = mexcLive || location.search.startsWith("?auto-leverage");
 const executionVenue = mexcLive ? "mexc-live" : "sim";
 const chartSymbol = autoLeverage ? "PERP.MEXC.BTC_USDT" : "US.AAPL";
 const stores = makeStores();
@@ -64,10 +64,11 @@ const sendCommand = async (name, args) => {
   if (args.venue !== executionVenue) throw new Error("Unexpected fixture order venue");
   if (name === "SubmitRiskEntry" || name === "SubmitPerpetualRiskEntry") {
     window.chartPanelProbe.lastRiskSubmitted = args;
-    if (mexcLive && name === "SubmitPerpetualRiskEntry") {
+    if (name === "SubmitPerpetualRiskEntry") {
       stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
         id: "sim-risk", venue: executionVenue, symbol: args.symbol, side: args.side, type: "STOP_LIMIT", tif: "IOC", session: "AUTO",
         qty: args.maxQty, limitPrice: args.trigger, stopPrice: args.trigger, pendingProtectionPrice: args.stop,
+        perpetualRisk: { budget: args.budget, leverage: args.leverage, autoLeverage: args.autoLeverage, entryCushion: args.cushion },
         status: "SUBMITTED", executedQty: 0, leavesQty: args.maxQty, avgFillPrice: 0, rejectReason: "", replacesId: "",
         createdMs: Date.now(), updatedMs: Date.now(), held: { phase: "WAITING", deadlineMs: Date.now() + 3600000 },
       } });
@@ -84,10 +85,14 @@ const sendCommand = async (name, args) => {
     return { kind: "ack", corrId: id, status: "accepted", orderId: id };
   }
   if (name === "ReplaceOrder") {
-    window.repro.lastReplace = args;
+    if (window.repro) window.repro.lastReplace = args;
+    if (window.chartPanelProbe) window.chartPanelProbe.lastReplace = args;
     const order = stores.exec.getSnapshot().orders.get(args.orderId);
     stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
-      ...order, limitPrice: args.limitPrice, stopPrice: args.stopPrice, updatedMs: order.updatedMs + 1,
+      ...order, qty: args.qty || order.qty, leavesQty: args.qty || order.leavesQty,
+      ...(args.pendingProtection ? { pendingProtectionPrice: args.stopPrice } :
+        { stopPrice: args.stopPrice, limitPrice: order.perpetualRisk ? args.stopPrice : args.limitPrice }),
+      updatedMs: order.updatedMs + 1,
     } });
     return { kind: "ack", corrId: args.orderId, status: "accepted" };
   }
@@ -233,8 +238,8 @@ function ConfigReadyProbe() {
         } });
         stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
           ...entry, id: "sim-protection", side: entry.side === "BUY" ? "SELL" : "COVER", type: "STOP",
-          qty: filled, leavesQty: filled, stopPrice: entry.pendingProtectionPrice, limitPrice: 0, pendingProtectionPrice: undefined,
-          held: { phase: "WAITING", deadlineMs: 0 },
+          status: "ACCEPTED", qty: filled, leavesQty: filled, stopPrice: entry.pendingProtectionPrice, limitPrice: 0,
+          pendingProtectionPrice: undefined, perpetualRisk: undefined, held: mexcLive ? { phase: "WAITING", deadlineMs: 0 } : undefined,
         } });
       }, protectPosition(stopPrice) {
         const common = { venue: "sim", symbol: "US.AAPL", type: "STOP_LIMIT", tif: "DAY", session: "EXTENDED", rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, avgFillPrice: 0 };

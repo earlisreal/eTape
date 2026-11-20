@@ -61,6 +61,36 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 			if !ack.Accepted || core.order(ack.OrderID).Held.Phase != HeldWaiting {
 				t.Fatalf("live risk entry not held: %+v", ack)
 			}
+			step := 1.0
+			if side == SideShort {
+				step = -1
+			}
+			trigger, stop, crossed = trigger+10*step, stop-10*step, crossed+10*step
+			edit := ReplaceOrder{Venue: venue, OrderID: ack.OrderID, ExpectedHeldPhase: HeldWaiting,
+				ExpectedStopPrice: cmd.Trigger, ExpectedProtectionPrice: cmd.Stop, StopPrice: trigger, Qty: 4}
+			if amended := core.handleReplace(ctx, edit); !amended.Accepted {
+				t.Fatalf("could not move entry trigger: %+v", amended)
+			}
+			if o := core.order(edit.OrderID); o.StopPrice != trigger || o.LimitPrice != trigger+step || o.LeavesQty != 4 {
+				t.Fatalf("entry trigger, IOC limit or quantity did not update: %+v", o)
+			}
+			edit.PendingProtection, edit.StopPrice, edit.Qty = true, stop, 3
+			if stale := core.handleReplace(ctx, edit); stale.Accepted {
+				t.Fatal("edit accepted using old entry trigger")
+			}
+			edit.ExpectedStopPrice = trigger
+			edit.StopPrice = trigger + step
+			if wrongSide := core.handleReplace(ctx, edit); wrongSide.Accepted {
+				t.Fatal("protection accepted on the profit side of the pending entry")
+			}
+			edit.StopPrice = stop
+			if amended := core.handleReplace(ctx, edit); !amended.Accepted {
+				t.Fatalf("could not move pending protection: %+v", amended)
+			}
+			if o := core.order(edit.OrderID); o.Perpetual.ProtectionPrice != stop || o.StopPrice != trigger || o.Qty != 3 {
+				t.Fatalf("pending protection did not preserve entry trigger and resize: %+v", o)
+			}
+			edit.ExpectedProtectionPrice = stop
 			clk.Advance(time.Millisecond)
 			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: 100_000, Seq: 1, TsMs: core.now(), RecvTsMs: core.now()})
 			if o := core.order(ack.OrderID); o.Held.Phase != HeldArmed || o.Held.ChildClientID != "" {
@@ -77,17 +107,26 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 					t.Fatalf("resume risk entry: %+v", resumed)
 				}
 			}
-			broker.fair = trigger
+			broker.fair = 0
 			clk.Advance(time.Millisecond)
 			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: crossed, Seq: 3, TsMs: core.now(), RecvTsMs: core.now()})
+			if o := core.order(ack.OrderID); o.Held.ChildClientID != "" || o.Held.Phase == HeldPaused {
+				t.Fatalf("entry should wait for fair price: %+v", o.Held)
+			}
+			broker.fair = trigger
+			clk.Advance(time.Millisecond)
+			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: crossed, Seq: 4, TsMs: core.now(), RecvTsMs: core.now()})
 			select {
 			case req := <-broker.submits:
 				if req.Venue != venue || req.ClientOrderID != ack.OrderID || req.Type != TypeLimit || req.TIF != TIFIOC ||
-					req.Side != side || req.Qty != 3 || req.Perpetual.ProtectionPrice != 0 || req.Perpetual.Leverage != 5 {
+					req.Side != side || req.Qty != 3 || req.LimitPrice != trigger+step || req.Perpetual.ProtectionPrice != 0 || req.Perpetual.Leverage != 5 {
 					t.Fatalf("wrong live IOC request: %+v", req)
 				}
 			case <-time.After(time.Second):
 				t.Fatal("live risk entry did not activate")
+			}
+			if racing := core.handleReplace(ctx, edit); racing.Accepted {
+				t.Fatal("pending stop edit accepted after IOC dispatch")
 			}
 			report := PerpetualObservation{Venue: venue, OrderID: ack.OrderID, BrokerOrderID: "123", Status: StatusAccepted,
 				Fills: []PerpetualFill{{ID: "1", Qty: 2, Price: trigger, TsMs: core.now()}}, Persisted: make(chan bool, 1)}
@@ -119,15 +158,20 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 				t.Fatalf("failed to protect the confirmed partial fill: %+v", o)
 			}
 			core.handleArm(ctx, false)
+			amendedStop := stop + 2*step
+			if amended := core.handleReplace(ctx, ReplaceOrder{Venue: venue, OrderID: stopID, ExpectedHeldPhase: HeldWaiting,
+				ExpectedStopPrice: stop, StopPrice: amendedStop}); !amended.Accepted {
+				t.Fatalf("could not move active protective stop while disarmed: %+v", amended)
+			}
 			position.Qty /= 2
 			core.handleBrokerEvent(ctx, BrokerSnapshot{V: venue, Positions: []Position{position}})
 			clk.Advance(time.Millisecond)
-			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: stop, Seq: 4, TsMs: core.now(), RecvTsMs: core.now()})
-			if o := core.order(stopID); !o.Working() || o.Qty != 1 || o.Held.ChildClientID != "" {
+			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: amendedStop, Seq: 5, TsMs: core.now(), RecvTsMs: core.now()})
+			if o := core.order(stopID); !o.Working() || o.Qty != 1 || o.StopPrice != amendedStop || o.Held.ChildClientID != "" {
 				t.Fatalf("disarm, reduction or a last trade incorrectly changed the fair-price stop: %+v", o)
 			}
 			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Gap: true})
-			broker.fair = stop
+			broker.fair = amendedStop
 			core.checkPerpetualRiskStops(ctx)
 			if o := core.order(stopID); o.Held.Phase != HeldPaused || o.Held.ChildClientID != "" {
 				t.Fatalf("stop submitted after feed gap without resume: %+v", o)

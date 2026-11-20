@@ -10,7 +10,7 @@ func (o Order) isPerpetualRiskStop() bool {
 }
 
 func (o Order) perpetualPositionID() string {
-	if o.Held != nil && o.Perpetual.isRiskEntry() {
+	if o.Held != nil && o.Perpetual.IsRiskEntry() {
 		return o.Held.PerpetualPositionID
 	}
 	return o.Perpetual.PositionID
@@ -34,7 +34,7 @@ func (c *Core) syncPerpetualProtection(ctx context.Context, v VenueID) {
 	vs := c.state.Venue(v)
 	for _, entry := range vs.Orders {
 		o := entry.Perpetual
-		if o == nil || !o.LocalProtection || !o.isRiskEntry() || entry.Working() || entry.ExecutedQty <= 0 ||
+		if o == nil || !o.LocalProtection || !o.IsRiskEntry() || entry.Working() || entry.ExecutedQty <= 0 ||
 			vs.Orders[o.ProtectionID].ID != "" || !c.ownsPerpetualPosition(entry, vs.Positions[entry.Symbol]) {
 			continue
 		}

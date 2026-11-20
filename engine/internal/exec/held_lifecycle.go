@@ -323,6 +323,9 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 		p := *o.Perpetual
 		child.Perpetual = &p
 		if err := c.validatePerpetual(&child, o.ID); err != nil {
+			if err == errPerpetualFairPrice {
+				return // Wait for a fresh trade with usable fair-price evidence.
+			}
 			c.changeHeld(o, HeldPaused, err.Error(), false)
 			return
 		}

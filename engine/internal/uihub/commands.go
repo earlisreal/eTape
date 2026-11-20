@@ -399,7 +399,9 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		return ackFromCmd(cd.ex.Do(exec.ReplaceOrder{
 			ExpectedRiskEntryPhase: a.ExpectedRiskEntryPhase,
 			ExpectedHeldPhase:      exec.HeldPhase(a.ExpectedHeldPhase),
-			Venue:                  exec.VenueID(a.Venue), OrderID: a.OrderID,
+			ExpectedStopPrice:      a.ExpectedStopPrice, ExpectedProtectionPrice: a.ExpectedProtectionPrice,
+			PendingProtection: a.PendingProtection,
+			Venue:             exec.VenueID(a.Venue), OrderID: a.OrderID,
 			Qty: a.Qty, LimitPrice: a.LimitPrice, StopPrice: a.StopPrice,
 		})), false
 	case "Flatten":

@@ -544,8 +544,25 @@ func (b *PerpetualSimulator) CancelAll(_ context.Context, symbol string) error {
 	return b.commit(next, events)
 }
 
-func (b *PerpetualSimulator) ReplaceOrder(context.Context, string, exec.ReplaceRequest) error {
-	return errors.New("perpetual paper orders require cancel and resubmit")
+func (b *PerpetualSimulator) ReplaceOrder(_ context.Context, id string, req exec.ReplaceRequest) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	o := b.data.Orders[id]
+	p := b.data.Positions[o.Symbol]
+	rules, ok := b.ContractRules(o.Symbol)
+	if o.ID == "" || !o.Working() || o.Type != exec.TypeStop || p.ProtectionID != id ||
+		!reduces(o.Side, p.Position.Qty) || req.ExpectedStopPrice != o.StopPrice || req.Qty != 0 ||
+		req.LimitPrice != 0 || !ok || !rules.ValidPrice(req.StopPrice) {
+		return errors.New("paper protective stop changed or is unavailable")
+	}
+	next := b.copyLedger()
+	o.StopPrice, o.UpdatedMs = req.StopPrice, b.cfg.Clock.Now().UnixMilli()
+	next.Orders[id] = o
+	if err := b.commit(next, []exec.BrokerEvent{exec.OrderReplaced{V: o.Venue, OID: id, NewStop: o.StopPrice, Ts: o.UpdatedMs}}); err != nil {
+		return err
+	}
+	b.cross(o.Symbol)
+	return nil
 }
 
 func (b *PerpetualSimulator) Flatten(context.Context) error {

@@ -583,7 +583,8 @@ try {
   await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
   assert.equal((await productionPage.evaluate(() => window.chartPanelProbe.lastRiskSubmitted)).sharedEntryId, "risk-original", "An add must bind to the reviewed shared protection");
 
-  for (const scenario of ["auto-leverage", "mexc-live"]) {
+  for (const scenario of ["auto-leverage", "auto-leverage-short", "mexc-live", "mexc-live-short"]) {
+    const isLive = scenario.startsWith("mexc-live"), isShort = scenario.endsWith("-short");
     const perpetualPage = await browser.newPage({ viewport: { width: 1000, height: 800 } });
     await perpetualPage.goto(`http://127.0.0.1:${port}/?${scenario}`);
     await perpetualPage.waitForFunction(() => window.chartPanelProbe?.isReady());
@@ -591,7 +592,7 @@ try {
     await perpetualPage.mouse.move(perpetualHost.x + 130, perpetualHost.y + 210);
     assert(await perpetualPage.evaluate(() => window.chartPanelProbe.startRisk()), "Auto leverage must start on the perpetual chart");
     await perpetualPage.mouse.down();
-    await perpetualPage.mouse.move(perpetualHost.x + 180, perpetualHost.y + 280, { steps: 5 });
+    await perpetualPage.mouse.move(perpetualHost.x + 180, perpetualHost.y + (isShort ? 140 : 280), { steps: 5 });
     await perpetualPage.mouse.up();
     const leverageReadout = perpetualPage.locator("[data-risk-readout]");
     await leverageReadout.waitFor({ state: "visible" });
@@ -600,25 +601,48 @@ try {
     assert(review, `Expected Auto leverage and margin in the chart preview, got ${readoutText}`);
     assert(Number(review[2]) > 1 && Number(review[2]) <= 10);
     assert(Number(review[3]) <= 300);
-    if (scenario === "mexc-live") {
+    if (isLive) {
       assert.match(await perpetualPage.locator("[data-risk-status]").innerText(), /mexc-live LIVE.*eTape-held fair-price stop/);
     }
     await perpetualPage.keyboard.press("Enter");
     await perpetualPage.waitForFunction(() => window.chartPanelProbe.lastRiskSubmitted?.autoLeverage);
     const automatic = await perpetualPage.evaluate(() => window.chartPanelProbe.lastRiskSubmitted);
-    assert.equal(automatic.venue, scenario === "mexc-live" ? "mexc-live" : "sim");
+    assert.equal(automatic.venue, isLive ? "mexc-live" : "sim");
+    assert.equal(automatic.side, isShort ? "SHORT" : "BUY");
     assert.equal(automatic.maxQty, Number(review[1].replaceAll(",", "")));
     assert.equal(automatic.leverage, Number(review[2]));
-    if (scenario === "mexc-live") {
+    {
+      const side = isShort ? "COVER" : "SELL";
       const pending = perpetualPage.getByTestId("pending-protection-sim-risk");
-      await perpetualPage.locator("[data-order-pill-visual]").filter({ hasText: "SELL PENDING" }).waitFor({ state: "visible" });
+      const pendingPrice = pending.getByTestId("order-label-sim-risk:protection");
+      await perpetualPage.locator("[data-order-pill-visual]").filter({ hasText: `${side} PENDING` }).waitFor({ state: "visible" });
       assert.equal(Number(await pending.getAttribute("data-price")), automatic.stop);
-      assert.equal(await pending.getByRole("button").count(), 0, "the planned stop must have no order actions");
+      const priceBox = await pendingPrice.boundingBox();
+      await perpetualPage.mouse.move(priceBox.x + priceBox.width / 2, priceBox.y + priceBox.height / 2);
+      await perpetualPage.mouse.down();
+      await perpetualPage.mouse.move(priceBox.x + priceBox.width / 2, priceBox.y + priceBox.height / 2 + (isShort ? -20 : 20), { steps: 5 });
+      await perpetualPage.mouse.up();
+      await perpetualPage.waitForFunction(() => window.chartPanelProbe.lastReplace?.pendingProtection);
+      const changedStop = await perpetualPage.evaluate(() => window.chartPanelProbe.lastReplace);
+      assert.equal(changedStop.expectedProtectionPrice, automatic.stop);
+      assert.equal(changedStop.expectedStopPrice, automatic.trigger);
+      assert(changedStop.qty > 0 && changedStop.qty < automatic.maxQty);
+      await perpetualPage.waitForFunction(price => Number(document.querySelector("[data-testid='pending-protection-sim-risk']")?.dataset.price) === price, changedStop.stopPrice);
+      await perpetualPage.getByTestId("order-label-sim-risk").press(isShort ? "ArrowDown" : "ArrowUp");
+      await perpetualPage.waitForFunction(() => window.chartPanelProbe.lastReplace?.orderId === "sim-risk" && !window.chartPanelProbe.lastReplace.pendingProtection);
+      const changedTrigger = await perpetualPage.evaluate(() => window.chartPanelProbe.lastReplace);
+      assert.equal(changedTrigger.stopPrice, Number((automatic.trigger + (isShort ? -.01 : .01)).toFixed(2)));
+      assert.equal(changedTrigger.expectedProtectionPrice, changedStop.stopPrice);
       await perpetualPage.evaluate(() => window.chartPanelProbe.settleMexcEntry(2));
       await pending.waitFor({ state: "detached" });
       const stop = perpetualPage.getByTestId("order-label-sim-protection");
       await stop.waitFor({ state: "visible" });
-      assert.match(await stop.getAttribute("title"), /SELL 2 contracts.*Reduce-only market close/s);
+      assert.match(await stop.getAttribute("title"), new RegExp(`${side} 2 contracts.*Reduce-only market close`, "s"));
+      await stop.press(isShort ? "ArrowDown" : "ArrowUp");
+      await perpetualPage.waitForFunction(() => window.chartPanelProbe.lastReplace?.orderId === "sim-protection");
+      const movedStop = await perpetualPage.evaluate(() => window.chartPanelProbe.lastReplace);
+      assert.equal(movedStop.expectedStopPrice, changedStop.stopPrice);
+      assert.equal(movedStop.qty, 0);
     }
     await perpetualPage.close();
   }

@@ -420,8 +420,8 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
               <option value="$">{t.auto && key === "buyCushion" ? "USD / USDT" : t.perpetual ? "USDT" : "$"}</option><option>%</option>
             </select>
           </label>)}
-          <small>{t.auto ? "Stocks use long entries and the selected Protection Mode. MEXC paper perpetuals use the gesture to choose long or short with a fixed fair-price stop." :
-            t.perpetual ? "24-hour entry. The simulator attaches a fair-price stop to the filled contracts." : "Loss budget, excluding fees and execution risk. Whole shares; DAY until market data close. Both triggers are held by eTape."}</small>
+          <small>{t.auto ? "Stocks use long entries and the selected Protection Mode. MEXC perpetuals use the gesture to choose long or short with a fixed fair-price stop." :
+            t.perpetual ? "24-hour entry. A fair-price stop covers the confirmed filled contracts on MEXC paper and live." : "Loss budget, excluding fees and execution risk. Whole shares; DAY until market data close. Both triggers are held by eTape."}</small>
         </div>
       ) : t.kind === "place" && t.type==="TRAILING_STOP" ? (
         <div style={fieldRow}>

@@ -47,6 +47,13 @@ func TestPerpetualPartialIOCPersistsPositionAndProtection(t *testing.T) {
 			if err != nil || !ack.Accepted {
 				t.Fatalf("submit returned %+v, %v", ack, err)
 			}
+			newStop := stop - sign*50
+			if err := b.ReplaceOrder(ctx, "stop", exec.ReplaceRequest{StopPrice: newStop, ExpectedStopPrice: stop}); err != nil {
+				t.Fatal(err)
+			}
+			if err := b.ReplaceOrder(ctx, "stop", exec.ReplaceRequest{StopPrice: stop, ExpectedStopPrice: stop}); err == nil {
+				t.Fatal("stale edit replaced the paper stop")
+			}
 			// Reload the durable paper venue before the first protective quote.
 			b, err = NewPerpetual(cfg)
 			if err != nil {
@@ -55,7 +62,7 @@ func TestPerpetualPartialIOCPersistsPositionAndProtection(t *testing.T) {
 			acct, pos, orders, err := b.Snapshot(ctx)
 			if err != nil || len(pos) != 1 || pos[0].Qty != 4*sign || pos[0].Leverage != 5 ||
 				acct.MarginUsed != 8 || len(orders) != 1 || orders[0].ID != "stop" ||
-				orders[0].Side != closeSide || orders[0].LeavesQty != 4 {
+				orders[0].Side != closeSide || orders[0].LeavesQty != 4 || orders[0].StopPrice != newStop {
 				t.Fatalf("restored account=%+v positions=%+v orders=%+v err=%v", acct, pos, orders, err)
 			}
 			clk.Advance(time.Second)
@@ -76,6 +83,11 @@ func TestPerpetualPartialIOCPersistsPositionAndProtection(t *testing.T) {
 				t.Fatalf("resting close returned %+v, %v", ack, err)
 			}
 			b.SetFairQuote(feed.Quote{Symbol: symbol, Mark: stop, TsMs: clockMs})
+			_, pos, _, _ = b.Snapshot(ctx)
+			if len(pos) != 1 {
+				t.Fatal("old stop triggered after replacement")
+			}
+			b.SetFairQuote(feed.Quote{Symbol: symbol, Mark: newStop, TsMs: clockMs})
 			acct, pos, orders, err = b.Snapshot(ctx)
 			want := 100 - .4 + funding - 4*.0001*(100000+stop)*.0005
 			if err != nil || len(pos) != 0 || len(orders) != 0 || math.Abs(acct.Equity-want) > 1e-10 {

@@ -138,7 +138,15 @@ type Order struct {
 	RiskEntry           *RiskEntry   `json:"riskEntry,omitempty"`
 	RiskEntryID         string       `json:"riskEntryId,omitempty"`
 
-	PendingProtectionPrice float64 `json:"pendingProtectionPrice,omitempty"`
+	PendingProtectionPrice float64             `json:"pendingProtectionPrice,omitempty"`
+	PerpetualRisk          *PerpetualRiskTerms `json:"perpetualRisk,omitempty"`
+}
+
+type PerpetualRiskTerms struct {
+	Budget       float64      `json:"budget"`
+	Leverage     int          `json:"leverage"`
+	AutoLeverage bool         `json:"autoLeverage,omitempty"`
+	EntryCushion LimitCushion `json:"entryCushion"`
 }
 
 type LimitCushion struct {
@@ -213,14 +221,15 @@ type SubmitPerpetualRiskEntryArgs struct {
 }
 
 type HeldOrder struct {
-	Trail           *TrailState `json:"trail,omitempty"`
-	Phase           string      `json:"phase"`
-	DeadlineMs      int64       `json:"deadlineMs"`
-	ChildClientID   string      `json:"childClientId,omitempty"`
-	ChildBrokerID   string      `json:"childBrokerId,omitempty"`
-	PausedReason    string      `json:"pausedReason,omitempty"`
-	CancelRequested bool        `json:"cancelRequested,omitempty"`
-	ResolvedQty     float64     `json:"resolvedQty,omitempty"`
+	PerpetualTriggered bool        `json:"perpetualTriggered,omitempty"`
+	Trail              *TrailState `json:"trail,omitempty"`
+	Phase              string      `json:"phase"`
+	DeadlineMs         int64       `json:"deadlineMs"`
+	ChildClientID      string      `json:"childClientId,omitempty"`
+	ChildBrokerID      string      `json:"childBrokerId,omitempty"`
+	PausedReason       string      `json:"pausedReason,omitempty"`
+	CancelRequested    bool        `json:"cancelRequested,omitempty"`
+	ResolvedQty        float64     `json:"resolvedQty,omitempty"`
 }
 
 type TrailSessions struct {
@@ -706,13 +715,16 @@ type AcknowledgeHeldLimitIfTouchedArgs struct {
 }
 
 type ReplaceOrderArgs struct {
-	ExpectedRiskEntryPhase string  `json:"expectedRiskEntryPhase,omitempty"`
-	ExpectedHeldPhase      string  `json:"expectedHeldPhase,omitempty"`
-	Venue                  string  `json:"venue"`
-	OrderID                string  `json:"orderId"`
-	Qty                    float64 `json:"qty"`
-	LimitPrice             float64 `json:"limitPrice"`
-	StopPrice              float64 `json:"stopPrice"`
+	ExpectedStopPrice       float64 `json:"expectedStopPrice,omitempty"`
+	ExpectedProtectionPrice float64 `json:"expectedProtectionPrice,omitempty"`
+	PendingProtection       bool    `json:"pendingProtection,omitempty"`
+	ExpectedRiskEntryPhase  string  `json:"expectedRiskEntryPhase,omitempty"`
+	ExpectedHeldPhase       string  `json:"expectedHeldPhase,omitempty"`
+	Venue                   string  `json:"venue"`
+	OrderID                 string  `json:"orderId"`
+	Qty                     float64 `json:"qty"`
+	LimitPrice              float64 `json:"limitPrice"`
+	StopPrice               float64 `json:"stopPrice"`
 }
 
 type FlattenArgs struct {

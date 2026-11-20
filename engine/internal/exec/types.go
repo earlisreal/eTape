@@ -420,9 +420,10 @@ func validLimitIfTouchedPrice(price float64) bool {
 }
 
 type ReplaceRequest struct {
-	Qty        float64
-	LimitPrice float64
-	StopPrice  float64
+	Qty               float64
+	LimitPrice        float64
+	StopPrice         float64
+	ExpectedStopPrice float64
 }
 
 // EligiblePrint is fed only from newly accepted real-time last-eligible

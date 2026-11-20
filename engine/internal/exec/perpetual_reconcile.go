@@ -111,7 +111,7 @@ func (c *Core) foldPerpetualObservation(report PerpetualObservation) error {
 	if report.BrokerOrderID == "" {
 		return errors.New("perpetual observation is missing the exchange order ID")
 	}
-	if o.Perpetual.LocalProtection && o.Perpetual.isRiskEntry() && o.Held != nil && len(report.Fills) != 0 && report.PositionID != "" {
+	if o.Perpetual.LocalProtection && o.Perpetual.IsRiskEntry() && o.Held != nil && len(report.Fills) != 0 && report.PositionID != "" {
 		h := *o.Held
 		if h.PerpetualPositionID != "" && h.PerpetualPositionID != report.PositionID {
 			return errors.New("MEXC entry reported a different position ID during reconciliation")

@@ -4,9 +4,18 @@ import { isWorking } from "../../wire/orderStatus";
 export interface ChartOrderMarker {
   order: Order;
   price: number;
-  kind: "limit" | "stop" | "stop-limit" | "limit-if-touched";
+  kind: "limit" | "stop" | "stop-limit" | "limit-if-touched" | "pending-protection";
   draggable: boolean;
   phase: string;
+}
+
+export function markerId(marker: ChartOrderMarker): string {
+  return marker.kind === "pending-protection" ? `${marker.order.id}:protection` : marker.order.id;
+}
+
+export function markerSide(marker: ChartOrderMarker): Order["side"] {
+  if (marker.kind === "pending-protection") return marker.order.side === "SHORT" ? "COVER" : "SELL";
+  return marker.order.side;
 }
 
 export function orderActionPending(marker: ChartOrderMarker): { kind: "replace" | "cancel"; price?: number; stop: boolean; confirmedPrice?: number; outcome: "requested" | "unknown" } | undefined {
@@ -34,24 +43,32 @@ export function chartOrderMarkers(orders: Iterable<Order>, venue: string, symbol
   for (const order of orders) {
     if (order.venue !== venue || order.symbol !== symbol || !isWorking(order.status)) continue;
     if (order.status === "SUBMITTED" && !order.held) continue;
+    const perpetual = order.symbol.startsWith("PERP.");
+    const held = order.held;
+    const actionPending = order.action?.phase === "REQUESTED" || order.action?.phase === "UNKNOWN";
+    const pretrigger = !held?.childClientId && !held?.cancelRequested && !held?.perpetualTriggered &&
+      (held?.phase === "WAITING" || held?.phase === "ARMED");
+    if (order.pendingProtectionPrice && held) {
+      out.push({ order, price: order.pendingProtectionPrice, kind: "pending-protection",
+        draggable: !!order.perpetualRisk && pretrigger && !actionPending, phase: held.phase });
+    }
     if (order.type === "LIMIT") {
-      const actionPending = order.action?.phase === "REQUESTED" || order.action?.phase === "UNKNOWN";
-      out.push({ order, price: order.limitPrice, kind: "limit", draggable: !order.held?.cancelRequested && !actionPending, phase: order.held?.phase ?? "" });
+      out.push({ order, price: order.limitPrice, kind: "limit", draggable: !perpetual && !held?.cancelRequested && !actionPending, phase: held?.phase ?? "" });
       continue;
     }
-    if (order.type === "STOP" && order.held && order.symbol.startsWith("PERP.MEXC.")) {
-      out.push({ order, price: order.stopPrice, kind: "stop", draggable: false, phase: order.held.phase });
+    if (order.type === "STOP" && order.symbol.startsWith("PERP.MEXC.")) {
+      out.push({ order, price: order.stopPrice, kind: "stop", draggable: (!held || pretrigger) && !actionPending, phase: held?.phase ?? order.status });
       continue;
     }
     if (order.type !== "STOP_LIMIT" && order.type !== "LIMIT_IF_TOUCHED" && order.type!=="TRAILING_STOP") continue;
-    const held = order.held;
     const childExists = !!held?.childClientId || held?.phase === "WORKING" || held?.phase === "ACTIVATING";
     if(held?.trail?.retired && !childExists)continue;
     const paused = held?.phase === "PAUSED";
     const price = childExists ? order.limitPrice : order.stopPrice;
     out.push({
       order, price, kind: childExists ? "limit" : order.type === "LIMIT_IF_TOUCHED" ? "limit-if-touched" : "stop-limit",
-      draggable: (!held?.trail || childExists) && !paused && !held?.cancelRequested && order.action?.phase !== "REQUESTED" && order.action?.phase !== "UNKNOWN" && (held?.phase === "WORKING" || held?.phase === "WAITING" || held?.phase === "ARMED"),
+      draggable: perpetual ? !!order.perpetualRisk && pretrigger && !actionPending :
+        (!held?.trail || childExists) && !paused && !held?.cancelRequested && !actionPending && (held?.phase === "WORKING" || held?.phase === "WAITING" || held?.phase === "ARMED"),
       phase: held?.phase ?? "NATIVE",
     });
   }

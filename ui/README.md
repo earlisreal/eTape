@@ -149,10 +149,10 @@ normal. Blockers and uncertain outcomes remain visible.
 
 Settings → Orders & hotkeys → Add → Chart Risk Entry creates a risk preset and
 hotkey. Choose **Auto (chart and gesture)** under Instrument and direction to
-use one preset on stock charts and MEXC paper perpetual charts. Focus a grouped
+use one preset on stock charts and MEXC perpetual charts. Focus a grouped
 chart, press the hotkey, then click the entry trigger and protective stop or
 drag between them. A lower stop gives a long. A higher stop gives a short on
-MEXC paper perpetuals. The preview shows the side, which locks on release or
+MEXC paper and live perpetuals. The preview shows the side, which locks on release or
 the second click. Auto uses a fixed risk amount in USD or USDT or a percentage
 of cash or collateral. New perpetual presets default to **Auto** under
 **Perpetual leverage**. Choose a cap, or select **Fixed** to enter the isolated
@@ -161,6 +161,10 @@ preview includes estimated USDT loss, leverage and initial margin.
 The selected Protection Mode applies to stocks. Only brief setup instructions and actionable
 warnings float over the bottom Volume area. The two axis chips expose planned
 shares, execution limits, custody, expiry and Enter/Escape shortcuts on hover.
+On MEXC, drag either pending line or use Up/Down on its price pill to resize the
+entry. BUY pairs with a lower SELL stop and SHORT pairs with a higher COVER stop.
+Either pending cancel button cancels the setup before the IOC is sent. Once the
+venue confirms a fill, the separate protective stop can be moved on its own.
 On a fully protected Chart Risk Entry long position, the same two points create
 an add with its own risk budget and one shared stop. The SELL must keep or raise
 the current stop and remain below BUY. Preview shows existing + added = total

@@ -166,8 +166,12 @@ func mapOrder(o exec.Order) wsmsg.Order {
 			Closing:     r.Closing, ProtectionCanceled: r.ProtectionCanceled, Failure: r.Failure, Protection: mapTrailConfig(r.Protection)}
 	}
 	var pendingProtectionPrice float64
-	if o.Type == exec.TypeStopLimit && o.Held != nil && o.Working() && o.Perpetual != nil && o.Perpetual.LocalProtection {
+	var perpetualRisk *wsmsg.PerpetualRiskTerms
+	if o.Type == exec.TypeStopLimit && o.Held != nil && o.Working() && o.Perpetual.IsRiskEntry() {
 		pendingProtectionPrice = o.Perpetual.ProtectionPrice
+		cushion := o.RiskEntryCushion()
+		perpetualRisk = &wsmsg.PerpetualRiskTerms{Budget: o.Perpetual.RiskBudget, Leverage: o.Perpetual.Leverage,
+			AutoLeverage: o.Perpetual.AutoLeverage, EntryCushion: wsmsg.LimitCushion{Value: cushion.Value, Unit: cushion.Unit}}
 	}
 	return wsmsg.Order{
 		Venue: string(o.Venue), ID: o.ID, Symbol: o.Symbol,
@@ -175,6 +179,7 @@ func mapOrder(o exec.Order) wsmsg.Order {
 		Session: sessionToWire(o.Session),
 		Qty:     o.Qty, DeferredPositionPct: o.DeferredPositionPct, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
 		PendingProtectionPrice: pendingProtectionPrice,
+		PerpetualRisk:          perpetualRisk,
 		Status:                 statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
 		AvgFillPrice: o.AvgFillPrice, RejectReason: o.RejectReason, ReplacesID: o.ReplacesID,
 		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs, Held: held, Action: action,
@@ -190,7 +195,8 @@ func mapOrderAction(a exec.OrderAction) *wsmsg.OrderAction {
 
 func mapHeldOrder(h exec.HeldOrder) *wsmsg.HeldOrder {
 	return &wsmsg.HeldOrder{Phase: string(h.Phase), DeadlineMs: h.DeadlineMs, ChildClientID: h.ChildClientID,
-		ChildBrokerID: h.ChildBrokerID, PausedReason: h.PausedReason, CancelRequested: h.CancelRequested, ResolvedQty: h.ResolvedQty, Trail: mapTrail(h.Trail)}
+		PerpetualTriggered: h.PerpetualTriggered,
+		ChildBrokerID:      h.ChildBrokerID, PausedReason: h.PausedReason, CancelRequested: h.CancelRequested, ResolvedQty: h.ResolvedQty, Trail: mapTrail(h.Trail)}
 }
 
 func mapClosedOrder(row exec.ClosedOrder) wsmsg.ClosedOrder {

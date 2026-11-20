@@ -3,27 +3,40 @@ package exec
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/instrument"
 )
 
+var errPerpetualFairPrice = errors.New("waiting for a fresh fair price")
+
 // PerpetualOrder carries the admitted terms and optional closing instruction.
 // The core derives the multiplier from the selected adapter's catalog.
 type PerpetualOrder struct {
-	Leverage        int     `json:"leverage"`
-	Multiplier      float64 `json:"multiplier"`
-	ProtectionPrice float64 `json:"protectionPrice,omitempty"`
-	ProtectionID    string  `json:"protectionId,omitempty"`
-	RiskBudget      float64 `json:"riskBudget,omitempty"`
-	AutoLeverage    bool    `json:"autoLeverage,omitempty"`
-	LocalProtection bool    `json:"localProtection,omitempty"`
-	PositionID      string  `json:"positionId,omitempty"`
-	AccountIdentity string  `json:"accountIdentity,omitempty"`
+	Leverage        int           `json:"leverage"`
+	Multiplier      float64       `json:"multiplier"`
+	ProtectionPrice float64       `json:"protectionPrice,omitempty"`
+	ProtectionID    string        `json:"protectionId,omitempty"`
+	RiskBudget      float64       `json:"riskBudget,omitempty"`
+	AutoLeverage    bool          `json:"autoLeverage,omitempty"`
+	LocalProtection bool          `json:"localProtection,omitempty"`
+	PositionID      string        `json:"positionId,omitempty"`
+	AccountIdentity string        `json:"accountIdentity,omitempty"`
+	EntryCushion    *LimitCushion `json:"entryCushion,omitempty"`
 }
 
-func (o PerpetualOrder) isRiskEntry() bool {
-	return o.ProtectionID != "" && finitePositive(o.ProtectionPrice) && finitePositive(o.RiskBudget)
+func (o *PerpetualOrder) IsRiskEntry() bool {
+	return o != nil && o.ProtectionID != "" && finitePositive(o.ProtectionPrice) && finitePositive(o.RiskBudget)
+}
+
+// RiskEntryCushion preserves the saved recipe. Older orders can retain their
+// original absolute trigger-to-limit distance because it is already tick aligned.
+func (o Order) RiskEntryCushion() LimitCushion {
+	if o.Perpetual != nil && o.Perpetual.EntryCushion != nil {
+		return *o.Perpetual.EntryCushion
+	}
+	return LimitCushion{Value: math.Abs(o.LimitPrice - o.StopPrice), Unit: "$"}
 }
 
 type SubmitPerpetualRiskEntry struct {
@@ -57,7 +70,7 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 	if err != nil {
 		return err
 	}
-	heldEntry := req.Type == TypeStopLimit && req.Perpetual != nil && req.Perpetual.isRiskEntry()
+	heldEntry := req.Type == TypeStopLimit && req.Perpetual != nil && req.Perpetual.IsRiskEntry()
 	validOrder := req.Type == TypeMarket || (req.Type == TypeLimit || heldEntry) && rules.ValidPrice(req.LimitPrice)
 	if req.Perpetual == nil || !rules.ValidQuantity(req.Qty) || !validOrder {
 		return errors.New("use a valid contract count and market or tick-aligned limit price")
@@ -65,7 +78,7 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 	o := req.Perpetual
 	caps := broker.Capabilities()
 	if caps.ReconciledPerpetual && (o.ProtectionPrice != 0 || o.RiskBudget != 0 || o.ProtectionID != "" || o.AutoLeverage) {
-		if !caps.EngineHeldPerpetualRiskEntry || !o.LocalProtection || !o.isRiskEntry() {
+		if !caps.EngineHeldPerpetualRiskEntry || !o.LocalProtection || !o.IsRiskEntry() {
 			return errors.New("attached protection on a live perpetual requires a supported Chart Risk Entry")
 		}
 		identity := c.heldLiveIdentity[req.Venue]
@@ -97,20 +110,24 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 		}
 		for _, order := range c.state.Venue(req.Venue).Orders {
 			if order.ID != ownOrder && order.Symbol == req.Symbol && order.Working() &&
-				(o.isRiskEntry() || order.Side == SideBuy || order.Side == SideShort) {
+				(o.IsRiskEntry() || order.Side == SideBuy || order.Side == SideShort) {
 				return errors.New("resolve the working perpetual entry first")
 			}
 		}
-		if caps.EngineHeldPerpetualRiskEntry && o.isRiskEntry() {
+		if caps.EngineHeldPerpetualRiskEntry && o.IsRiskEntry() {
 			for _, order := range c.state.Venue(req.Venue).ExternalOrders {
 				if order.Symbol == req.Symbol && order.Working() {
 					return errors.New("resolve the working MEXC Futures order first")
 				}
 			}
 		}
-		price, ok := broker.FairPrice(req.Symbol)
-		if !ok {
-			return errors.New("waiting for a fresh fair price")
+		var price float64
+		if !heldEntry {
+			var ok bool
+			price, ok = broker.FairPrice(req.Symbol)
+			if !ok {
+				return errPerpetualFairPrice
+			}
 		}
 		if o.ProtectionPrice != 0 {
 			if !rules.ValidPrice(o.ProtectionPrice) || position != 0 {
@@ -147,6 +164,9 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 	if caps.ReconciledPerpetual && !caps.EngineHeldPerpetualRiskEntry {
 		return deny("perpetual Chart Risk Entry requires MEXC Live or the MEXC Perpetual Simulator")
 	}
+	if !c.perpetualRiskAccountFresh(cm.Venue) {
+		return deny("fresh account data required")
+	}
 	long := cm.Side == SideBuy
 	if (!long && cm.Side != SideShort) || (long && cm.Stop >= cm.Trigger) || (!long && cm.Stop <= cm.Trigger) {
 		return deny("place the stop on the loss side of the entry trigger")
@@ -176,7 +196,7 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 	} else {
 		size = min(cm.MaxQty, float64(rules.SizeRisk(budget, collateral, limit, cm.Stop, leverage)))
 	}
-	options := &PerpetualOrder{Leverage: leverage, Multiplier: rules.ContractSize(), ProtectionPrice: cm.Stop, ProtectionID: c.idgen.Next(), RiskBudget: budget, AutoLeverage: cm.AutoLeverage}
+	options := &PerpetualOrder{Leverage: leverage, Multiplier: rules.ContractSize(), ProtectionPrice: cm.Stop, ProtectionID: c.idgen.Next(), RiskBudget: budget, AutoLeverage: cm.AutoLeverage, EntryCushion: &cm.Cushion}
 	if caps.EngineHeldPerpetualRiskEntry {
 		options.LocalProtection = true
 		options.AccountIdentity = c.heldLiveIdentity[cm.Venue]
@@ -201,8 +221,18 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 		c.releaseHeld(order.ID)
 		return deny(err.Error())
 	}
-	if p, ok := c.lastEligible[order.Symbol]; ok && c.freshEligiblePrint(p) && HeldOrderTriggered(order.Type, order.Side, p.Price, order.StopPrice) {
+	c.checkPerpetualEntryTrigger(ctx, order)
+	return CmdAck{Accepted: true, OrderID: order.ID}
+}
+
+func (c *Core) perpetualRiskAccountFresh(venue VenueID) bool {
+	ts := c.state.Venue(venue).Account.TsMs
+	return riskAccountFresh(c.state, venue) && ts > 0 && c.now()-ts <= 30_000 && ts-c.now() <= 1000
+}
+
+func (c *Core) checkPerpetualEntryTrigger(ctx context.Context, order Order) {
+	if p, ok := c.lastEligible[order.Symbol]; ok && p.RecvTsMs > order.Held.ResumeAfterMs &&
+		c.freshEligiblePrint(p) && HeldOrderTriggered(order.Type, order.Side, p.Price, order.StopPrice) {
 		c.activateHeld(ctx, order)
 	}
-	return CmdAck{Accepted: true, OrderID: order.ID}
 }

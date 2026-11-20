@@ -135,7 +135,7 @@ func (c *Core) perpetualProtectionWarnings(v VenueID, b PerpetualBroker) []Prote
 	bySymbol := make(map[string]ProtectionWarning)
 	for _, entry := range vs.Orders {
 		o := entry.Perpetual
-		if o == nil || !o.LocalProtection || !o.isRiskEntry() || entry.ExecutedQty <= 0 {
+		if o == nil || !o.LocalProtection || !o.IsRiskEntry() || entry.ExecutedQty <= 0 {
 			continue
 		}
 		p := vs.Positions[entry.Symbol]

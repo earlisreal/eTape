@@ -22,6 +22,13 @@ uses the previewed quantity and leverage as ceilings. It revalidates the armed
 terms on activation and the simulator checks the resulting fill price. Missing
 or unsupported tier data blocks Auto sizing.
 
+MEXC paper and live expose both pending trigger prices. Amendments check both
+observed prices and the pretrigger phase, then persist the new entry terms in
+one event. The original budget, cushion recipe, leverage and direction govern
+the amended size. Both trigger prices lock on IOC dispatch. An edit to the
+active stop preserves the confirmed coverage; the simulator saves the new
+price under its ledger lock and live verifies the original MEXC position ID.
+
 ## MEXC Live Chart Risk Entry
 
 The held entry uses an eligible MEXC trade and submits an IOC limit order.

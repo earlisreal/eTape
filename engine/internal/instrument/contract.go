@@ -152,6 +152,19 @@ func (r ContractRules) EntryLimit(trigger, cushion float64, percent, long bool) 
 	return price, r.ValidPrice(price)
 }
 
+// MoveEntryLimit preserves the exact tick distance for orders created before
+// the cushion recipe was saved with the entry.
+func (r ContractRules) MoveEntryLimit(trigger, oldTrigger, oldLimit float64) (float64, bool) {
+	if !r.ValidPrice(trigger) || !r.ValidPrice(oldTrigger) || !r.ValidPrice(oldLimit) {
+		return 0, false
+	}
+	target, _ := exactFloat(trigger)
+	from, _ := exactFloat(oldTrigger)
+	limit, _ := exactFloat(oldLimit)
+	price, _ := target.Add(target, limit.Sub(limit, from)).Float64()
+	return price, r.ValidPrice(price)
+}
+
 func (r ContractRules) SizeRisk(budget, collateral, limit, stop float64, leverage int) int64 {
 	if !r.Valid() || !r.ValidPrice(limit) || !r.ValidPrice(stop) || limit == stop ||
 		leverage < r.MinLeverage || leverage > r.MaxLeverage {

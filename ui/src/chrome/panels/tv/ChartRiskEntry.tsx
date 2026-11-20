@@ -188,8 +188,6 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (draft?.template.perpetual) {
                 if (v.broker !== "mexc-sim" && v.broker !== "mexc") return "Select a MEXC Execution Venue.";
                 if (!contract()?.tradingEnabled) return "Waiting for tradable contract rules.";
-                const quote = p.stores.quote.get(p.symbol);
-                if (!quote || !(quote.bid > 0 && quote.ask > 0)) return "Waiting for MEXC order book.";
                 return "";
             }
             if (draft && draft.sharedEntryId !== (context.owner?.id ?? "")) return "Shared protection changed; review a new chart risk entry.";

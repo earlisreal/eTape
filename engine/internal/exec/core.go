@@ -46,13 +46,16 @@ type CancelOrder struct {
 	OrderID string
 }
 type ReplaceOrder struct {
-	ExpectedRiskEntryPhase string
-	Venue                  VenueID
-	OrderID                string
-	Qty                    float64
-	LimitPrice             float64
-	StopPrice              float64
-	ExpectedHeldPhase      HeldPhase
+	ExpectedRiskEntryPhase  string
+	ExpectedStopPrice       float64
+	ExpectedProtectionPrice float64
+	PendingProtection       bool
+	Venue                   VenueID
+	OrderID                 string
+	Qty                     float64
+	LimitPrice              float64
+	StopPrice               float64
+	ExpectedHeldPhase       HeldPhase
 }
 type Flatten struct{ Venue VenueID }
 type KillSwitch struct{ Venue VenueID }
@@ -1332,6 +1335,12 @@ func (c *Core) handleCancel(ctx context.Context, cm CancelOrder) CmdAck {
 
 func (c *Core) handleReplace(ctx context.Context, cm ReplaceOrder) CmdAck {
 	o := c.order(cm.OrderID)
+	if o.Venue == cm.Venue && instrument.IsPerpetual(o.Symbol) {
+		return c.replacePerpetualRisk(ctx, cm, o)
+	}
+	if cm.PendingProtection {
+		return CmdAck{Reason: "pending protection unavailable", OrderID: cm.OrderID}
+	}
 	if o.Venue == cm.Venue && (o.RiskEntry != nil || o.RiskEntryID != "") {
 		return c.replaceRisk(ctx, cm, o)
 	}
@@ -1344,9 +1353,6 @@ func (c *Core) handleReplaceSingle(ctx context.Context, cm ReplaceOrder) CmdAck 
 		return CmdAck{Accepted: false, Reason: "unknown order", OrderID: cm.OrderID}
 	}
 	o := c.state.Venue(v).Orders[cm.OrderID]
-	if instrument.IsPerpetual(o.Symbol) {
-		return CmdAck{Reason: "cancel and resubmit a perpetual order to change it", OrderID: o.ID}
-	}
 	if o.Action != nil && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
 		return CmdAck{Accepted: false, Reason: "order action outcome is still unresolved", OrderID: o.ID}
 	}
