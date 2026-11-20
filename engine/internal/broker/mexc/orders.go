@@ -309,7 +309,7 @@ func (c client) checkOpening(ctx context.Context, req exec.OrderRequest, rules i
 		return errors.New("MEXC isolated leverage is unavailable for this direction")
 	}
 	if limit.Leverage != input.Leverage {
-		return fmt.Errorf("MEXC isolated leverage is %d×, but this order uses %d×. Review the leverage on MEXC.", limit.Leverage, input.Leverage)
+		return fmt.Errorf("MEXC isolated leverage is %d× and this order uses %d×. Match the settings before sending", limit.Leverage, input.Leverage)
 	}
 	if held+req.Qty > float64(limit.MaxContracts) {
 		return fmt.Errorf("MEXC isolated tier permits at most %d total contracts", limit.MaxContracts)

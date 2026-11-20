@@ -28,7 +28,7 @@ type liveAPI struct {
 	quotes sync.Map
 }
 
-const openingForbidden = "MEXC forbids opening this position (6002). Contact MEXC support."
+const openingForbidden = "MEXC forbids opening this position (6002). Contact MEXC support"
 
 func (a *Live) Capabilities() exec.Capabilities {
 	caps := a.Adapter.Capabilities()
