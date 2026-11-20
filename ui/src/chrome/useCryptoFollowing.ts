@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import type { CommandClient } from "./catalogs";
-import { binanceDemoExchange, cryptoExchange, cryptoExchangeKey, defaultCryptoExchange, rankCryptoScanner, readCryptoScanner, useCryptoPreference, useCryptoScannerData } from "./cryptoScanner";
+import { binanceDemoExchange, cryptoExchange, cryptoExchangeKey, defaultCryptoExchange, rankCryptoScanner, readCryptoScanner, resolveScannerExchange, type CryptoExchange, useCryptoPreference, useCryptoScannerData } from "./cryptoScanner";
+import { savedLinkMarket } from "./linkGroups";
 import { buildCryptoMonitoringWorkspace } from "./presets";
 import { planScannerSync, ScannerSyncRuntime, type PanelSymbolRuntime, type ScannerSyncPanelState } from "./scannerSync";
-import { CRYPTO_MONITORING_WORKSPACE_ID as targetId, type Workspace, type WorkspaceStore } from "./workspace";
+import { CRYPTO_MONITORING_WORKSPACE_ID as targetId, type PanelConfig, type Workspace, type WorkspaceStore } from "./workspace";
+
+function exchangeForPanel(panel: PanelConfig, workspace: Workspace | null | undefined, appDefault: CryptoExchange) {
+  const group = panel.group;
+  const market = group ? savedLinkMarket(workspace?.groups?.[group], workspace?.linkMarkets?.[group]?.emptyMarket) : undefined;
+  return resolveScannerExchange(readCryptoScanner(panel.settings).exchange, market, appDefault);
+}
 
 function useWatchedWorkspace(store: WorkspaceStore, id: string | undefined) {
   const [loaded, setLoaded] = useState<Workspace>();
@@ -37,15 +44,15 @@ export function useCryptoFollowing({ name, workspace, current, apply, store, com
   const sync = (isTarget ? workspace : otherTarget)?.scannerSync;
   const sourceWorkspaceId = sync?.sourceWorkspaceId ?? targetId;
   const otherSource = useWatchedWorkspace(store, isTarget && sourceWorkspaceId !== name ? sourceWorkspaceId : undefined);
-  const source = (sourceWorkspaceId === name ? workspace : otherSource)?.panels.find(panel =>
+  const sourceWorkspace = sourceWorkspaceId === name ? workspace : otherSource;
+  const source = sourceWorkspace?.panels.find(panel =>
     panel.id === sync?.sourcePanelId && panel.panelId === "crypto-scanner");
   const needed = localPanels.length > 0 || (isTarget && sync?.enabled === true && !!source);
   const preference = useCryptoPreference(commands, cryptoExchangeKey, needed && connected);
   const exchange = cryptoExchange(preference.value) ?? defaultCryptoExchange;
-  const sourceFilters = source ? readCryptoScanner(source.settings) : undefined;
-  const sourceExchange = sourceFilters?.exchange ?? exchange;
-  const requested = new Set(localPanels.map(panel => readCryptoScanner(panel.settings).exchange ?? exchange));
-  if (isTarget && sync?.enabled && source) requested.add(sourceExchange);
+  const sourceExchange = source ? exchangeForPanel(source, sourceWorkspace, exchange) : undefined;
+  const requested = new Set(localPanels.map(panel => exchangeForPanel(panel, workspace, exchange)));
+  if (isTarget && sync?.enabled && sourceExchange) requested.add(sourceExchange);
   const mexc = useCryptoScannerData(commands, connected, requested.has("MEXC"), "MEXC");
   const binance = useCryptoScannerData(commands, connected, requested.has("BINANCE"), "BINANCE");
   const binanceDemo = useCryptoScannerData(commands, connected, requested.has(binanceDemoExchange), binanceDemoExchange);
@@ -54,7 +61,7 @@ export function useCryptoFollowing({ name, workspace, current, apply, store, com
     defaultExchange: exchange,
     byExchange: { MEXC: mexc, BINANCE: binance, [binanceDemoExchange]: binanceDemo, BINGX: bingx },
   }), [exchange, mexc, binance, binanceDemo, bingx]);
-  const sourceSnapshot = data.byExchange[sourceExchange].snapshot;
+  const sourceSnapshot = sourceExchange ? data.byExchange[sourceExchange].snapshot : undefined;
 
   const save = useCallback((next: Workspace) => { apply(next); store.save(next); }, [apply, store]);
   useEffect(() => {

@@ -1,6 +1,20 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type WebSocketRoute } from "@playwright/test";
 import { buildCryptoMonitoringWorkspace } from "../src/chrome/presets";
 import type { ClientMessage } from "../src/wire/contract";
+import { blankWorkspace } from "../src/chrome/workspace";
+
+function preserveSavedLayout(server: WebSocketRoute, socket: WebSocketRoute) {
+  // Keep demo startup from rewriting the workspace or adding a Watchlist tab.
+  server.onMessage(raw => {
+    const message = JSON.parse(raw.toString()) as { kind: string; topic?: string; payload?: object };
+    socket.send(message.kind === "snapshot" && message.topic === "sys.session"
+      ? JSON.stringify({ ...message, payload: { ...message.payload, mode: "live" } }) : raw);
+  });
+}
+
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript(() => localStorage.setItem("etape.venueSetupHidden", "1"));
+});
 
 test("Crypto Scanner keeps its saved layout and fits its controls in a narrow panel", async ({ page }, testInfo) => {
   let workspace = buildCryptoMonitoringWorkspace();
@@ -9,6 +23,7 @@ test("Crypto Scanner keeps its saved layout and fits its controls in a narrow pa
   const workspaceKey = `workspace.${workspace.name}`;
   await page.routeWebSocket("**/ws", socket => {
     const server = socket.connectToServer();
+    preserveSavedLayout(server, socket);
     socket.onMessage(raw => {
       const message = JSON.parse(raw.toString()) as ClientMessage;
       if (message.kind !== "command") { server.send(raw); return; }
@@ -81,4 +96,84 @@ test("Crypto Scanner keeps its saved layout and fits its controls in a narrow pa
     await page.screenshot({ path: testInfo.outputPath(`${theme.toLowerCase()}-crypto-scanner.png`) });
     await page.keyboard.press("Escape");
   }
+});
+
+test("Account switches a linked Crypto Scanner across windows and restores the last contracts", async ({ page, context }) => {
+  const trading = blankWorkspace("e2e-account-market");
+  trading.groups = { green: "US.AAPL" };
+  trading.linkVenues = { green: "sim-paper" }; // legacy stock account selection
+  trading.panels = [
+    { id: "account", panelId: "account", group: "green", settings: { ordersHeight: 160 } },
+    { id: "chart", panelId: "chart", group: "green", settings: { timeframe: "1m", symbol: "US.MSFT" } },
+  ];
+  const scanning = blankWorkspace("e2e-follow-account");
+  scanning.groups = { green: "US.AAPL" };
+  scanning.panels = [
+    { id: "linked", panelId: "crypto-scanner", group: "green", settings: { cryptoMode: "Most Active" } },
+    { id: "fixed", panelId: "crypto-scanner", group: null, settings: { cryptoExchange: "MEXC", cryptoMode: "Most Active" } },
+  ];
+  const docs = new Map([[`workspace.${trading.name}`, trading], [`workspace.${scanning.name}`, scanning]]);
+  await context.routeWebSocket("**/ws", socket => {
+    const server = socket.connectToServer();
+    preserveSavedLayout(server, socket);
+    socket.onMessage(raw => {
+      const message = JSON.parse(raw.toString()) as ClientMessage;
+      if (message.kind !== "command") { server.send(raw); return; }
+      const args = message.args as { key?: string; value?: typeof trading; exchange?: string };
+      const ack = (value?: unknown) => socket.send(JSON.stringify({ kind: "ack", status: "accepted", corrId: message.corrId, value }));
+      if (args.key && docs.has(args.key) && message.name === "GetConfig") {
+        ack(docs.get(args.key));
+      } else if (args.key && docs.has(args.key) && message.name === "SetConfig" && args.value) {
+        docs.set(args.key, args.value);
+        ack();
+      } else if (message.name === "GetCryptoScanner") {
+        ack({ asOfMs: Date.now(), warming: false, rows: [
+          { symbol: `PERP.${args.exchange}.BTCUSDT`, base: "BTC", last: 62100, changePct: 4.2, turnover: 3900000, spreadBps: 0.8 },
+        ] });
+      } else server.send(raw);
+    });
+  });
+  const scannerWindow = await context.newPage();
+  await Promise.all([
+    page.goto(`/?workspace=${trading.name}`),
+    scannerWindow.goto(`/?workspace=${scanning.name}`),
+  ]);
+  const symbol = page.getByTestId("panel-symbol");
+  const stockVenue = page.getByTestId("acct-venue");
+  const stocks = page.getByRole("button", { name: "Stocks", exact: true });
+  const crypto = page.getByRole("button", { name: "Crypto", exact: true });
+  const exchange = page.getByLabel("Account exchange");
+  const fixed = scannerWindow.getByRole("table", { name: "MEXC crypto Scanner results" });
+  const demo = scannerWindow.getByRole("table", { name: "Binance Futures Demo crypto Scanner results" });
+  const paused = scannerWindow.getByText("Paused while Green is on Stocks");
+
+  await expect(stockVenue).toHaveValue("sim-paper");
+  await expect(symbol).toHaveText("AAPL");
+  await scannerWindow.getByTestId("scanner-header-controls").first().getByRole("button", { name: "filters" }).click();
+  await scannerWindow.getByLabel("Crypto Scanner exchange").selectOption("follow-account");
+  await scannerWindow.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(paused).toBeVisible();
+  await expect(fixed.getByRole("button", { name: "BTC/USDT" })).toBeVisible();
+
+  await crypto.click();
+  await exchange.selectOption("BINANCE-DEMO");
+  await expect(page.getByText("Browse only", { exact: true })).toBeVisible();
+  await expect(symbol).toHaveText("—");
+  const btc = demo.getByRole("button", { name: "BTC/USDT" });
+  await expect(btc).toBeVisible();
+  await btc.dblclick();
+  await expect.poll(() => docs.get(`workspace.${trading.name}`)?.groups?.green).toBe("PERP.BINANCE-DEMO.BTCUSDT");
+
+  await stocks.click();
+  await expect(paused).toBeVisible();
+  await expect(demo).toHaveCount(0);
+  await expect(fixed.getByRole("button", { name: "BTC/USDT" })).toBeVisible();
+  await expect(symbol).toHaveText("AAPL");
+  await expect(stockVenue).toHaveValue("sim-paper");
+  await expect.poll(() => docs.get(`workspace.${trading.name}`)?.groups?.green).toBe("US.AAPL");
+  await page.reload();
+  await crypto.click();
+  await expect(exchange).toHaveValue("BINANCE-DEMO");
+  await expect(btc).toBeVisible();
+  await expect.poll(() => docs.get(`workspace.${trading.name}`)?.groups?.green).toBe("PERP.BINANCE-DEMO.BTCUSDT");
 });

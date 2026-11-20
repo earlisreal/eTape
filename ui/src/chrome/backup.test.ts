@@ -108,12 +108,14 @@ describe("backup: structural layout export", () => {
     const workspace: Workspace = {
       ...makeWorkspace("monitoring"),
       panels: [{ id: "p1", panelId: "chart", group: "red", settings: { symbol: "US.MSFT", timeframe: "1m" } }],
+      linkMarkets: { red: { lastCrypto: "MEXC", symbols: { MEXC: "PERP.MEXC.BTC_USDT" } } },
       scannerSync: { enabled: true, sourceWorkspaceId: "other", sourcePanelId: "scanner-1" },
     };
     const before = JSON.stringify(workspace);
     const out = buildExport({ layout: true, hotkeys: false }, { workspace, orderConfig: makeOrderConfig([]) });
     expect(out.layout?.panels[0].settings).toEqual({ timeframe: "1m" });
     expect(out.layout?.groups).toEqual({});
+    expect(out.layout?.linkMarkets).toEqual({ red: { lastCrypto: "MEXC" } });
     expect(out.layout?.linkVenues).toEqual({ red: "alpaca" });
     expect(out.layout?.scannerSync).toEqual({ enabled: true });
     expect(JSON.stringify(workspace)).toBe(before);

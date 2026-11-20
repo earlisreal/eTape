@@ -12,10 +12,16 @@ was using.
 
 ## Decision
 
-- Each colour Link Group remembers an Execution Venue for stocks and for each
-  supported perpetual exchange. The focused symbol determines which selection
-  applies. Account, Order Ticket, chart, DOM Ladder, locate, and hotkey actions
-  share that context. The selector lists compatible accounts for that market.
+- Each colour Link Group remembers its last crypto exchange and the focused
+  symbol and Execution Venue for stocks and each supported perpetual exchange.
+  Account can select the market before a symbol is focused. Opening a symbol
+  also selects its market. Account, Order Ticket, chart, DOM Ladder, locate,
+  and hotkey actions share that context. Venue selection lists compatible
+  accounts, and symbol-specific actions require a matching symbol.
+- A Crypto Scanner set to Follow Account reads the exchange of its Link Group
+  and pauses in Stocks mode. Explicit Scanner exchanges and the app-default
+  Scanner setting support independent monitoring. Scanner data does not select
+  an Execution Venue.
 - A legacy single saved venue resolves only for the market supported by its
   configured broker. A missing or incompatible selection leaves trading
   unavailable for the focused market.

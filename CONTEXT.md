@@ -33,7 +33,7 @@ A colour-named shared focus channel through which panels follow the same symbol 
 _Avoid_: Panel group, tab group
 
 **Execution Venue**:
-A configured broker account and environment (paper or live) that receives an order. A Link Group remembers an Execution Venue for stocks and for each perpetual exchange. Its focus determines which selection applies. Orders belong to the venue chosen when they were submitted.
+A configured broker account and environment (paper or live) that receives an order. A Link Group remembers an Execution Venue for stocks and for each perpetual exchange. The Link Group's selected market determines which account applies, including when no symbol is focused. Orders belong to the venue chosen when they were submitted.
 _Avoid_: Active venue, global broker
 
 ## Venue Eligibility
