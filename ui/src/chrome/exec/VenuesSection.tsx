@@ -43,7 +43,7 @@ import type { ConnState } from "../../wire/WsClient";
 
 interface Commands { sendCommand(name: string, args: unknown): Promise<AckMsg>; }
 
-const BROKER_LABEL: Record<string, string> = { tradezero: "TradeZero", alpaca: "Alpaca", moomoo: "moomoo", sim: "Simulated", "mexc-sim": "MEXC Perpetual Simulator", mexc: "MEXC Live", "bingx-vst": "BingX Virtual", "binance-demo": "Binance Futures Demo" };
+const BROKER_LABEL: Record<string, string> = { tradezero: "TradeZero", alpaca: "Alpaca", moomoo: "moomoo", sim: "Simulated", "mexc-sim": "MEXC Perpetual Simulator", mexc: "MEXC Live", "bingx-vst": "BingX Virtual", "bingx-live": "BingX Live", "binance-demo": "Binance Futures Demo" };
 const GATE_CAPS = ["maxOrderValue", "maxPositionValue", "maxPositionShares", "maxOpenOrders"] as const;
 const GLOBAL_CAPS = ["maxDayLoss", "maxSymbolPositionValue", "maxSymbolPositionShares"] as const;
 const CAP_LABELS: Record<(typeof GATE_CAPS)[number] | (typeof GLOBAL_CAPS)[number], string> = {
@@ -76,17 +76,18 @@ const cryptoSlots = [
   { slot: "mexcLive", broker: "mexc", id: "mexc-live", env: "live", pending: "__pending_mexc_live__", currency: "USDT", badge: "LIVE" },
   { slot: "binanceDemo", broker: "binance-demo", id: "binance-demo", env: "paper", pending: "__pending_binance_demo__", currency: "USDT", badge: "DEMO" },
   { slot: "bingxVST", broker: "bingx-vst", id: "bingx-vst", env: "paper", pending: "__pending_bingx_vst__", currency: "VST", badge: "VST" },
+  { slot: "bingxLive", broker: "bingx-live", id: "bingx-live", env: "live", pending: "__pending_bingx_live__", currency: "USDT", badge: "LIVE" },
 ] as const;
 type CryptoSlot = (typeof cryptoSlots)[number]["slot"];
 type CredentialSlotName = "alpacaPaper" | "alpacaLive" | "tradezero" | CryptoSlot;
-interface Slots { sim: number; mexcPaper: number; mexcLive: number; bingxVST: number; binanceDemo: number; moomoo: number; alpacaPaper: number; alpacaLive: number; tradezero: number }
+type Slots = Record<CryptoSlot | "sim" | "mexcPaper" | "moomoo" | "alpacaPaper" | "alpacaLive" | "tradezero", number>;
 
 // Each slot claims the FIRST venue matching its (broker, env) predicate.
 // Broker values are mutually exclusive per venue, so independent `if`s (not
 // an if/else chain) are just as correct — kept as ifs for clarity, not for
 // any exclusivity reason.
 function resolveSlots(venues: Venue[]): Slots {
-  const s: Slots = { sim: -1, mexcPaper: -1, mexcLive: -1, bingxVST: -1, binanceDemo: -1, moomoo: -1, alpacaPaper: -1, alpacaLive: -1, tradezero: -1 };
+  const s: Slots = { sim: -1, mexcPaper: -1, mexcLive: -1, bingxVST: -1, bingxLive: -1, binanceDemo: -1, moomoo: -1, alpacaPaper: -1, alpacaLive: -1, tradezero: -1 };
   venues.forEach((v, i) => {
     if (v.broker === "sim" && s.sim === -1) s.sim = i;
     if (v.broker === "mexc-sim" && v.env === "paper" && s.mexcPaper === -1) s.mexcPaper = i;

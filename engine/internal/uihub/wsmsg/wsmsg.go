@@ -208,6 +208,7 @@ const (
 	BrokerMEXCSim     Broker = "mexc-sim"
 	BrokerMEXC        Broker = "mexc"
 	BrokerBingXVST    Broker = "bingx-vst"
+	BrokerBingXLive   Broker = "bingx-live"
 	BrokerBinanceDemo Broker = "binance-demo"
 )
 

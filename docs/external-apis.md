@@ -161,12 +161,15 @@ first-partial stop lifecycle can be verified. [MEXC signing](https://www.mexc.co
 · [Order placement](https://www.mexc.com/api-docs/futures/account-and-trading-endpoints/place-order)
 · [Active TP/SL records](https://www.mexc.com/api-docs/futures/account-and-trading-endpoints/get-current-take-profitstop-loss-order-list)
 
-BingX Virtual directs authenticated reads and writes exclusively to
-`open-api-vst.bingx.com`. Orders use `positionSide=BOTH`, and exits add the
-reduce-only flag. The adapter converts integer lots to exact base quantities
-and verifies the VST mark, collateral and effective leverage before opening.
-Charts and depth use the public BingX feed. The generic Binance and BingX Futures
-API checks use their production read-only endpoints. [BingX API environments](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/base-urls.md)
+BingX Live uses `open-api.bingx.com` and USDT collateral. BingX Virtual uses
+`open-api-vst.bingx.com` and VST collateral. Each venue binds its credentials
+and order journal to its own environment. Orders use `positionSide=BOTH` and
+exits add the reduce-only flag. The adapter converts integer lots to exact base
+quantities and verifies one-way mode, the account position, collateral, mark and
+the configured isolated leverage before opening. Both venues use the public
+BingX feed for charts and depth. The BingX Live credential test reads balance,
+position mode, positions and working orders. The generic Binance and BingX
+Futures API checks use their production read-only endpoints. [BingX API environments](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/base-urls.md)
 · [Swap orders and fills](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md)
 
 The authenticated adapters save pending submissions next to the local database

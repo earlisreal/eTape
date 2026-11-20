@@ -524,6 +524,8 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			return mexcBroker.NewLive(id, pair, execClk, path, mexcAPI)
 		case "bingx-vst":
 			return bingx.NewVirtual(id, pair, execClk, path)
+		case "bingx-live":
+			return bingx.NewLive(id, pair, execClk, path)
 		case "binance-demo":
 			return binance.NewDemo(id, pair, execClk, path, binanceDemoAPI)
 		default:
@@ -1227,13 +1229,13 @@ func hz(rate float64) time.Duration {
 // against nil, it doesn't decide when a Seeder exists.
 func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, seeder *venueseed.Seeder, venues []venueBroker) {
 	var perpetual []interface{ SetFairQuote(feed.Quote) }
-	var virtual *bingx.Virtual
+	var bingxVenues []*bingx.Adapter
 	for _, v := range venues {
 		if sink, ok := v.Broker.(interface{ SetFairQuote(feed.Quote) }); ok {
 			perpetual = append(perpetual, sink)
 		}
-		if b, ok := v.Broker.(*bingx.Virtual); ok {
-			virtual = b
+		if b, ok := v.Broker.(*bingx.Adapter); ok {
+			bingxVenues = append(bingxVenues, b)
 		}
 	}
 	for {
@@ -1245,10 +1247,13 @@ func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, seeder *venue
 				for _, sink := range perpetual {
 					sink.SetFairQuote(q.Quote)
 				}
-				if virtual != nil && strings.HasPrefix(q.Quote.Symbol, "PERP.BINGX.") {
-					if rules, ok := virtual.ContractRules(q.Quote.Symbol); ok {
-						q.Quote.Contract = &rules
-						u = q
+				if strings.HasPrefix(q.Quote.Symbol, "PERP.BINGX.") {
+					for _, venue := range bingxVenues {
+						if rules, ok := venue.ContractRules(q.Quote.Symbol); ok {
+							q.Quote.Contract = &rules
+							u = q
+							break
+						}
 					}
 				}
 			}

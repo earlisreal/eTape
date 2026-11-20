@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"strings"
@@ -84,7 +85,7 @@ func (l *list[T]) UnmarshalJSON(data []byte) error {
 	if raw := wrapped[l.Key]; len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
 		return json.Unmarshal(raw, &l.Items)
 	}
-	return errors.New("invalid BingX Virtual list")
+	return errors.New("invalid BingX list")
 }
 
 type accountState struct {
@@ -93,7 +94,7 @@ type accountState struct {
 	Orders    []order
 }
 
-func (a *virtualAPI) account(ctx context.Context) (accountState, error) {
+func (a *apiClient) account(ctx context.Context) (accountState, error) {
 	const read = http.MethodGet
 	var state accountState
 	var dual struct {
@@ -103,7 +104,7 @@ func (a *virtualAPI) account(ctx context.Context) (accountState, error) {
 		return state, err
 	}
 	if dual.Enabled == nil || *dual.Enabled {
-		return state, errors.New("set BingX Virtual to one-way position mode")
+		return state, fmt.Errorf("set %s to one-way position mode", a.env.label)
 	}
 	var balances []struct {
 		Asset     string      `json:"asset"`
@@ -115,21 +116,21 @@ func (a *virtualAPI) account(ctx context.Context) (accountState, error) {
 		return state, err
 	}
 	for _, b := range balances {
-		if b.Asset != "VST" {
+		if b.Asset != a.env.currency {
 			continue
 		}
 		cash, cashErr := b.Available.Float64()
 		equity, equityErr := b.Equity.Float64()
 		used, usedErr := b.Used.Float64()
 		if cashErr != nil || equityErr != nil || usedErr != nil || used < 0 {
-			return state, errors.New("invalid BingX Virtual collateral values")
+			return state, fmt.Errorf("invalid %s collateral values", a.env.label)
 		}
-		state.Account = exec.AccountSnapshot{Currency: "VST", Equity: equity, BuyingPower: cash, AvailableCash: cash,
+		state.Account = exec.AccountSnapshot{Currency: b.Asset, Equity: equity, BuyingPower: cash, AvailableCash: cash,
 			MarginUsed: used, DayPnLProvisional: true}
 		break
 	}
 	if state.Account.Currency == "" {
-		return state, errors.New("BingX Virtual returned no VST collateral account")
+		return state, fmt.Errorf("%s returned no %s collateral account", a.env.label, a.env.currency)
 	}
 	if err := a.request(ctx, read, "/openApi/swap/v2/user/positions", nil, true, &state.Positions); err != nil {
 		return state, err
@@ -169,7 +170,7 @@ func side(buy, reduce bool) exec.Side {
 	}
 }
 
-func (a *virtualAPI) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
+func (a *apiClient) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
 	if err := a.refreshCatalog(ctx); err != nil {
 		return exec.AccountSnapshot{}, nil, nil, err
 	}
@@ -185,11 +186,11 @@ func (a *virtualAPI) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec
 		}
 		terms, ok := a.contract(p.Symbol)
 		if !ok {
-			return state.Account, nil, nil, errors.New("missing BingX Virtual position terms")
+			return state.Account, nil, nil, fmt.Errorf("missing %s position terms", a.env.label)
 		}
 		qty, ok := positionLots(p, *terms.QtyDigits)
 		if !ok || qty != 0 && seen[p.Symbol] {
-			return state.Account, nil, nil, errors.New("invalid or duplicate BingX Virtual one-way position")
+			return state.Account, nil, nil, fmt.Errorf("invalid or duplicate %s one-way position", a.env.label)
 		}
 		if qty == 0 {
 			continue
@@ -197,7 +198,7 @@ func (a *virtualAPI) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec
 		avg, avgErr := p.Average.Float64()
 		margin, marginErr := p.Margin.Float64()
 		if avgErr != nil || marginErr != nil || avg <= 0 || margin < 0 {
-			return state.Account, nil, nil, errors.New("invalid BingX Virtual position values")
+			return state.Account, nil, nil, fmt.Errorf("invalid %s position values", a.env.label)
 		}
 		seen[p.Symbol] = true
 		positions = append(positions, exec.Position{Symbol: "PERP.BINGX." + p.Symbol, Qty: qty, AvgPrice: avg,
@@ -210,12 +211,12 @@ func (a *virtualAPI) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec
 		}
 		terms, ok := a.contract(o.Symbol)
 		if !ok {
-			return state.Account, nil, nil, errors.New("missing BingX Virtual working order terms")
+			return state.Account, nil, nil, fmt.Errorf("missing %s working order terms", a.env.label)
 		}
 		qty, valid := lots(o.Quantity, *terms.QtyDigits)
 		filled, validFill := lots(o.Filled, *terms.QtyDigits)
 		if !validID(o.id()) || !valid || !validFill || filled < 0 || filled >= qty || o.Side != "BUY" && o.Side != "SELL" {
-			return state.Account, nil, nil, errors.New("invalid BingX Virtual working order")
+			return state.Account, nil, nil, fmt.Errorf("invalid %s working order", a.env.label)
 		}
 		id := "BINGX:" + o.id()
 		if strings.HasPrefix(o.Client, "et") && len(o.Client) == 28 {

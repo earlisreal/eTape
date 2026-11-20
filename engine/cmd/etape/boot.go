@@ -122,9 +122,9 @@ func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, perpetual .
 		switch v.Broker {
 		case "sim":
 			out = append(out, venueBroker{ID: id, Env: v.Env, Broker: sim.New(id, clk, v.EffectiveStartingBalance(), sim.Options{SlippageBps: v.SlippageBps, FillLatencyMs: v.FillLatencyMs})})
-		case "mexc-sim", "mexc", "bingx-vst", "binance-demo":
+		case "mexc-sim", "mexc", "bingx-vst", "bingx-live", "binance-demo":
 			expected := "paper"
-			if v.Broker == "mexc" {
+			if v.Broker == "mexc" || v.Broker == "bingx-live" {
 				expected = "live"
 			}
 			if v.Env != expected || len(perpetual) == 0 {

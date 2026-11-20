@@ -77,6 +77,7 @@ describe("VenuesSection — Simulator card", () => {
   it.each([
     { id: "mexc-live", broker: "mexc", env: "live" },
     { id: "bingx-vst", broker: "bingx-vst", env: "paper" },
+    { id: "bingx-live", broker: "bingx-live", env: "live" },
   ])("saves the $id credentials and adds the correctly scoped venue", async ({ id, broker, env }) => {
     const commands = makeCommands([baseSetup()], { TestConnection: testAck(okResult({ env, accountId: "", message: "Futures reads verified" })) });
     wrap(commands);

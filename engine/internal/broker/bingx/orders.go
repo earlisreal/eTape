@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"net/http"
@@ -18,13 +19,13 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/instrument"
 )
 
-func (a *virtualAPI) Prepare(ctx context.Context, req exec.OrderRequest) (func(context.Context) error, error) {
+func (a *apiClient) Prepare(ctx context.Context, req exec.OrderRequest) (func(context.Context) error, error) {
 	if err := a.refreshCatalog(ctx); err != nil {
 		return nil, err
 	}
 	terms, ok := a.Rules(req.Symbol)
 	if !ok || req.Perpetual == nil || !terms.ValidQuantity(req.Qty) || terms.ContractSize() != req.Perpetual.Multiplier {
-		return nil, errors.New("invalid BingX Virtual order terms")
+		return nil, fmt.Errorf("invalid %s order terms", a.env.label)
 	}
 	id, _ := instrument.ParsePerpetual(req.Symbol)
 	item, _ := a.contract(id.Native)
@@ -32,7 +33,7 @@ func (a *virtualAPI) Prepare(ctx context.Context, req exec.OrderRequest) (func(c
 	buy := req.Side == exec.SideBuy || req.Side == exec.SideCover
 	reduce := req.Side == exec.SideCover || req.Side == exec.SideSell
 	if !buy && req.Side != exec.SideSell && req.Side != exec.SideShort {
-		return nil, errors.New("invalid BingX Virtual direction")
+		return nil, fmt.Errorf("invalid %s direction", a.env.label)
 	}
 	unit, _ := new(big.Rat).SetString(terms.Multiplier)
 	q := unit.Mul(unit, big.NewRat(int64(req.Qty), 1))
@@ -48,12 +49,12 @@ func (a *virtualAPI) Prepare(ctx context.Context, req exec.OrderRequest) (func(c
 	case exec.TypeMarket:
 	case exec.TypeLimit:
 		if !terms.ValidPrice(req.LimitPrice) || req.TIF != exec.TIFGTC && req.TIF != exec.TIFIOC && req.TIF != exec.TIFFOK {
-			return nil, errors.New("invalid BingX Virtual limit price or time in force")
+			return nil, fmt.Errorf("invalid %s limit price or time in force", a.env.label)
 		}
 		params.Set("price", strconv.FormatFloat(req.LimitPrice, 'f', -1, 64))
 		params.Set("timeInForce", req.TIF.String())
 	default:
-		return nil, errors.New("BingX Virtual supports market and limit orders")
+		return nil, fmt.Errorf("%s supports market and limit orders", a.env.label)
 	}
 	state, err := a.account(ctx)
 	if err != nil {
@@ -68,7 +69,7 @@ func (a *virtualAPI) Prepare(ctx context.Context, req exec.OrderRequest) (func(c
 		qty, valid := positionLots(p, *item.QtyDigits)
 		avail, validAvailable := lots(p.Available, *item.QtyDigits)
 		if !valid || qty != 0 && (held != 0 || !validAvailable || !p.Isolated) {
-			return nil, errors.New("BingX Virtual requires one isolated position per contract")
+			return nil, fmt.Errorf("%s requires one isolated position per contract", a.env.label)
 		}
 		if qty != 0 {
 			held, available, leverage = qty, math.Abs(avail), p.Leverage
@@ -76,15 +77,15 @@ func (a *virtualAPI) Prepare(ctx context.Context, req exec.OrderRequest) (func(c
 	}
 	if reduce {
 		if item.Close != "true" || held == 0 || buy != (held < 0) || req.Qty > min(math.Abs(held), available) {
-			return nil, errors.New("BingX Virtual close exceeds the confirmed isolated position available to reduce")
+			return nil, fmt.Errorf("%s close exceeds the confirmed isolated position available to reduce", a.env.label)
 		}
 	} else {
 		if !terms.TradingEnabled || held != 0 && (buy != (held > 0) || leverage != req.Perpetual.Leverage) {
-			return nil, errors.New("resolve the current isolated BingX Virtual position before opening")
+			return nil, fmt.Errorf("resolve the current isolated %s position before opening", a.env.label)
 		}
 		for _, order := range state.Orders {
 			if order.Symbol == id.Native {
-				return nil, errors.New("resolve working BingX Virtual orders for this contract first")
+				return nil, fmt.Errorf("resolve working %s orders for this contract first", a.env.label)
 			}
 		}
 		qty, _ := q.Float64()
@@ -98,7 +99,7 @@ func (a *virtualAPI) Prepare(ctx context.Context, req exec.OrderRequest) (func(c
 			// Documented definitive permission and business rejections.
 			var code apiError
 			if errors.As(err, &code) {
-				switch code {
+				switch code.code {
 				case 100001, 100004, 100412, 100413, 100419, 100421, 101204, 101206, 101211, 101415, 101419, 109415, 110206:
 					return exec.PerpetualSubmitDeclined{Cause: err}
 				}
@@ -106,13 +107,13 @@ func (a *virtualAPI) Prepare(ctx context.Context, req exec.OrderRequest) (func(c
 			return err
 		}
 		if !validID(response.id()) || !strings.EqualFold(response.Client, req.ClientOrderID) || response.Symbol != id.Native {
-			return errors.New("incomplete BingX Virtual order acknowledgement")
+			return fmt.Errorf("incomplete %s order acknowledgement", a.env.label)
 		}
 		return nil
 	}, nil
 }
 
-func (a *virtualAPI) checkOpening(ctx context.Context, symbol string, buy bool, qty float64, req exec.OrderRequest, available float64, item contract) error {
+func (a *apiClient) checkOpening(ctx context.Context, symbol string, buy bool, qty float64, req exec.OrderRequest, available float64, item contract) error {
 	params := func() url.Values { return url.Values{"symbol": {symbol}} }
 	var margin struct {
 		Type string `json:"marginType"`
@@ -121,7 +122,7 @@ func (a *virtualAPI) checkOpening(ctx context.Context, symbol string, buy bool, 
 		return err
 	}
 	if margin.Type != "ISOLATED" {
-		return errors.New("set this BingX Virtual contract to isolated margin")
+		return fmt.Errorf("set this %s contract to isolated margin", a.env.label)
 	}
 	var limit struct {
 		Long     int         `json:"longLeverage"`
@@ -141,7 +142,7 @@ func (a *virtualAPI) checkOpening(ctx context.Context, symbol string, buy bool, 
 	maximumQty, parseErr := maxQty.Float64()
 	leverage := req.Perpetual.Leverage
 	if parseErr != nil || leverage < 1 || current != leverage || maximum < leverage || qty > maximumQty {
-		return errors.New("match the BingX Virtual contract's configured leverage and available size")
+		return fmt.Errorf("match the %s contract's configured leverage and available size", a.env.label)
 	}
 	var mark struct {
 		Symbol string      `json:"symbol"`
@@ -154,16 +155,16 @@ func (a *virtualAPI) checkOpening(ctx context.Context, symbol string, buy bool, 
 	minimum, minErr := item.MinimumValue.Float64()
 	fee, feeErr := item.Fee.Float64()
 	if mark.Symbol != symbol || priceErr != nil || price <= 0 || minErr != nil || feeErr != nil || minimum < 0 || fee < 0 {
-		return errors.New("BingX Virtual mark or minimum trade value unavailable")
+		return fmt.Errorf("%s mark or minimum trade value unavailable", a.env.label)
 	}
 	if qty*max(price, req.LimitPrice)*(1/float64(leverage)+2*fee) > available {
-		return errors.New("insufficient BingX Virtual collateral")
+		return fmt.Errorf("insufficient %s collateral", a.env.label)
 	}
 	if req.Type == exec.TypeLimit {
 		price = req.LimitPrice
 	}
 	if qty*price < minimum {
-		return errors.New("order is below the BingX Virtual minimum trade value")
+		return fmt.Errorf("order is below the %s minimum trade value", a.env.label)
 	}
 	return nil
 }
@@ -173,7 +174,7 @@ func orderIdentity(req exec.OrderRequest) url.Values {
 	return url.Values{"symbol": {id.Native}, "clientOrderId": {strings.ToLower(req.ClientOrderID)}}
 }
 
-func (a *virtualAPI) lookup(ctx context.Context, req exec.OrderRequest) (order, exec.OrderStatus, error) {
+func (a *apiClient) lookup(ctx context.Context, req exec.OrderRequest) (order, exec.OrderStatus, error) {
 	var o order
 	params := orderIdentity(req)
 	if err := a.request(ctx, http.MethodGet, "/openApi/swap/v2/trade/order", params, true, &o); err != nil {
@@ -183,7 +184,7 @@ func (a *virtualAPI) lookup(ctx context.Context, req exec.OrderRequest) (order, 
 	reduce := req.Side == exec.SideSell || req.Side == exec.SideCover
 	if !validID(o.id()) || !strings.EqualFold(o.Client, req.ClientOrderID) || o.Symbol != params.Get("symbol") ||
 		o.Type != req.Type.String() || o.Side != "BUY" && o.Side != "SELL" || buy != (o.Side == "BUY") || o.ReduceOnly != reduce {
-		return o, 0, errors.New("mismatched BingX Virtual order identity")
+		return o, 0, fmt.Errorf("mismatched %s order identity", a.env.label)
 	}
 	switch o.Status {
 	case "NEW", "PENDING", "PARTIALLYFILLED":
@@ -197,11 +198,11 @@ func (a *virtualAPI) lookup(ctx context.Context, req exec.OrderRequest) (order, 
 	case "EXPIRED":
 		return o, exec.StatusExpired, nil
 	default:
-		return o, 0, errors.New("unknown BingX Virtual order state")
+		return o, 0, fmt.Errorf("unknown %s order state", a.env.label)
 	}
 }
 
-func (a *virtualAPI) Observe(ctx context.Context, req exec.OrderRequest) (exec.PerpetualObservation, error) {
+func (a *apiClient) Observe(ctx context.Context, req exec.OrderRequest) (exec.PerpetualObservation, error) {
 	o, status, err := a.lookup(ctx, req)
 	if err != nil {
 		return exec.PerpetualObservation{}, err
@@ -213,23 +214,16 @@ func (a *virtualAPI) Observe(ctx context.Context, req exec.OrderRequest) (exec.P
 	qty, valid := lots(o.Quantity, digits)
 	filled, validFill := lots(o.Filled, digits)
 	if !valid || !validFill || qty != req.Qty || filled < 0 || filled > qty || status == exec.StatusFilled && filled != qty {
-		return exec.PerpetualObservation{}, errors.New("invalid BingX Virtual order quantity")
+		return exec.PerpetualObservation{}, fmt.Errorf("invalid %s order quantity", a.env.label)
 	}
 	report := exec.PerpetualObservation{BrokerOrderID: o.id(), Status: status}
 	if filled == 0 {
 		return report, nil
 	}
-	var reply list[struct {
-		OrderID  json.Number `json:"orderId"`
-		Symbol   string      `json:"symbol"`
-		Side     string      `json:"side"`
-		Quantity json.Number `json:"volume"`
-		Price    json.Number `json:"price"`
-		Time     string      `json:"filledTime"`
-	}]
+	var reply list[tradeFill]
 	reply.Key = "fill_orders"
 	if o.Time <= 0 {
-		return report, errors.New("missing BingX Virtual order time")
+		return report, fmt.Errorf("missing %s order time", a.env.label)
 	}
 	params := url.Values{"tradingUnit": {"COIN"}, "currency": {"USDT"}, "orderId": {o.id()},
 		"startTs": {strconv.FormatInt(o.Time-1000, 10)}, "endTs": {strconv.FormatInt(a.clock.Now().UnixMilli(), 10)}}
@@ -238,25 +232,18 @@ func (a *virtualAPI) Observe(ctx context.Context, req exec.OrderRequest) (exec.P
 	}
 	var sum float64
 	occurrences := make(map[string]int)
+	seen := make(map[string]bool)
 	for _, f := range reply.Items {
-		q, ok := lots(f.Quantity, digits)
-		price, err := f.Price.Float64()
-		when, timeErr := time.Parse(time.RFC3339Nano, f.Time)
-		if f.OrderID.String() != o.id() || f.Symbol != o.Symbol || f.Side != o.Side ||
-			!ok || q <= 0 || err != nil || price <= 0 || timeErr != nil || when.UnixMilli() <= 0 {
-			return report, errors.New("invalid BingX Virtual fills")
+		execution, ok := a.execution(f, o, digits, occurrences)
+		if !ok || seen[execution.ID] {
+			return report, fmt.Errorf("invalid %s fills", a.env.label)
 		}
-		// VST returns no execution ID. Build stable identities from the
-		// normalized execution and preserve its multiplicity within this order.
-		key := strconv.FormatInt(when.UnixMilli(), 10) + ":" + strconv.FormatInt(int64(q), 10) + ":" +
-			strconv.FormatFloat(price, 'f', -1, 64)
-		occurrences[key]++
-		id := key + ":" + strconv.Itoa(occurrences[key])
-		sum += q
-		report.Fills = append(report.Fills, exec.PerpetualFill{ID: id, Qty: q, Price: price, TsMs: when.UnixMilli()})
+		seen[execution.ID] = true
+		sum += execution.Qty
+		report.Fills = append(report.Fills, execution)
 	}
 	if sum != filled {
-		return report, errors.New("BingX Virtual fills do not yet reconcile with the order")
+		return report, fmt.Errorf("%s fills do not yet reconcile with the order", a.env.label)
 	}
 	slices.SortFunc(report.Fills, func(a, b exec.PerpetualFill) int {
 		if n := cmp.Compare(a.TsMs, b.TsMs); n != 0 {
@@ -267,7 +254,59 @@ func (a *virtualAPI) Observe(ctx context.Context, req exec.OrderRequest) (exec.P
 	return report, nil
 }
 
-func (a *virtualAPI) Cancel(ctx context.Context, req exec.OrderRequest) error {
+type tradeFill struct {
+	OrderID    json.Number `json:"orderId"`
+	TradeID    json.Number `json:"tradeId"`
+	Symbol     string      `json:"symbol"`
+	Side       string      `json:"side"`
+	Price      json.Number `json:"price"`
+	Quantity   json.Number `json:"qty"`
+	Time       json.Number `json:"time"`
+	Volume     json.Number `json:"volume"`
+	FilledTime string      `json:"filledTime"`
+}
+
+func (a *apiClient) execution(f tradeFill, o order, digits int, occurrences map[string]int) (exec.PerpetualFill, bool) {
+	price, priceErr := f.Price.Float64()
+	if f.OrderID.String() != o.id() || priceErr != nil || price <= 0 {
+		return exec.PerpetualFill{}, false
+	}
+	if a.env.broker == live.broker && f.TradeID != "" {
+		qty, ok := lots(f.Quantity, digits)
+		when, err := f.Time.Int64()
+		id := f.TradeID.String()
+		return exec.PerpetualFill{ID: id, Qty: qty, Price: price, TsMs: when},
+			ok && qty > 0 && err == nil && when > 0 && validID(id) && f.Symbol == o.Symbol && f.Side == o.Side
+	}
+
+	// Legacy order-filtered records may omit the symbol and side in production.
+	// Preserve Virtual's existing fill identities for orders recovered on upgrade.
+	symbol, side := f.Symbol, f.Side
+	if a.env.broker == live.broker {
+		if symbol == "" {
+			symbol = o.Symbol
+		}
+		if side == "" {
+			side = o.Side
+		}
+	}
+	qty, ok := lots(f.Volume, digits)
+	when, err := time.Parse(time.RFC3339Nano, f.FilledTime)
+	if err != nil && a.env.broker == live.broker {
+		when, err = time.Parse("2006-01-02T15:04:05Z0700", f.FilledTime)
+	}
+	ts := when.UnixMilli()
+	if !ok || qty <= 0 || err != nil || ts <= 0 || symbol != o.Symbol || side != o.Side {
+		return exec.PerpetualFill{}, false
+	}
+	key := strconv.FormatInt(ts, 10) + ":" + strconv.FormatInt(int64(qty), 10) + ":" +
+		strconv.FormatFloat(price, 'f', -1, 64)
+	occurrences[key]++
+	id := key + ":" + strconv.Itoa(occurrences[key])
+	return exec.PerpetualFill{ID: id, Qty: qty, Price: price, TsMs: ts}, true
+}
+
+func (a *apiClient) Cancel(ctx context.Context, req exec.OrderRequest) error {
 	o, status, err := a.lookup(ctx, req)
 	if err != nil {
 		return err
@@ -281,7 +320,7 @@ func (a *virtualAPI) Cancel(ctx context.Context, req exec.OrderRequest) error {
 		return err
 	}
 	if response.id() != o.id() {
-		return errors.New("BingX Virtual cancellation acknowledgement did not identify the order")
+		return fmt.Errorf("%s cancellation acknowledgement did not identify the order", a.env.label)
 	}
 	return nil
 }

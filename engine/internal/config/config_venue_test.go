@@ -59,6 +59,24 @@ func TestValidateVenueConfigRejects(t *testing.T) {
 	}
 }
 
+func TestValidateVenueConfigIsolatesBingXEnvironments(t *testing.T) {
+	keys := []string{"bingx-prod", "bingx-VST"}
+	vc := VenueConfig{Venues: []Venue{
+		{ID: "bingx-live", Broker: "bingx-live", Env: "live", Credentials: keys[0]},
+		{ID: "bingx-vst", Broker: "bingx-vst", Env: "paper", Credentials: keys[1]},
+	}}
+	if err := ValidateVenueConfig(vc, keys); err != nil {
+		t.Fatalf("BingX venues rejected: %v", err)
+	}
+	if err := ValidateVenueConfig(vc, keys[1:]); err == nil {
+		t.Error("BingX Live accepted missing credentials")
+	}
+	vc.Venues[0].Env = "paper"
+	if err := ValidateVenueConfig(vc, keys); err == nil {
+		t.Error("BingX Live accepted the paper environment")
+	}
+}
+
 func TestEffectiveStartingBalanceDefaultsWhenUnsetOrZero(t *testing.T) {
 	for _, sb := range []float64{0, -5} {
 		v := Venue{ID: "sim", Broker: "sim", StartingBalance: sb}

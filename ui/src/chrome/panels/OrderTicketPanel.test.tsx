@@ -97,6 +97,33 @@ describe("OrderTicketPanel", () => {
     expect(linkGroups.venueFor("green", st)).toBe("alpaca-paper");
   });
 
+  it.each([
+    { broker: "bingx-live" as const, env: "live", currency: "USDT", badge: "LIVE" },
+    { broker: "bingx-vst" as const, env: "paper", currency: "VST", badge: "VST" },
+  ])("sizes and submits BingX orders using the selected $broker account", async ({ broker, env, currency, badge }) => {
+    const { props, stores, linkGroups, sent } = mkProps();
+    const st = { ...status(), venues: [{ ...status().venues[0], venue: broker, broker, env }] };
+    const symbol = "PERP.BINGX.BTC-USDT";
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: st });
+    stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: {
+      symbol, bid: 59999, ask: 60001, last: 60000, mark: 60000, ts: "",
+      contract: { base: "BTC", settlement: "USDT", multiplier: "0.0001", priceTick: "0.1",
+        quantityStep: 1, minimum: 1, maximum: 1000, minLeverage: 1, maxLeverage: 125, tradingEnabled: true },
+    } });
+    linkGroups.focus("green", symbol);
+    linkGroups.focusVenue("green", broker);
+    wrap(props);
+    expect(screen.getByTestId("venue-environment-badge").textContent).toBe(badge);
+    fireEvent.change(screen.getByLabelText("Size"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("Limit price"), { target: { value: "60000" } });
+    fireEvent.change(screen.getByLabelText("Isolated leverage"), { target: { value: "5" } });
+    expect(screen.getByText(new RegExp(`12.00 ${currency} margin`))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Long" }));
+    await waitFor(() => expect(sent.find(entry => entry.name === "SubmitOrder")?.args).toMatchObject({
+      venue: broker, symbol, side: "BUY", qty: 10, limitPrice: 60000, perpetual: { leverage: 5 },
+    }));
+  });
+
   it("shows no venue environment for a pinned panel", () => {
     const { props, stores } = mkProps();
     props.config.group = null;

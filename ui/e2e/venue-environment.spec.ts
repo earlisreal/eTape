@@ -127,6 +127,7 @@ test("linked panels recall the stock and exchange accounts", async ({ page, cont
           { ...status.venues[0], venue: "alpaca-live", broker: "alpaca", env: "live", connected: false },
           { ...status.venues[0], venue: "mexc-paper", broker: "mexc-sim", env: "paper" },
           { ...status.venues[0], venue: "bingx-virtual", broker: "bingx-vst", env: "paper" },
+          { ...status.venues[0], venue: "bingx-live", broker: "bingx-live", env: "live" },
         );
         socket.send(JSON.stringify(frame));
       } else {
@@ -181,4 +182,27 @@ test("linked panels recall the stock and exchange accounts", async ({ page, cont
   await expect(select).toHaveValue("mexc-paper");
   await load("bingx.btc.usdt");
   await expect(select).toHaveValue("bingx-virtual");
+  await expect(cue.getByTestId("venue-environment-badge")).toHaveText("VST");
+  await Promise.all([
+    page.waitForEvent("dialog").then(async dialog => {
+      expect(dialog.message()).toBe("Switch this Link Group from paper to live trading?");
+      await dialog.dismiss();
+    }),
+    select.selectOption("bingx-live"),
+  ]);
+  await expect(select).toHaveValue("bingx-virtual");
+  await Promise.all([
+    page.waitForEvent("dialog").then(async dialog => {
+      expect(dialog.message()).toBe("Switch this Link Group from paper to live trading?");
+      await dialog.accept();
+    }),
+    select.selectOption("bingx-live"),
+  ]);
+  await expect(account).toHaveValue("bingx-live");
+  await expect(cue.getByTestId("venue-environment-badge")).toHaveText("LIVE");
+  await load("mexc.btc.usdt");
+  await expect(select).toHaveValue("mexc-paper");
+  await load("bingx.btc.usdt");
+  await expect(select.locator("option:checked")).toHaveText("Confirm live account");
+  await expect(account).toHaveValue("");
 });

@@ -152,7 +152,7 @@ func testFrontmatterParityEnums(t *testing.T) {
 		"SignificanceState":  {string(wsmsg.SignificanceStateWarming), string(wsmsg.SignificanceStateActive), string(wsmsg.SignificanceStateClosed)},
 		"Broker": {
 			string(wsmsg.BrokerTradeZero), string(wsmsg.BrokerAlpaca), string(wsmsg.BrokerMoomoo), string(wsmsg.BrokerSim),
-			string(wsmsg.BrokerMEXCSim), string(wsmsg.BrokerMEXC), string(wsmsg.BrokerBingXVST), string(wsmsg.BrokerBinanceDemo),
+			string(wsmsg.BrokerMEXCSim), string(wsmsg.BrokerMEXC), string(wsmsg.BrokerBingXVST), string(wsmsg.BrokerBingXLive), string(wsmsg.BrokerBinanceDemo),
 		},
 		"AckStatus": {string(wsmsg.AckAccepted), string(wsmsg.AckBlocked)},
 		"LinkName": {

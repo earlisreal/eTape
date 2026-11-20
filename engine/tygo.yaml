@@ -79,7 +79,7 @@ packages:
       export type SignificanceLevel = "none" | "large" | "exceptional";
       export type SignificancePool = "RTH" | "EXTENDED";
       export type SignificanceState = "warming" | "active" | "closed";
-      export type Broker = "tradezero" | "alpaca" | "moomoo" | "sim" | "mexc-sim" | "mexc" | "bingx-vst" | "binance-demo";
+      export type Broker = "tradezero" | "alpaca" | "moomoo" | "sim" | "mexc-sim" | "mexc" | "bingx-vst" | "bingx-live" | "binance-demo";
       export type AckStatus = "accepted" | "blocked";
       export type LinkName = "ui-engine" | "engine-moomoo" | "engine-tz" | "engine-alpaca";
       export type LinkStatus = "ok" | "degraded" | "down";

@@ -165,6 +165,18 @@ func (p *Prober) TestConnection(ctx context.Context, broker, env, credName, keyI
 			return Result{Message: err.Error()}
 		}
 		return Result{OK: true, Env: "paper", Message: "BingX Virtual balance and one-way mode verified."}
+	case "bingx-live":
+		if env != "live" {
+			return Result{Message: "Select the BingX Live account check."}
+		}
+		cr, ok := p.resolveCreds(credName, keyID, secretKey)
+		if !ok {
+			return Result{Message: "BingX Live API key and secret are required."}
+		}
+		if err := bingx.VerifyLive(ctx, cr, p.clk); err != nil {
+			return Result{Message: err.Error()}
+		}
+		return Result{OK: true, Env: "live", Message: "BingX Live USDT balance, one-way mode, positions and working orders verified."}
 	case "mexc":
 		if env != "" && env != "live" {
 			return Result{Message: "Select the MEXC Live account check."}

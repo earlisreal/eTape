@@ -22,7 +22,9 @@ export function PerpetualTicket({ symbol, venue, routeReady, broker, positionRea
   const [leverage, setLeverage] = useState(1);
   const bingx = symbol.startsWith("PERP.BINGX.");
   const demo = symbol.startsWith(`PERP.${binanceDemoExchange}.`);
-  const exchange = bingx ? "BingX Virtual" : demo ? cryptoExchangeLabel[binanceDemoExchange] : "MEXC";
+  const exchange = broker === "bingx-live" ? "BingX Live" : broker === "bingx-vst" ? "BingX Virtual" :
+    bingx ? "BingX" : demo ? cryptoExchangeLabel[binanceDemoExchange] : "MEXC";
+  const marginCurrency = broker === "bingx-vst" ? "VST" : "USDT";
   const supportsStop = broker === "mexc-sim";
   const units = bingx || demo ? "lots" : "contracts";
   const contract = quote?.contract;
@@ -62,8 +64,9 @@ export function PerpetualTicket({ symbol, venue, routeReady, broker, positionRea
       <label>Isolated leverage <input className="ctl" type="number" min={contract?.minLeverage ?? 1} max={bingx ? undefined : contract?.maxLeverage} value={leverage} onChange={e => setLeverage(Number(e.target.value))} /></label>
     </div>
     {demo && <span>Match the isolated leverage set for this contract in Binance Demo.</span>}
+    {broker === "bingx-live" && <span>Match the isolated leverage set for this contract in BingX.</span>}
     {supportsStop && <label>Fair-price stop (optional) <input className="ctl" type="number" min={0} step={contract?.priceTick ?? "any"} value={stop} onChange={e => setStop(e.target.value)} /></label>}
-    {notional > 0 && contract && <span>{contracts} {units} · {(contracts * multiplier).toLocaleString("en-US", { maximumFractionDigits: 12 })} {contract.base} · {notional.toFixed(2)} USDT position value{validLeverage ? ` · ≈ ${(notional / leverage).toFixed(2)} ${bingx ? "VST" : "USDT"} margin` : ""}</span>}
+    {notional > 0 && contract && <span>{contracts} {units} · {(contracts * multiplier).toLocaleString("en-US", { maximumFractionDigits: 12 })} {contract.base} · {notional.toFixed(2)} USDT position value{validLeverage ? ` · ≈ ${(notional / leverage).toFixed(2)} ${marginCurrency} margin` : ""}</span>}
     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
       <button type="button" className="side side-buy" disabled={!canOpen || positionQty < 0} onClick={() => place("BUY")}>Open Long</button>
       <button type="button" className="side side-sell" disabled={!canOpen || positionQty > 0} onClick={() => place("SHORT")}>Open Short</button>

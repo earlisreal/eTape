@@ -51,7 +51,7 @@ export function useCryptoPreference(commands: CommandClient, key: string, enable
 
 export function cryptoBrokerExchange(broker: string | undefined): CryptoExchange | undefined {
   if (broker === "binance-demo") return binanceDemoExchange;
-  if (broker === "bingx-vst") return "BINGX";
+  if (broker === "bingx-vst" || broker === "bingx-live") return "BINGX";
   return broker === "mexc-sim" || broker === "mexc" ? "MEXC" : undefined;
 }
 
