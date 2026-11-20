@@ -13,7 +13,9 @@ Stock Info publishes the existing `stock.detail` snapshot by combining:
 - Alpaca asset metadata when an Alpaca venue is configured: borrow status,
   shortable, marginable, and tradable
 
-Moomoo uses the broad focused/watch/scanner symbol universe. Alpaca's active
+Stock Info uses stock symbols from the broad focused/watch/scanner universe.
+It skips perpetual contracts before building OpenD metadata batches so an
+active crypto chart cannot block stock industry lookups. Alpaca's active
 asset directory is loaded once during engine boot by the first configured
 Alpaca adapter. Stock Info performs an in-memory lookup for Alpaca status for
 every symbol in its normal universe, so scanner/watch symbols can receive the

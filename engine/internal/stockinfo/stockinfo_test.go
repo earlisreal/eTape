@@ -2,6 +2,7 @@ package stockinfo
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -771,6 +772,48 @@ func TestFetchTickSkipsWhenSymbolsEmpty(t *testing.T) {
 	}
 	if fr.calls[opend.ProtoQotGetSecuritySnapshot] != 0 || fr.calls[opend.ProtoQotGetOwnerPlate] != 0 {
 		t.Fatalf("want no requests when symbols() is empty, got %+v", fr.calls)
+	}
+}
+
+func TestFetchTickSkipsPerpetuals(t *testing.T) {
+	fr := enrichmentRequester()
+	stockPlates := ownerPlateBatchOrPoison("PERP.MEXC.BTC_USDT")
+	fr.ownerPlateFn = func(codes []string) *ownerplatepb.Response {
+		if slices.Contains(codes, "PERP.MEXC.BTC_USDT") {
+			return &ownerplatepb.Response{
+				RetType: proto.Int32(-1),
+				RetMsg:  proto.String("Unknown stock. PERP.MEXC.BTC_USDT"),
+			}
+		}
+		return stockPlates(codes)
+	}
+	pub := &fakePublisher{}
+	perps := []string{"PERP.MEXC.BTC_USDT", "PERP.BINGX.BTC-USDT"}
+	syms := []string{perps[0], "US.AAPL", perps[1]}
+	p := New(config.StockInfo{MaxPerReq: 400}, fr, pub, clock.NewFake(time.Now()), func() []string { return syms }, newFakeBars(), nil)
+	ctx := context.Background()
+
+	p.fetchTick(ctx)
+	syms = perps
+	p.fetchTick(ctx)
+
+	for _, batch := range []struct {
+		name  string
+		calls [][]string
+	}{
+		{"snapshot", fr.snapshotCodeCalls},
+		{"owner-plate", fr.ownerPlateCodeCalls},
+		{"static-info", fr.staticInfoCodeCalls},
+	} {
+		if len(batch.calls) != 1 || !slices.Equal(batch.calls[0], []string{"AAPL"}) {
+			t.Errorf("%s requests = %v, want one batch with AAPL only", batch.name, batch.calls)
+		}
+	}
+	if len(pub.calls) != 1 || pub.calls[0].key != "US.AAPL" {
+		t.Fatalf("published updates = %+v, want one for US.AAPL", pub.calls)
+	}
+	if got := pub.calls[0].payload.(wsmsg.StockDetailPayload).Industry; got != "AAPL Industry" {
+		t.Errorf("AAPL industry = %q, want AAPL Industry", got)
 	}
 }
 

@@ -33,6 +33,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
+	"github.com/earlisreal/eTape/engine/internal/instrument"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 
@@ -155,7 +156,13 @@ func (p *Poller) Run(ctx context.Context) error {
 // at most once per UTC day per symbol) and publishes one
 // wsmsg.StockDetailPayload per symbol that a snapshot was returned for.
 func (p *Poller) fetchTick(ctx context.Context) {
-	syms := p.symbols()
+	candidates := p.symbols()
+	syms := make([]string, 0, len(candidates))
+	for _, sym := range candidates {
+		if !instrument.IsPerpetual(sym) {
+			syms = append(syms, sym)
+		}
+	}
 	if len(syms) == 0 {
 		return
 	}
