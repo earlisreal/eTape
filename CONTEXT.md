@@ -121,6 +121,10 @@ _Avoid_: Global Scanner alert, Scanner Sync sound
 A saved per-Scanner Panel preference that excludes that panel from making its workspace window eligible for Scanner Sound. It defaults to unmuted and remains subordinate to the global sound controls.
 _Avoid_: Global Scanner mute, sound off
 
+**Crypto List**:
+A Workspace panel for finding USDT perpetual contracts on a selected exchange and comparing their available market data in a sortable table.
+_Avoid_: Crypto Scanner
+
 **Price Alert**:
 A saved, symbol-specific at-or-above or at-or-below condition on the Last-Eligible Price, shared across Workspaces and restored after eTape restarts. It fires once and has no automatic daily expiry.
 _Avoid_: Stop order, price alarm, chart drawing
