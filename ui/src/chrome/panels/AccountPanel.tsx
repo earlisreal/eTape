@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Dialog } from "../controls/Dialog";
 import { Button } from "../controls/Button";
@@ -17,7 +17,7 @@ import { useOrderConfig } from "../exec/useOrderConfig";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import { pendingPerpetualStop } from "../exec/perpetual";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
-import { formatClock, formatEtDateTime, formatPrice, formatSize, quoteDecimals } from "../../render/format";
+import { formatClock, formatEtDateTime, formatPrice, formatSize, marketPriceDecimals, quoteDecimals } from "../../render/format";
 import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, abbrevType, isTerminal, isWorking, type DisplayStatus } from "../exec/orderStatus";
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
 import type { OrderView } from "../../data/ExecStore";
@@ -180,20 +180,14 @@ function readClosedSort(s: Record<string, unknown>): SortState {
   return CLOSED_DEFAULT_SORT;
 }
 
-function OrderPriceCells({ order, pendingStop }: {
-  order: Pick<Order, "type" | "limitPrice" | "stopPrice">;
-  pendingStop?: ReturnType<typeof pendingPerpetualStop>;
-}): JSX.Element {
+const orderCell = { padding: "2px 8px", overflow: "hidden", textOverflow: "ellipsis" };
+
+function OrderPriceCells({ order }: { order: Pick<Order, "symbol" | "type" | "limitPrice" | "stopPrice"> }): JSX.Element {
   return <>{ORDER_PRICE_COLUMNS.map((column) => {
     const value = ORDER_PRICE_ACCESSORS[column.col](order);
-    const text = value === null ? "—" : typeof value === "number" ? formatPrice(value, quoteDecimals(value)) : value;
-    return <td key={column.col} data-column={column.col} title={text} style={{ padding: "2px 8px", overflow: "hidden", textOverflow: "ellipsis" }}>
-      {text}
-      {column.col === "stopPrice" && pendingStop && <div style={{ color: "var(--text-muted)", fontSize: 10 }}
-        title="Fair-price stop activates after the entry fills reconcile">
-        {pendingStop.price}<br />{pendingStop.side === "SELL" ? "Sell" : "Cover"} pending
-      </div>}
-    </td>;
+    const text = value === null ? "—" : typeof value === "number"
+      ? formatPrice(value, Math.max(quoteDecimals(value), marketPriceDecimals(order.symbol, value))) : value;
+    return <td key={column.col} data-column={column.col} title={text} style={orderCell}>{text}</td>;
   })}</>;
 }
 
@@ -233,7 +227,9 @@ function OrdersTable({
     refresh();
     return () => window.clearTimeout(timer);
   }, []);
-  const views = sortRows(stores.exec.orders().filter((v) => v.order.venue === venue && (v.optimistic || isWorking(v.order.status))), openSort, ORDERS_SORT_ACCESSORS);
+  const views = sortRows(stores.exec.orders().filter((v) => v.order.venue === venue && (v.optimistic || isWorking(v.order.status))), openSort, ORDERS_SORT_ACCESSORS)
+    .map((view) => ({ ...view, pendingStop: pendingPerpetualStop(view.order) }));
+  const openCount = views.length + views.filter((view) => view.pendingStop).length;
   const closedRows = sortRows(stores.exec.closedOrders().filter((o) => o.venue === venue && isTerminal(o.status)), closedSort, CLOSED_SORT_ACCESSORS);
   const openHasDates = views.some(({ order }) => formatEtDateTime(order.createdMs, todayMs).includes(" "));
   const closedHasDates = closedRows.some((order) => formatEtDateTime(order.updatedMs, todayMs).includes(" "));
@@ -273,7 +269,7 @@ function OrdersTable({
         <Button type="button" disabled={trailBusy} onClick={()=>setTrailEdit(null)}>Close</Button></div>
       </Dialog>}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
-        {upperTab(`Open Orders (${views.length})`, tab === "open", () => setTab("open"), "open-orders-tab")}
+        {upperTab(`Open Orders (${openCount})`, tab === "open", () => setTab("open"), "open-orders-tab")}
         {upperTab(`Closed Orders (${closedRows.length})`, tab === "closed", () => setTab("closed"), "closed-orders-tab")}
         {tab === "open" && <HoverButton data-testid="cancel-all" onClick={() => void oc.cancelAll("venue", undefined, { venue })}
           style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.warn}`, background: "transparent", color: palette.warn, cursor: "pointer" }}>Cancel All</HoverButton>}
@@ -295,21 +291,22 @@ function OrdersTable({
                 onKeyDown={(event) => openResize.onKeyDown(c.col, event)} />
             </th>)}
           </tr></thead>
-          <tbody>{views.map(({ order, optimistic }) => {
+          <tbody>{views.map(({ order, optimistic, pendingStop }) => {
             const ds = displayStatus(order, optimistic);
             const variant = chipVariant(ds);
             const working = !optimistic && isWorking(order.status);
-            const pendingStop = pendingPerpetualStop(order);
+            const name = bareSymbol(order.symbol);
+            const symbol = <td data-column="symbol" title={name} style={orderCell}>{name}</td>;
             const custody = orderCustodyLabel(order, todayMs) ??
               (order.deferredPositionPct !== undefined && !order.held?.resolvedQty && order.held?.deadlineMs
                 ? `eTape-held · expires ${formatEtDateTime(order.held.deadlineMs, todayMs)} ET` : null);
-            return <tr key={order.id} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
+            return <Fragment key={order.id}><tr style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
               <td data-column="createdMs" style={{ padding: "2px 8px" }} title={formatEtDateTime(order.createdMs)}>{formatEtDateTime(order.createdMs, todayMs)}</td>
-              <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
+              {symbol}
               <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
               <td data-column="qty">{order.deferredPositionPct !== undefined && !order.held?.resolvedQty
                 ? `${order.deferredPositionPct}% position` : formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)}</td>
-              <OrderPriceCells order={order} pendingStop={pendingStop} />
+              <OrderPriceCells order={order} />
               <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}
                 {custody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{custody}</div>}</td>
@@ -318,7 +315,18 @@ function OrdersTable({
                   <button type="button" aria-label="Resume held MEXC order" onClick={() => void oc.resumeHeld(order.venue, order.id)}>Resume</button>}
                 {(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
                 style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton> : null}</td>
-            </tr>;
+            </tr>
+              {pendingStop && <tr data-testid={`account-pending-stop-${order.id}`} style={{ textAlign: "center", color: palette.textMuted }}>
+                <td data-column="createdMs">—</td>
+                {symbol}
+                <td data-column="side" style={{ color: pendingStop.side === "COVER" ? palette.up : palette.down }}>{pendingStop.side}</td>
+                <td data-column="qty">—</td>
+                <OrderPriceCells order={{ symbol: order.symbol, type: "STOP", stopPrice: pendingStop.price, limitPrice: 0 }} />
+                <td data-column="state"><span className="chip chip-pending" data-chip="pending"
+                  title="Fair-price stop activates after the entry fills reconcile">Pending fill</span></td>
+                <td data-column="actions" />
+              </tr>}
+            </Fragment>;
           })}</tbody>
         </table>
       </div> : <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>

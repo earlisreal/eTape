@@ -94,9 +94,9 @@ describe("AccountPanel", () => {
     expect(screen.queryByTestId("venue-environment-badge")).toBeNull();
   });
 
-  it.each([["BUY", "Sell"], ["SHORT", "Cover"]] as const)(
-    "shows the pending %s entry's protective stop beside its trigger",
-    (side, label) => {
+  it.each([["BUY", "SELL", 0.123456, 0], ["SHORT", "COVER", 62300, 2]] as const)(
+    "shows a separate pending stop for a %s entry and removes it when the IOC settles",
+    (side, closeSide, stopPrice, filled) => {
       const { props, stores, linkGroups } = mkProps();
       const venue = "mexc-live";
       const symbol = "PERP.MEXC.BTC_USDT";
@@ -107,17 +107,33 @@ describe("AccountPanel", () => {
       linkGroups.hydrate({ green: symbol });
       linkGroups.focusVenue("green", venue);
       const entry: Order = { venue, symbol, id: "waiting-risk", side, type: "STOP_LIMIT", tif: "IOC", session: "AUTO",
-        qty: 6, limitPrice: 62882, stopPrice: 62259.7, pendingProtectionPrice: side === "BUY" ? 62136.5 : 62300,
+        qty: 6, limitPrice: 62882, stopPrice: 62259.7, pendingProtectionPrice: stopPrice,
         status: "SUBMITTED", executedQty: 0, leavesQty: 6, avgFillPrice: 0, rejectReason: "", replacesId: "",
         createdMs: 1, updatedMs: 1, held: { phase: "WAITING", deadlineMs: 2 } };
       stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [entry] });
       wrap(props);
-      const stopCell = screen.getByTestId("open-orders-table").querySelector('tbody [data-column="stopPrice"]');
-      expect(stopCell?.textContent).toContain(String(entry.pendingProtectionPrice));
-      expect(stopCell?.textContent).toContain(`${label} pending`);
-      expect(screen.getByText("Open Orders (1)")).toBeTruthy();
-      act(() => stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...entry, status: "CANCELED" } }));
-      expect(screen.queryByText(`${label} pending`, { exact: false })).toBeNull();
+      const table = screen.getByTestId("open-orders-table");
+      const column = (key: string) => Array.from(table.querySelectorAll(`tbody td[data-column="${key}"]`), cell => cell.textContent);
+      expect(column("side")).toEqual([side, closeSide]);
+      expect(column("stopPrice")).toEqual(["62259.700", stopPrice === 62300 ? "62300.000" : "0.123456"]);
+      expect(column("qty")).toEqual(["6", "—"]);
+      expect(column("state")).toEqual(["Submitted", "Pending fill"]);
+      expect(column("actions")).toEqual(["Cancel", ""]);
+      expect(screen.getByText("Open Orders (2)")).toBeTruthy();
+
+      act(() => {
+        stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...entry, status: "CANCELED", executedQty: filled, leavesQty: entry.qty - filled } });
+        if (filled) {
+          const stop: Order = { ...entry, id: "active-stop", side: closeSide, type: "STOP", limitPrice: 0, stopPrice,
+            status: "SUBMITTED", qty: filled, leavesQty: filled };
+          delete stop.pendingProtectionPrice;
+          stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: stop });
+        }
+      });
+      expect(screen.queryByText("Pending fill")).toBeNull();
+      expect(column("side")).toEqual(filled ? [closeSide] : []);
+      expect(column("qty")).toEqual(filled ? [String(filled)] : []);
+      expect(screen.getByText(`Open Orders (${filled ? 1 : 0})`)).toBeTruthy();
     },
   );
 
