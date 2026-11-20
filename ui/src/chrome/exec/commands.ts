@@ -48,7 +48,7 @@ export class OrderCommands {
   }
   async resumeHeld(venue:string,orderId:string):Promise<void> {
     const ack=await this.d.cmd.sendCommand("ResumeHeldOrder",{venue,orderId});
-    this.trailFeedback(ack,venue,"Trail resumed; waiting for fresh execution data");
+    this.trailFeedback(ack,venue,"Order resumed. Waiting for fresh execution data.");
   }
   async editTrail(order:Order,config:TrailConfig):Promise<boolean> {
     const error=trailError(config);

@@ -316,6 +316,52 @@ func TestRiskEntryPartialFillProtectionSurvivesDisarm(t *testing.T) {
 	}
 }
 
+func TestRiskProtectionResumesAndEvaluatesFirstPrintAfterFeedGap(t *testing.T) {
+	c, clk, broker, ctx := newRiskCore(t)
+	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
+	if !ack.Accepted {
+		t.Fatalf("admission: %+v", ack)
+	}
+	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
+	stopID := entry.RiskEntry.StopID
+	clk.Advance(time.Millisecond)
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
+	select {
+	case <-broker.submits:
+	case <-time.After(time.Second):
+		t.Fatal("entry did not trigger")
+	}
+	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
+	broker.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 100, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 100, AvgPrice: 10}
+	waitOrder(t, c, stopID, func(o Order) bool { return o.Qty == 100 })
+	clk.Advance(time.Millisecond)
+	gapAt := clk.Now()
+	c.FeedEligiblePrint(ctx, EligiblePrint{Gap: true, RecvTsMs: gapAt.UnixMilli()})
+	waitHeldOrder(t, c, stopID, HeldPaused)
+
+	clk.Advance(time.Millisecond)
+	feedCorroboratedPrint(t, c, ctx, eligible(3, gapAt, 9.8))
+	other := eligible(3, clk.Now(), 9.8)
+	other.Symbol = "MSFT"
+	feedCorroboratedPrint(t, c, ctx, other)
+	select {
+	case req := <-broker.submits:
+		t.Fatalf("protection triggered without a post-gap AAPL print: %+v", req)
+	default:
+	}
+
+	clk.Advance(time.Millisecond)
+	feedCorroboratedPrint(t, c, ctx, eligible(4, clk.Now(), 9.8))
+	select {
+	case req := <-broker.submits:
+		if req.ClientOrderID != stopID || req.Side != SideSell || req.Qty != 100 || req.LimitPrice != 9.8 {
+			t.Fatalf("restored protection: %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the first post-gap AAPL print did not trigger protection")
+	}
+}
+
 func TestRiskEntryLateFillsDoNotDuplicatePausedProtection(t *testing.T) {
 	c, clk, broker, ctx := newRiskCore(t)
 	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
@@ -458,6 +504,9 @@ func TestRiskEntryRecoveryKeepsPairPausedWithoutBrokerReplay(t *testing.T) {
 	if entry.Qty != 40 || entry.RiskEntry.Budget != 1000 {
 		t.Fatalf("preview cap and Cash risk: %+v", entry)
 	}
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, EligiblePrint{Gap: true, RecvTsMs: clk.Now().UnixMilli()})
+	waitHeldOrder(t, c, stop.ID, HeldPaused)
 	broker := newHeldTestBroker()
 	recovered := NewCore(CoreConfig{Venues: []VenueID{"v"}, Gate: c.gate, Store: c.store, Brokers: map[VenueID]Broker{"v": broker}, Clock: clk})
 	if err := recovered.Recover(ctx); err != nil {
@@ -467,6 +516,9 @@ func TestRiskEntryRecoveryKeepsPairPausedWithoutBrokerReplay(t *testing.T) {
 	protection := waitHeldOrder(t, recovered, stop.ID, HeldPaused)
 	if restored.RiskEntry == nil || restored.RiskEntry.StopID != stop.ID || protection.RiskEntryID != entry.ID {
 		t.Fatal("pair linkage lost during recovery")
+	}
+	if protection.Held.PausedReason != "engine restarted; resume manually" {
+		t.Fatalf("restart retained the feed-gap pause: %+v", protection.Held)
 	}
 	select {
 	case req := <-broker.submits:
@@ -485,8 +537,13 @@ func TestRiskEntryReconciledFillsGrowPausedProtection(t *testing.T) {
 	<-broker.submits
 	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
 	waitHeldOrder(t, c, entry.ID, HeldWorking)
-	broker.ev <- BrokerConnDown{V: "v"}
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, EligiblePrint{Gap: true, RecvTsMs: clk.Now().UnixMilli()})
 	waitHeldOrder(t, c, stop.ID, HeldPaused)
+	broker.ev <- BrokerConnDown{V: "v"}
+	waitOrder(t, c, stop.ID, func(o Order) bool {
+		return o.Held.PausedReason == "venue connection lost; reconcile and resume manually"
+	})
 	entry.Type = TypeLimit
 	entry.Held = nil
 	entry.RiskEntry = nil

@@ -237,8 +237,12 @@ The exit covers only this strategy's confirmed fills. Stop activation cancels th
 remaining buys; late fills receive separate durable exit children, including
 reservations for paused protection. Disarm/day-loss cancel further buying while
 healthy reducing linked exits remain enabled. Cancel Protection cancels every
-linked leg and leaves shares open. Restart/feed/broker gaps pause local custody
-for reconciliation and manual Resume; ambiguous children are never reposted.
+linked leg and leaves shares open. After a stock market-data gap within the same
+engine run, a pretrigger linked stop resumes on the first fresh eligible trade
+for its symbol when broker positions are ready. That trade can trigger the stop
+through the normal price and position checks. Buy triggers paused by a feed
+gap require manual Resume. Broker interruptions and restarts of fixed stops
+require reconciliation and manual Resume. Ambiguous children are never reposted.
 Snapshots and recovery update protection from confirmed fills; newly uncovered
 late fills discovered by reconciliation require manual Resume even with healthy quotes.
 Marker edits retain cushions, resize only before buy activation against the

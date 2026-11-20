@@ -36,7 +36,10 @@ func (c *Core) shutdownHeldOrders() {
 			o = c.order(o.ID)
 		}
 		switch o.Held.Phase {
-		case HeldWaiting, HeldArmed, HeldWaitingQuote:
+		case HeldWaiting, HeldArmed, HeldWaitingQuote, HeldPaused:
+			if o.Held.Phase == HeldPaused && !stockRiskStopPausedForPrintGap(o) {
+				continue
+			}
 			c.changeHeld(o, HeldPaused, "engine shutdown; resume manually", false)
 			summary.Paused++
 		case HeldActivating:
@@ -90,6 +93,12 @@ func (c *Core) shutdownHeldOrders() {
 
 const eligiblePrintMaxAge = 2 * time.Second
 
+const stockRiskStopPrintGap = "eligible-print gap; resumes on fresh trade data"
+
+func stockRiskStopPausedForPrintGap(o Order) bool {
+	return o.Held != nil && o.Held.Phase == HeldPaused && o.Held.PausedReason == stockRiskStopPrintGap
+}
+
 func (c *Core) freshEligiblePrint(p EligiblePrint) bool {
 	age := c.clk.Now().Sub(time.UnixMilli(p.RecvTsMs))
 	return p.RecvTsMs > 0 && age >= 0 && age <= eligiblePrintMaxAge
@@ -132,7 +141,12 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 		for _, id := range c.heldOrderIDs() {
 			o := c.order(id)
 			if o.Held != nil && o.Perpetual == nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
-				c.changeHeld(o, HeldPaused, "eligible-print gap; resume manually", false)
+				reason := "eligible-print gap; resume manually"
+				if o.RiskEntryID != "" && o.Held.ChildClientID == "" && !o.Held.CancelRequested &&
+					(o.Held.Trail == nil || !o.Held.Trail.Retired && !o.Held.Trail.Triggered) {
+					reason = stockRiskStopPrintGap
+				}
+				c.changeHeld(o, HeldPaused, reason, false)
 			}
 		}
 		return
@@ -161,11 +175,23 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 	if !instrument.IsPerpetual(p.Symbol) {
 		c.printHealthy = true
 	}
+	observedProtection := false
 	for _, id := range c.heldOrderIDs() {
-		if o := c.order(id); o.Symbol == p.Symbol && c.protectiveOrder(o) && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
+		o := c.order(id)
+		if o.Symbol != p.Symbol {
+			continue
+		}
+		// The feed gap leaves the existing execution subscription in place. Rejoin
+		// normal evaluation before observing this print so it can trigger the stop.
+		if stockRiskStopPausedForPrintGap(o) && c.state.PositionsReady(o.Venue) &&
+			!c.state.Venue(o.Venue).FlattenPending && c.trailPositionChecks[o.Venue] == nil && o.Held.DeadlineMs > c.now() {
+			c.changeHeld(o, HeldWaiting, "", false)
+			o = c.order(id)
+		}
+		if !observedProtection && c.protectiveOrder(o) && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
 			c.requestProtectionBook(o)
 			c.observeProtectionPrice(p)
-			break
+			observedProtection = true
 		}
 	}
 	c.resolveProtection(ctx, p.Symbol)
@@ -540,7 +566,8 @@ func (c *Core) requestHeldVenueCancel(ctx context.Context, o Order, reason strin
 func (c *Core) pauseHeldVenue(venue VenueID, reason string) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
-		if o.Venue == venue && o.Held != nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed || o.Perpetual != nil && o.Held.Phase == HeldWaitingQuote) {
+		if o.Venue == venue && o.Held != nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed ||
+			o.Perpetual != nil && o.Held.Phase == HeldWaitingQuote || stockRiskStopPausedForPrintGap(o)) {
 			c.changeHeld(o, HeldPaused, reason, false)
 		}
 	}
@@ -550,7 +577,7 @@ func (c *Core) pauseHeldReducingVenue(venue VenueID, reason string) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
 		if o.Venue == venue && c.requiresReductionGuard(OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side}) && o.Held != nil &&
-			(o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
+			(o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed || stockRiskStopPausedForPrintGap(o)) {
 			c.changeHeld(o, HeldPaused, reason, false)
 		}
 	}

@@ -303,6 +303,8 @@ function OrdersTable({
             const ds = displayStatus(order, optimistic);
             const variant = chipVariant(ds);
             const working = !optimistic && isWorking(order.status);
+            const pausedStockProtection = working && order.type === "STOP_LIMIT" && !!order.riskEntryId &&
+              !order.symbol.startsWith("PERP.") && order.held?.phase === "PAUSED" && !order.held.trail && !order.held.cancelRequested;
             const name = bareSymbol(order.symbol);
             const symbol = <td data-column="symbol" title={name} style={orderCell}>{name}</td>;
             const custody = orderCustodyLabel(order, todayMs) ??
@@ -315,13 +317,16 @@ function OrdersTable({
               <td data-column="qty">{order.deferredPositionPct !== undefined && !order.held?.resolvedQty
                 ? `${order.deferredPositionPct}% position` : formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)}</td>
               <OrderPriceCells order={order} />
-              <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
+              <td data-column="state">{pausedStockProtection ? <span className="chip chip-pending" title={order.held?.pausedReason}>Paused</span>
+                : variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}
                 {custody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{custody}</div>}</td>
               <td data-column="actions">{order.held?.trail && !order.held.trail.retired && !order.held.trail.triggered && ["WAITING","ARMED"].includes(order.held.phase) && <button type="button" aria-label="Edit trail" onClick={()=>{const current=stores.exec.liveOrder(order.id)??order;setTrailEdit({order:current,config:current.held!.trail!.config});}}>Edit</button>}{order.held?.trail && !order.held.trail.retired && order.held.phase==="PAUSED" && <button type="button" aria-label="Resume trail" onClick={()=>void oc.resumeHeld(order.venue,order.id)}>Resume</button>}
                 {(order.symbol.startsWith("PERP.MEXC.") || order.wholePositionProtection || order.perpetualRisk?.wholePosition) &&
                   order.held?.phase === "PAUSED" &&
                   <button type="button" aria-label={order.symbol.startsWith("PERP.MEXC.") ? "Resume held MEXC order" : "Resume held BingX order"} onClick={() => void oc.resumeHeld(order.venue, order.id)}>Resume</button>}
+                {pausedStockProtection && <div><button type="button" aria-label="Resume protection"
+                  onClick={() => void oc.resumeHeld(order.venue, order.id)}>Resume</button></div>}
                 {(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
                 style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton> : null}</td>
             </tr>

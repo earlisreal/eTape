@@ -15,7 +15,7 @@ async function addAccountPanel(page: Page, waitForLatency = true): Promise<void>
   await expect(page.getByTestId("demo-banner")).toBeVisible();
   await expect(page.getByTestId("boot-status-banner")).toHaveCount(0, { timeout:15_000 });
   await page.getByRole("button", { name: "+ Add panel" }).click();
-  await page.getByRole("button", { name: /Account Equity, BP, day P&L/ }).last().click();
+  await page.getByRole("dialog", { name: "Add panel" }).getByRole("button", { name: /Account Equity, BP, day P&L/ }).click();
   await expect(page.getByTestId("acct-equity")).toBeVisible({ timeout: 15_000 });
 }
 
@@ -52,6 +52,47 @@ test("Account keeps protection warnings visible across tabs and clears resolved 
   warnings = [];
   publishWarnings?.();
   await expect(alert).toHaveCount(0);
+});
+
+test("Account resumes a paused fixed stock protection order", async ({ page }) => {
+  const now = Date.now();
+  const reason = "broker stream gap; reconcile and resume manually";
+  let order: Order = {
+    venue: "sim-paper", id: "protection", symbol: "US.AAPL", side: "SELL", type: "STOP_LIMIT", tif: "DAY", session: "EXTENDED",
+    qty: 12, leavesQty: 12, executedQty: 0, limitPrice: 9.75, stopPrice: 9.8, avgFillPrice: 0,
+    status: "SUBMITTED", rejectReason: "", replacesId: "", createdMs: now, updatedMs: now, riskEntryId: "entry",
+    held: { phase: "PAUSED", deadlineMs: now + 60_000, pausedReason: reason },
+  };
+  let resumeArgs: unknown;
+  await page.routeWebSocket("**/ws", (socket) => {
+    const server = socket.connectToServer();
+    const publishOrder = () => socket.send(JSON.stringify({ kind: "snapshot", topic: "exec.orders", payload: [order] }));
+    server.onMessage((raw) => {
+      if (typeof raw === "string" && JSON.parse(raw).topic === "exec.orders") publishOrder();
+      else socket.send(raw);
+    });
+    socket.onMessage((raw) => {
+      if (typeof raw !== "string") { server.send(raw); return; }
+      const message = JSON.parse(raw);
+      if (message.kind !== "command" || message.name !== "ResumeHeldOrder") { server.send(raw); return; }
+      resumeArgs = message.args;
+      order = { ...order, held: { phase: "WAITING", deadlineMs: now + 60_000 } };
+      publishOrder();
+      socket.send(JSON.stringify({ kind: "ack", corrId: message.corrId, status: "accepted" }));
+    });
+  });
+
+  await addAccountPanel(page);
+  await page.getByRole("button", { name: "link group", exact: true }).click();
+  await page.getByRole("button", { name: "Blue group", exact: true }).click();
+  await page.getByTestId("acct-venue").selectOption("sim-paper");
+  const table = page.getByTestId("open-orders-table");
+  await expect(table.getByText("Paused", { exact: true })).toHaveAttribute("title", reason);
+  const resume = table.getByRole("button", { name: "Resume protection" });
+  await resume.click();
+  expect(resumeArgs).toEqual({ venue: "sim-paper", orderId: "protection" });
+  await expect(resume).toHaveCount(0);
+  await expect(table.getByText("Submitted", { exact: true })).toBeVisible();
 });
 
 test("account columns do not create horizontal overflow when they fit", async ({ page }) => {

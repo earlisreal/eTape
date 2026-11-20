@@ -554,7 +554,10 @@ func (c *Core) Recover(ctx context.Context) error {
 			}
 		}
 		switch h.Phase {
-		case HeldWaiting, HeldArmed, HeldWaitingQuote:
+		case HeldWaiting, HeldArmed, HeldWaitingQuote, HeldPaused:
+			if h.Phase == HeldPaused && !stockRiskStopPausedForPrintGap(o) {
+				continue
+			}
 			h.Phase, h.PausedReason = HeldPaused, "engine restarted; resume manually"
 		case HeldActivating:
 			if foundBrokerOrders[id] {

@@ -331,14 +331,16 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 		if !ok {
 			return
 		}
-		if stop.Qty == 0 {
-			h := *stop.Held
-			h.PausedReason = "awaiting entry fills"
-			stop.Held = &h
-		} else if stop.Held.Trail != nil && stop.Held.PausedReason == "awaiting entry fills" {
-			h := *stop.Held
-			h.PausedReason = "fixed fallback; waiting for trailing data"
-			stop.Held = &h
+		if stop.Held.Phase != HeldPaused {
+			if stop.Qty == 0 {
+				h := *stop.Held
+				h.PausedReason = "awaiting entry fills"
+				stop.Held = &h
+			} else if stop.Held.Trail != nil && stop.Held.PausedReason == "awaiting entry fills" {
+				h := *stop.Held
+				h.PausedReason = "fixed fallback; waiting for trailing data"
+				stop.Held = &h
+			}
 		}
 		if !entry.Working() && c.riskFilledQty(entry) == 0 {
 			stop.Status = StatusCanceled

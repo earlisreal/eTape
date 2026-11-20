@@ -184,6 +184,10 @@ Existing Protection Mode, Sell Limit Cushion and trailing progress are retained;
 one pending BUY (including a partial/cancel-pending remainder) blocks another add.
 Canceling an add leaves filled shares protected. Pending BUY hover details show
 the proposed shared stop; a stale protection owner requires a new chart draft.
+Stock protective stops resume after a market-data gap on the next eligible
+trade for the stock once broker positions are ready. **Account → Open Orders**
+offers **Resume** for paused protective stops. Hover a fixed stop's **Paused**
+badge to see the reason.
 On BingX Virtual and Live, use the same chart gesture to add to a long or short
 with a healthy shared stop. The preview shows existing, added and total lots.
 The stop may stay at its current price or tighten on the first add fill. A
