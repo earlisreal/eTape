@@ -11,7 +11,7 @@ import { SmokePainterPanel } from "./SmokePainterPanel";
 import { ChartPanel } from "./ChartPanel";
 import { LadderPanel } from "./LadderPanel";
 import { TapePanel } from "./TapePanel";
-import { CryptoScannerPanel } from "./CryptoScannerPanel";
+import { CryptoListPanel } from "./CryptoScannerPanel";
 import { ScannerPanel } from "./ScannerPanel";
 import { WatchlistPanel } from "./WatchlistPanel";
 import { StockInfoPanel } from "./StockInfoPanel";
@@ -165,13 +165,12 @@ export const PANELS: Record<string, PanelDef> = {
     headerControls: true,
   },
   "crypto-scanner": {
-    component: CryptoScannerPanel,
+    component: CryptoListPanel,
     topics: [],
-    title: "Crypto Scanner",
+    title: "Crypto List",
     glyph: "%",
-    description: "USDT perpetual movers and turnover",
+    description: "Search and sort USDT perpetuals",
     symbolBearing: false,
-    headerControls: true,
   },
   "watchlist": {
     component: WatchlistPanel,

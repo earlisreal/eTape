@@ -1,6 +1,7 @@
-import { createContext, useEffect, useState } from "react";
-import type { CryptoScannerRow, CryptoScannerSnapshot } from "../gen/wsmsg";
+import { createContext, useEffect, useMemo, useState } from "react";
+import type { CryptoScannerRow, CryptoScannerSnapshot, ListPerpetualMarketsArgs, PerpetualMarket } from "../gen/wsmsg";
 import type { CommandClient } from "./catalogs";
+import { sortRows } from "./sortColumns";
 
 export const binanceDemoExchange = "BINANCE-DEMO";
 export const cryptoExchanges = ["MEXC", "BINANCE", binanceDemoExchange, "BINGX"] as const;
@@ -56,36 +57,27 @@ export function cryptoBrokerExchange(broker: string | undefined): CryptoExchange
   return broker === "mexc-sim" || broker === "mexc" ? "MEXC" : undefined;
 }
 
-export const cryptoModes = ["5m Gainers", "5m Losers", "Most Active"] as const;
-export type CryptoMode = typeof cryptoModes[number];
-type CryptoSortKey = "base" | "last" | "changePct" | "turnover" | "spreadBps";
+type CryptoSortKey = "base" | "last" | "reportedChangePct" | "turnover";
+type ExchangeSelection = CryptoExchange | typeof followAccountExchange | undefined;
 type CryptoSort = { col: CryptoSortKey; dir: "asc" | "desc" };
-export const cryptoColumns: { key: CryptoSortKey; label: string; title?: string }[] = [
+
+export const cryptoColumns: { key: CryptoSortKey; label: string }[] = [
   { key: "base", label: "Market" },
-  { key: "changePct", label: "5m %" },
   { key: "last", label: "Last" },
-  { key: "turnover", label: "24h Turnover", title: "24-hour turnover (USDT)" },
-  { key: "spreadBps", label: "Spread", title: "Spread (bps)" },
+  { key: "reportedChangePct", label: "Change %" },
+  { key: "turnover", label: "24h Turnover (USDT)" },
 ];
 
-export function readCryptoScanner(settings: Record<string, unknown>) {
-  const mode = cryptoModes.find(mode => settings.cryptoMode === mode) ?? cryptoModes[0];
-  const numeric = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+export function readCryptoList(settings: Record<string, unknown>) {
   const saved = settings.cryptoSort as Partial<CryptoSort> | undefined;
   const sort: CryptoSort = saved?.col && cryptoColumns.some(column => column.key === saved.col) &&
-    (saved.dir === "asc" || saved.dir === "desc") ? { col: saved.col, dir: saved.dir } :
-    mode === "Most Active" ? { col: "turnover", dir: "desc" } :
-      { col: "changePct", dir: mode === "5m Losers" ? "asc" : "desc" };
-  const exchange: CryptoExchange | typeof followAccountExchange | undefined =
-    settings.cryptoExchange === followAccountExchange ? followAccountExchange : cryptoExchange(settings.cryptoExchange);
-  return {
-    mode, sort, exchange,
-    minMove: numeric(settings.minMove), minTurnover: numeric(settings.minTurnover), maxSpread: numeric(settings.maxSpread),
-  };
+    (saved.dir === "asc" || saved.dir === "desc") ? { col: saved.col, dir: saved.dir } : { col: "turnover", dir: "desc" };
+  const exchange: ExchangeSelection = settings.cryptoExchange === followAccountExchange ? followAccountExchange : cryptoExchange(settings.cryptoExchange);
+  return { sort, exchange };
 }
 
-export function resolveScannerExchange(
-  selection: ReturnType<typeof readCryptoScanner>["exchange"],
+export function resolveListExchange(
+  selection: ExchangeSelection,
   groupMarket: string | undefined,
   appDefault: CryptoExchange,
   configuredExchanges: ReadonlySet<CryptoExchange>,
@@ -95,74 +87,99 @@ export function resolveScannerExchange(
   return exchange && configuredExchanges.has(exchange) ? exchange : undefined;
 }
 
-export function rankCryptoScanner(rows: readonly CryptoScannerRow[], settings: ReturnType<typeof readCryptoScanner>): CryptoScannerRow[] {
-  return rows.filter(row => {
-    if (settings.minTurnover > 0 && (row.turnover === null || row.turnover < settings.minTurnover)) return false;
-    if (settings.maxSpread > 0 && (row.spreadBps === null || row.spreadBps > settings.maxSpread)) return false;
-    if (settings.mode === "Most Active" && settings.minMove === 0) return row.turnover !== null;
-    const move = row.changePct;
-    if (move === null || Math.abs(move) < settings.minMove) return false;
-    return settings.mode === "Most Active" ? row.turnover !== null :
-      settings.mode === "5m Gainers" ? move > 0 : move < 0;
-  }).sort((a, b) => {
-    const left = a[settings.sort.col], right = b[settings.sort.col];
-    if (left === null) return right === null ? a.symbol.localeCompare(b.symbol) : 1;
-    if (right === null) return -1;
-    const result = typeof left === "number" && typeof right === "number" ? left - right : String(left).localeCompare(String(right));
-    return (settings.sort.dir === "asc" ? result : -result) || a.symbol.localeCompare(b.symbol);
-  });
+interface CryptoListRow {
+  market: PerpetualMarket;
+  quote: CryptoScannerRow | undefined;
 }
 
-export interface CryptoScannerData {
-  exchange: CryptoExchange;
+const sortAccessors = {
+  base: (row: CryptoListRow) => row.market.base,
+  last: (row: CryptoListRow) => row.quote?.last ?? null,
+  reportedChangePct: (row: CryptoListRow) => row.quote?.reportedChangePct ?? null,
+  turnover: (row: CryptoListRow) => row.quote?.turnover ?? null,
+};
+
+export function rankCryptoList(data: CryptoListData | undefined, sort: CryptoSort, following = false): CryptoListRow[] {
+  if (!data?.markets || (following && !data.snapshot)) return [];
+  const quotes = new Map(data.snapshot?.rows.map(quote => [quote.symbol, quote]));
+  const rows = data.markets.map(market => ({ market, quote: quotes.get(market.symbol) }));
+  return sortRows(following ? rows.filter(row => row.quote && sortAccessors[sort.col](row) !== null) : rows, sort, sortAccessors);
+}
+
+export const marketSearchKey = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+interface CryptoListData {
+  markets?: readonly PerpetualMarket[];
+  catalogError?: string;
   snapshot?: CryptoScannerSnapshot;
-  error?: string;
+  quoteError?: string;
 }
 
-export interface CryptoScannerBoards {
+export const CryptoListContext = createContext<{
   defaultExchange: CryptoExchange;
   configuredExchanges: ReadonlySet<CryptoExchange>;
-  byExchange: Record<CryptoExchange, CryptoScannerData>;
-}
-
-export const CryptoScannerContext = createContext<CryptoScannerBoards>({
+  byExchange: Record<CryptoExchange, CryptoListData>;
+}>({
   defaultExchange: defaultCryptoExchange,
   configuredExchanges: new Set(),
-  byExchange: {
-    MEXC: { exchange: "MEXC" },
-    BINANCE: { exchange: "BINANCE" },
-    [binanceDemoExchange]: { exchange: binanceDemoExchange },
-    BINGX: { exchange: "BINGX" },
-  },
+  byExchange: { MEXC: {}, BINANCE: {}, [binanceDemoExchange]: {}, BINGX: {} },
 });
 
-export function useCryptoScannerData(commands: CommandClient, connected: boolean, needed: boolean, exchange: CryptoExchange): CryptoScannerData {
-  const [data, setData] = useState<CryptoScannerData>({ exchange });
+// Each workspace shares a catalog and a ticker poll across its lists for an exchange.
+export function useCryptoListData(commands: CommandClient, connected: boolean, needed: boolean, exchange: CryptoExchange): CryptoListData {
+  const [catalog, setCatalog] = useState<Pick<CryptoListData, "markets" | "catalogError">>({});
+  const [quotes, setQuotes] = useState<Pick<CryptoListData, "snapshot" | "quoteError">>({});
   useEffect(() => {
     if (!needed || !connected) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      let delay = 5_000;
+      try {
+        const ack = await commands.sendCommand("ListPerpetualMarkets", { exchange } satisfies ListPerpetualMarketsArgs);
+        if (!active) return;
+        if (ack.status !== "accepted" || !Array.isArray(ack.value)) throw new Error(ack.reason || "Could not load markets.");
+        const markets = (ack.value as PerpetualMarket[]).filter(market => market.exchange === exchange);
+        setCatalog({ markets });
+        delay = 60_000;
+      } catch (err) {
+        if (active) setCatalog(previous => ({ ...previous, catalogError: err instanceof Error ? err.message : "Could not load markets." }));
+      } finally {
+        if (active) timer = setTimeout(() => void refresh(), delay);
+      }
+    };
+    void refresh();
+    return () => { active = false; clearTimeout(timer); };
+  }, [commands, connected, needed, exchange]);
+
+  useEffect(() => {
+    if (!needed || !connected) {
+      setQuotes({});
+      return;
+    }
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
       try {
         const ack = await commands.sendCommand("GetCryptoScanner", { exchange });
         if (!active) return;
-        if (ack.status !== "accepted" || !ack.value) throw new Error(ack.reason || "Waiting for crypto data.");
+        if (ack.status !== "accepted" || !ack.value) throw new Error(ack.reason || "Waiting for crypto quotes.");
         const snapshot = ack.value as CryptoScannerSnapshot;
-        setData(Date.now() - snapshot.asOfMs <= 16_000 ? { exchange, snapshot } : { exchange, error: "Waiting for fresh crypto data." });
+        setQuotes(Date.now() - snapshot.asOfMs <= 16_000 ? { snapshot } : { quoteError: "Waiting for fresh crypto quotes." });
       } catch (err) {
-        if (active) setData({ exchange, error: err instanceof Error ? err.message : "Waiting for crypto data." });
+        if (active) setQuotes({ quoteError: err instanceof Error ? err.message : "Waiting for crypto quotes." });
       } finally {
         if (active) timer = setTimeout(() => void refresh(), 5_000);
       }
     };
     void refresh();
-    const check = setInterval(() => setData(previous =>
+    const check = setInterval(() => setQuotes(previous =>
       previous.snapshot && Date.now() - previous.snapshot.asOfMs > 16_000
-        ? { exchange, error: "Waiting for fresh crypto data." } : previous), 1_000);
+        ? { quoteError: "Waiting for fresh crypto quotes." } : previous), 1_000);
     return () => { active = false; clearTimeout(timer); clearInterval(check); };
   }, [commands, connected, needed, exchange]);
-  if (!needed) return { exchange };
-  if (!connected) return { exchange, error: "Waiting for engine connection." };
-  if (data.snapshot && Date.now() - data.snapshot.asOfMs > 16_000) return { exchange, error: "Waiting for fresh crypto data." };
-  return data.exchange === exchange ? data : { exchange };
+  return useMemo(() => {
+    if (!connected) return { ...catalog, quoteError: "Waiting for engine connection." };
+    return needed ? { ...catalog, ...quotes } : catalog;
+  }, [catalog, connected, needed, quotes]);
 }

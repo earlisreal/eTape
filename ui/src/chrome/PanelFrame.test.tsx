@@ -157,6 +157,20 @@ function renderTapeFrame(commandAdapter?: typeof commands) {
   return { ...frame, restore: () => { PANELS.tape = realTapeDef; } };
 }
 
+it("offers the perpetual picker on Ladder, Time & Sales and Order Ticket", () => {
+  for (const panelId of ["chart", "ladder", "tape", "order-ticket"]) {
+    const def = PANELS[panelId];
+    PANELS[panelId] = { ...def, component: () => null };
+    const frame = renderFrame({ panelId, group: null, settings: { symbol: "US.AAPL" } });
+    try {
+      expect(!!screen.queryByRole("button", { name: "Browse USDT perpetuals" })).toBe(panelId !== "chart");
+    } finally {
+      frame.unmount();
+      PANELS[panelId] = def;
+    }
+  }
+});
+
 it("searches and loads the chosen USDT perpetual from a panel header", async () => {
   const sendCommand = vi.fn(async (): Promise<AckMsg> => ({
     kind: "ack", corrId: "markets", status: "accepted", value: [

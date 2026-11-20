@@ -148,6 +148,7 @@ type Client struct {
 	stream       string
 	mu           sync.Mutex
 	cache        map[string]cachedContract
+	marketsMu    sync.Mutex
 	markets      []instrument.PerpetualMarket
 	marketsUntil time.Time
 	funding      map[string]fundingTime
@@ -252,13 +253,11 @@ func parseSymbol(symbol string) (instrument.Perpetual, bool) {
 }
 
 func (c *Client) PerpetualMarkets(ctx context.Context) ([]instrument.PerpetualMarket, error) {
-	c.mu.Lock()
+	c.marketsMu.Lock()
+	defer c.marketsMu.Unlock()
 	if time.Now().Before(c.marketsUntil) {
-		markets := c.markets
-		c.mu.Unlock()
-		return markets, nil
+		return c.markets, nil
 	}
-	c.mu.Unlock()
 
 	var contracts []Contract
 	if err := c.get(ctx, "/api/v1/contract/detail/country", &contracts); err != nil {

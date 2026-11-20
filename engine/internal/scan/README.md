@@ -22,12 +22,13 @@ Reported Short Interest is a board-only asynchronous 3249 enrichment. The worker
 
 Test: `go test ./internal/scan`.
 
-## Crypto Scanner
+## Crypto List
 
-The perpetual-feed router serves Crypto Scanner snapshots on demand. Each exchange
-shares one five-second snapshot cache per engine across all windows. The cache
-joins bulk tickers with the active crypto contract catalog, rejects out-of-date
-observations and derives five-minute percentage changes from exchange timestamps.
-It retains only the rolling baseline window and publishes USDT turnover and
-nullable top-of-book spread. The browser applies each panel's filters and sort to
-its exchange's snapshot. Crypto Monitoring follows that same ranked view.
+The perpetual-feed router supports exchange-scoped catalog requests and shares a
+five-second ticker snapshot cache per exchange across all windows. Snapshots
+publish fresh, exchange-reported Last, Change %, and 24-hour USDT turnover for
+catalogued contracts. MEXC supplies `riseFallRate` as a fraction and `amount24` for
+turnover. Binance, Binance Futures Demo, and BingX supply `priceChangePercent`
+in percentage units and `quoteVolume` for turnover. The browser
+loads the catalog independently and joins quotes by exact contract ID. Crypto
+Monitoring follows fresh rows with values for the selected list's saved sort.

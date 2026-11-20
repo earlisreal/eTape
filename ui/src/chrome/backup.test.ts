@@ -590,6 +590,26 @@ describe("backup: reconcileToGrid", () => {
 });
 
 describe("backup: Dockview panel constraint normalization", () => {
+  it("renames an imported Crypto Scanner tab while keeping layout and source identity", () => {
+    const seed: Workspace = {
+      name: "legacy", layoutVersion: 8,
+      panels: [
+        { id: "list", panelId: "crypto-scanner", group: "blue", settings: { cryptoExchange: "BINGX", cryptoSort: { col: "last", dir: "asc" } } },
+        { id: "chart", panelId: "chart", group: "blue", settings: { timeframe: "5m" } },
+      ],
+      scannerSync: { enabled: true, sourcePanelId: "list", sourceWorkspaceId: "legacy" },
+      layout: {
+        grid: { root: { type: "leaf", data: { id: "shared", views: ["list", "chart"], activeView: "list" } } },
+        panels: { list: { id: "list", title: "Crypto Scanner" }, chart: { id: "chart", title: "Chart" } },
+      },
+    };
+    const imported = prepareImportedWorkspace(seed, "crypto-monitoring");
+    const restored = applyPanelConstraintsToLayout(imported.layout, imported.panels, { "crypto-scanner": { title: "Crypto List" } });
+    expect(restored).toMatchObject({ grid: (seed.layout as { grid: unknown }).grid, panels: { list: { title: "Crypto List" }, chart: { title: "Chart" } } });
+    expect(imported.panels).toEqual(seed.panels);
+    expect(imported.scannerSync).toEqual(seed.scannerSync);
+  });
+
   it("overlays current registry constraints without mutating a legacy layout", () => {
     const layout = {
       grid: { root: { type: "leaf", data: { views: ["tape-1"], activeView: "tape-1", id: "g1" } }, width: 400, height: 300, orientation: "HORIZONTAL" },

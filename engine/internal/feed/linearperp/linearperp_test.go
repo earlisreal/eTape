@@ -21,11 +21,9 @@ func TestPerpetualCatalogsAndCandleHistory(t *testing.T) {
 		now := time.Now().UnixMilli()
 		switch r.URL.Path {
 		case "/fapi/v1/ticker/24hr":
-			fmt.Fprintf(w, `[{"symbol":"BTCUSDT","lastPrice":"100","quoteVolume":"12345","closeTime":%d}]`, now)
-		case "/fapi/v1/ticker/bookTicker":
-			fmt.Fprintf(w, `[{"symbol":"BTCUSDT","bidPrice":"99.9","askPrice":"100.1","time":%d}]`, now)
+			fmt.Fprintf(w, `[{"symbol":"BTCUSDT","lastPrice":"100","priceChangePercent":"-3.25","quoteVolume":"12345","closeTime":%d}]`, now)
 		case "/openApi/swap/v2/quote/ticker":
-			fmt.Fprintf(w, `{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"100","quoteVolume":"12345","bidPrice":"99.9","askPrice":"100.1","closeTime":%d}]}`, now)
+			fmt.Fprintf(w, `{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"100","priceChangePercent":"-3.25","quoteVolume":"12345","bidPrice":"99.9","askPrice":"100.1","closeTime":%d}]}`, now)
 		case "/fapi/v1/exchangeInfo":
 			fmt.Fprint(w, `{"symbols":[
 				{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","status":"TRADING","underlyingType":"COIN",
@@ -86,8 +84,9 @@ func TestPerpetualCatalogsAndCandleHistory(t *testing.T) {
 		}
 		scanner, err := c.CryptoScanner(ctx)
 		if err != nil || len(scanner.Rows) != 1 || scanner.Rows[0].Symbol != symbol ||
-			scanner.Rows[0].Turnover == nil || *scanner.Rows[0].Turnover != 12345 || scanner.Rows[0].SpreadBps == nil ||
-			*scanner.Rows[0].SpreadBps < 19.99 || *scanner.Rows[0].SpreadBps > 20.01 {
+			scanner.Rows[0].Last == nil || *scanner.Rows[0].Last != 100 ||
+			scanner.Rows[0].Turnover == nil || *scanner.Rows[0].Turnover != 12345 ||
+			scanner.Rows[0].ReportedChangePct == nil || *scanner.Rows[0].ReportedChangePct != -3.25 {
 			t.Fatalf("%s scanner %+v, %v", c.exchange, scanner, err)
 		}
 		bars, err := c.History(ctx, symbol, feed.Res1m)

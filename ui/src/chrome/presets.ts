@@ -94,7 +94,7 @@ export function buildCryptoMonitoringWorkspace(): Workspace {
   const right = Array.isArray(root.data) ? root.data[1] : undefined;
   if (Array.isArray(right?.data)) right.data.splice(1);
   delete layout.panels["m-news"];
-  layout.panels["m-scanner"] = { ...layout.panels["m-scanner"]!, title: "Crypto Scanner" };
+  layout.panels["m-scanner"] = { ...layout.panels["m-scanner"]!, title: "Crypto List" };
   return {
     ...workspace, name: CRYPTO_MONITORING_WORKSPACE_ID,
     panels: workspace.panels.filter(panel => panel.panelId !== "stock-info").map(panel =>

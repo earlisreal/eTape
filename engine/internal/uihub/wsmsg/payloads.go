@@ -188,18 +188,19 @@ type SubmitRiskEntryArgs struct {
 }
 
 type CryptoScannerRow struct {
-	Symbol    string   `json:"symbol"`
-	Base      string   `json:"base"`
-	Last      float64  `json:"last"`
-	ChangePct *float64 `json:"changePct" tstype:"number | null,required"`
-	Turnover  *float64 `json:"turnover" tstype:"number | null,required"`
-	SpreadBps *float64 `json:"spreadBps" tstype:"number | null,required"`
+	Symbol            string   `json:"symbol"`
+	Last              *float64 `json:"last" tstype:"number | null,required"`
+	ReportedChangePct *float64 `json:"reportedChangePct" tstype:"number | null,required"`
+	Turnover          *float64 `json:"turnover" tstype:"number | null,required"`
 }
 
 type CryptoScannerSnapshot struct {
-	AsOfMs  int64              `json:"asOfMs"`
-	Warming bool               `json:"warming"`
-	Rows    []CryptoScannerRow `json:"rows"`
+	AsOfMs int64              `json:"asOfMs"`
+	Rows   []CryptoScannerRow `json:"rows"`
+}
+
+type ListPerpetualMarketsArgs struct {
+	Exchange string `json:"exchange,omitempty"`
 }
 
 type PerpetualMarket struct {

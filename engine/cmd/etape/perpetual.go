@@ -51,7 +51,15 @@ func (r perpetualFeedRouter) source(symbol string) int {
 	return slices.IndexFunc(r.sources, func(source perpetualSource) bool { return source.exchange == id.Exchange })
 }
 
-func (r perpetualFeedRouter) PerpetualMarkets(ctx context.Context) ([]instrument.PerpetualMarket, error) {
+func (r perpetualFeedRouter) PerpetualMarkets(ctx context.Context, exchange string) ([]instrument.PerpetualMarket, error) {
+	if exchange != "" {
+		for _, source := range r.sources {
+			if source.exchange == exchange {
+				return source.api.PerpetualMarkets(ctx)
+			}
+		}
+		return nil, fmt.Errorf("unsupported crypto exchange %q", exchange)
+	}
 	var group sync.WaitGroup
 	result := make([][]instrument.PerpetualMarket, len(r.sources))
 	failures := make([]error, len(r.sources))
@@ -80,7 +88,7 @@ func (r perpetualFeedRouter) CryptoScanner(ctx context.Context, exchange string)
 			}
 		}
 	}
-	return wsmsg.CryptoScannerSnapshot{}, fmt.Errorf("unsupported crypto Scanner exchange %q", exchange)
+	return wsmsg.CryptoScannerSnapshot{}, fmt.Errorf("unsupported crypto exchange %q", exchange)
 }
 
 func (r perpetualFeedRouter) Validate(ctx context.Context, symbol string) error {

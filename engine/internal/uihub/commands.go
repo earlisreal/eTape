@@ -242,13 +242,13 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("Select a crypto exchange."), false
 		}
 		if cd.feed == nil {
-			return blocked("Crypto Scanner is unavailable in this workspace mode."), false
+			return blocked("Crypto List is unavailable in this workspace mode."), false
 		}
 		source, ok := cd.feed().(interface {
 			CryptoScanner(context.Context, string) (wsmsg.CryptoScannerSnapshot, error)
 		})
 		if !ok {
-			return blocked("Crypto Scanner is unavailable in this workspace mode."), false
+			return blocked("Crypto List is unavailable in this workspace mode."), false
 		}
 		go func() {
 			request, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -262,11 +262,15 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		}()
 		return wsmsg.AckMsg{}, true
 	case "ListPerpetualMarkets":
+		var query wsmsg.ListPerpetualMarketsArgs
+		if len(args) > 0 && json.Unmarshal(args, &query) != nil {
+			return blocked("Invalid crypto exchange."), false
+		}
 		if cd.feed == nil {
 			return blocked("Crypto markets are unavailable in this workspace mode."), false
 		}
 		catalog, ok := cd.feed().(interface {
-			PerpetualMarkets(context.Context) ([]instrument.PerpetualMarket, error)
+			PerpetualMarkets(context.Context, string) ([]instrument.PerpetualMarket, error)
 		})
 		if !ok {
 			return blocked("Crypto markets are unavailable in this workspace mode."), false
@@ -274,7 +278,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		go func() {
 			request, cancel := context.WithTimeout(ctx, 8*time.Second)
 			defer cancel()
-			markets, err := catalog.PerpetualMarkets(request)
+			markets, err := catalog.PerpetualMarkets(request, query.Exchange)
 			if err != nil {
 				reply(blocked("Could not load USDT perpetuals."))
 				return

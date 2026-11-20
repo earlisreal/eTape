@@ -20,6 +20,12 @@ import (
 func TestPerpetualMarketsFiltersAndCachesCatalog(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/contract/ticker" {
+			fmt.Fprintf(w, `{"success":true,"data":[
+				{"symbol":"BTC_USDT","lastPrice":100,"riseFallRate":-0.0325,"amount24":12345,"timestamp":%d}
+			]}`, time.Now().UnixMilli())
+			return
+		}
 		calls.Add(1)
 		if r.URL.RequestURI() != "/api/v1/contract/detail/country" {
 			t.Errorf("unexpected contract request %s", r.URL.RequestURI())
@@ -43,6 +49,12 @@ func TestPerpetualMarketsFiltersAndCachesCatalog(t *testing.T) {
 			!markets[0].TradingEnabled || markets[1].ID.String() != "PERP.MEXC.ETH_USDT" || markets[1].TradingEnabled {
 			t.Fatalf("catalog: %+v, %v", markets, err)
 		}
+	}
+	snapshot, err := client.CryptoScanner(ctx)
+	if err != nil || len(snapshot.Rows) != 1 || snapshot.Rows[0].Symbol != "PERP.MEXC.BTC_USDT" ||
+		snapshot.Rows[0].ReportedChangePct == nil || *snapshot.Rows[0].ReportedChangePct != -3.25 ||
+		snapshot.Rows[0].Turnover == nil || *snapshot.Rows[0].Turnover != 12345 {
+		t.Fatalf("snapshot: %+v, %v", snapshot, err)
 	}
 	if err := client.Validate(ctx, "PERP.MEXC.ETH_USDT"); err != nil || calls.Load() != 1 {
 		t.Fatalf("catalog validation: %d requests, %v", calls.Load(), err)

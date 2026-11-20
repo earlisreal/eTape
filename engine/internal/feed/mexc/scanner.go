@@ -14,9 +14,8 @@ func (c *Client) CryptoScanner(ctx context.Context) (wsmsg.CryptoScannerSnapshot
 func (c *Client) scannerTickers(ctx context.Context) ([]cryptoscanner.Ticker, error) {
 	var response []struct {
 		Symbol    string   `json:"symbol"`
-		Last      float64  `json:"lastPrice"`
-		Bid       float64  `json:"bid1"`
-		Ask       float64  `json:"ask1"`
+		Last      *float64 `json:"lastPrice"`
+		Change    *float64 `json:"riseFallRate"`
 		Turnover  *float64 `json:"amount24"`
 		Timestamp int64    `json:"timestamp"`
 	}
@@ -25,8 +24,13 @@ func (c *Client) scannerTickers(ctx context.Context) ([]cryptoscanner.Ticker, er
 	}
 	tickers := make([]cryptoscanner.Ticker, 0, len(response))
 	for _, row := range response {
+		var changePct *float64
+		if row.Change != nil {
+			value := *row.Change * 100
+			changePct = &value
+		}
 		tickers = append(tickers, cryptoscanner.Ticker{
-			Symbol: row.Symbol, Last: row.Last, Bid: row.Bid, Ask: row.Ask, Turnover: row.Turnover, Timestamp: row.Timestamp,
+			Symbol: row.Symbol, Last: row.Last, ReportedChangePct: changePct, Turnover: row.Turnover, Timestamp: row.Timestamp,
 		})
 	}
 	return tickers, nil

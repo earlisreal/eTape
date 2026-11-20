@@ -38,9 +38,10 @@ export function ScannerHeader({ title, context, muted, onMute, filtersOpen, onFi
   return headerSlot ? createPortal(controls, headerSlot) : null;
 }
 
-export function ScannerSyncControl({ sync, sourceLabel = "Monitoring source" }: {
+export function ScannerSyncControl({ sync, sourceLabel = "Monitoring source", sourceName = "Scanner" }: {
   sync: NonNullable<PanelProps["scannerSync"]>;
   sourceLabel?: string;
+  sourceName?: "Scanner" | "List";
 }): JSX.Element {
   const { status } = sync;
   const toggleLabel = sync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync";
@@ -61,8 +62,8 @@ export function ScannerSyncControl({ sync, sourceLabel = "Monitoring source" }: 
       </> : <>
         <span className="mono scanner-truncate">{sourceLabel}</span>
         <span className="scanner-spacer" />
-        <button type="button" className="mono scanner-sync-source" aria-label="Use this Scanner as Monitoring Source"
-          title="Use this Scanner as the Monitoring Source" onClick={sync.onSelect}>Use this Scanner</button>
+        <button type="button" className="mono scanner-sync-source" aria-label={`Use this ${sourceName} as Monitoring Source`}
+          title={`Use this ${sourceName} as the Monitoring Source`} onClick={sync.onSelect}>Use this {sourceName}</button>
       </>}
       {statusText && <span className="mono scanner-sync-status" aria-live="polite"
         title={scannerSyncStatusText(status)}>{statusText}</span>}

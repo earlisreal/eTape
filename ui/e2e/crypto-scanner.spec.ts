@@ -1,5 +1,6 @@
 import { expect, test, type WebSocketRoute } from "@playwright/test";
 import { buildCryptoMonitoringWorkspace } from "../src/chrome/presets";
+import type { PerpetualMarket } from "../src/gen/wsmsg";
 import type { ClientMessage, ExecStatus } from "../src/wire/contract";
 import { blankWorkspace } from "../src/chrome/workspace";
 
@@ -19,14 +20,20 @@ function preserveSavedLayout(server: WebSocketRoute, socket: WebSocketRoute, acc
   });
 }
 
+function market(exchange: string, base: string): PerpetualMarket {
+  const separator = exchange === "MEXC" ? "_" : exchange === "BINGX" ? "-" : "";
+  return { symbol: `PERP.${exchange}.${base}${separator}USDT`, exchange, base, settlement: "USDT", tradingEnabled: false };
+}
+
 test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => localStorage.setItem("etape.venueSetupHidden", "1"));
 });
 
-test("Crypto Scanner keeps its saved layout and fits its controls in a narrow panel", async ({ page }, testInfo) => {
+test("Crypto List restores legacy settings and fits its controls in a narrow panel", async ({ page }, testInfo) => {
   let workspace = buildCryptoMonitoringWorkspace();
   const scanner = workspace.panels.find(panel => panel.panelId === "crypto-scanner")!;
-  scanner.settings = { ...scanner.settings, cryptoExchange: "BINANCE-DEMO", cryptoMode: "Most Active", minTurnover: 1_000_000 };
+  scanner.settings = { ...scanner.settings, cryptoExchange: "BINANCE-DEMO", cryptoMode: "5m Losers", minTurnover: 99_000_000, cryptoSort: { col: "spreadBps", dir: "asc" } };
+  (workspace.layout as { panels: Record<string, { title: string }> }).panels[scanner.id].title = "Crypto Scanner";
   const workspaceKey = `workspace.${workspace.name}`;
   await page.routeWebSocket("**/ws", socket => {
     const server = socket.connectToServer();
@@ -41,71 +48,63 @@ test("Crypto Scanner keeps its saved layout and fits its controls in a narrow pa
       } else if (message.name === "SetConfig" && args?.key === workspaceKey && args.value) {
         workspace = args.value;
         ack();
-      } else if (message.name === "GetCryptoScanner") {
-        ack({ asOfMs: Date.now(), warming: false, rows: [
-          { symbol: `PERP.${args.exchange}.BTCUSDT`, base: "BTC", last: 62100, changePct: 4.2, turnover: 3900000, spreadBps: 0.8 },
-          { symbol: `PERP.${args.exchange}.ETHUSDT`, base: "ETH", last: 2100, changePct: -2.4, turnover: 2000000, spreadBps: 1.5 },
+      } else if (args.exchange && message.name === "ListPerpetualMarkets") {
+        const exchange = args.exchange;
+        ack(["BTC", "ETH", "SOL"].map(base => market(exchange, base)));
+      } else if (args.exchange && message.name === "GetCryptoScanner") {
+        ack({ asOfMs: Date.now(), rows: [
+          { symbol: market(args.exchange, "BTC").symbol, last: 62100, reportedChangePct: 4.2, turnover: 3900000 },
+          { symbol: market(args.exchange, "ETH").symbol, last: 2100, reportedChangePct: -2.4, turnover: 2000000 },
         ] });
       } else server.send(raw);
     });
   });
   await page.setViewportSize({ width: 1000, height: 800 });
   await page.goto(`/?workspace=${workspace.name}`);
-  const header = page.getByTestId("scanner-header-controls");
-  const gear = header.getByRole("button", { name: "filters" });
-  const results = page.getByRole("table", { name: "Binance Futures Demo crypto Scanner results" });
+  const results = page.getByRole("table", { name: "Binance Futures Demo Crypto List" });
   const btc = results.getByRole("row", { name: /BTC\/USDT/ });
   const eth = results.getByRole("row", { name: /ETH\/USDT/ });
+  const sol = results.getByRole("row", { name: /SOL\/USDT/ });
+  const exchange = page.getByLabel("Crypto List exchange");
+  const search = page.getByRole("searchbox", { name: "Search USDT perpetuals" });
   await expect(page.getByTestId("chart-host")).toHaveCount(4);
+  await expect(page.getByText("Crypto List", { exact: true })).toBeVisible();
   await expect(eth).toContainText("−2.40%");
-  await expect(header.getByRole("button", { name: "Mute Scanner sounds" })).toBeVisible();
-  await expect(results.getByRole("columnheader", { name: "24-hour turnover (USDT)" })).toHaveAttribute("aria-sort", "descending");
+  await expect(sol.getByRole("cell", { name: "—" })).toHaveCount(3);
+  await expect(results.getByRole("columnheader", { name: "24h Turnover (USDT)" })).toHaveAttribute("aria-sort", "descending");
+  await expect(exchange).toHaveValue("BINANCE-DEMO");
 
   await btc.click();
   await expect(btc).toHaveCSS("box-shadow", /1px inset/);
-  const spread = results.getByRole("columnheader", { name: "Spread (bps)" });
-  await spread.getByRole("button").click();
-  await expect(spread).toHaveAttribute("aria-sort", "descending");
+  const change = results.getByRole("columnheader", { name: "Change %" });
+  await change.getByRole("button").click();
+  await change.getByRole("button").click();
+  await expect(change).toHaveAttribute("aria-sort", "ascending");
   await expect(results.locator("tbody tr").first()).toContainText("ETH/USDT");
+  await expect(results.locator("tbody tr").last()).toContainText("SOL/USDT");
 
-  await gear.click();
-  const exchange = page.getByLabel("Crypto Scanner exchange");
-  const minTurnover = page.getByLabel("Min 24h turnover (USDT)");
-  await expect(exchange).toHaveValue("BINANCE-DEMO");
-  await expect(minTurnover).toHaveValue("1000000");
-  await minTurnover.fill("3000000");
-  await expect(eth).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(gear).toBeFocused();
-  await expect(exchange).toHaveCount(0);
-  await gear.click();
-  await expect(minTurnover).toHaveValue("1000000");
-  await minTurnover.fill("3000000");
-  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await search.fill("btc/usdt");
+  await expect(btc).toBeVisible();
   await expect(eth).toHaveCount(0);
-  await expect.poll(() => workspace.panels.find(panel => panel.id === scanner.id)?.settings.minTurnover).toBe(3000000);
+  await expect.poll(() => workspace.panels.find(panel => panel.id === scanner.id)?.settings.cryptoSort)
+    .toEqual({ col: "reportedChangePct", dir: "asc" });
 
   await page.reload();
   await expect(page.getByTestId("chart-host")).toHaveCount(4);
   await expect(btc).toBeVisible();
-  await expect(eth).toHaveCount(0);
-  await expect(spread).toHaveAttribute("aria-sort", "descending");
+  await expect(eth).toBeVisible();
+  await expect(change).toHaveAttribute("aria-sort", "ascending");
   for (const theme of ["Light", "Dark"]) {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("radio", { name: theme, exact: true }).check();
     await page.keyboard.press("Escape");
-    await expect(btc.getByRole("cell", { name: "+4.20%" })).toHaveCSS("color", await page.locator("html").evaluate(
-      root => getComputedStyle(root).getPropertyValue("--up").trim().replace(/^#(\w\w)(\w\w)(\w\w)$/, (_, r, g, b) =>
-        `rgb(${[r, g, b].map(channel => parseInt(channel, 16)).join(", ")})`),
-    ));
-    await gear.click();
-    await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeInViewport();
-    await page.screenshot({ path: testInfo.outputPath(`${theme.toLowerCase()}-crypto-scanner.png`) });
-    await page.keyboard.press("Escape");
+    await expect(search).toBeInViewport();
+    await expect(exchange).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath(`${theme.toLowerCase()}-crypto-list.png`) });
   }
 });
 
-test("Account switches a linked Crypto Scanner across windows and restores the last contracts", async ({ page, context }) => {
+test("Account switches a linked Crypto List across windows and restores the last contracts", async ({ page, context }) => {
   const trading = blankWorkspace("e2e-account-market");
   trading.groups = { green: "US.AAPL" };
   trading.linkVenues = { green: "sim-paper" }; // legacy stock account selection
@@ -139,10 +138,14 @@ test("Account switches a linked Crypto Scanner across windows and restores the l
       } else if (args.key && docs.has(args.key) && message.name === "SetConfig" && args.value) {
         docs.set(args.key, args.value);
         ack();
-      } else if (message.name === "GetCryptoScanner") {
-        ack({ asOfMs: Date.now(), warming: false, rows: [
-          { symbol: `PERP.${args.exchange}.BTCUSDT`, base: "BTC", last: 62100, changePct: 4.2, turnover: 3900000, spreadBps: 0.8 },
+      } else if (args.exchange && message.name === "ListPerpetualMarkets") {
+        ack([market(args.exchange, "BTC"), market(args.exchange, "ETH")]);
+      } else if (args.exchange && message.name === "GetCryptoScanner") {
+        ack({ asOfMs: Date.now(), rows: [
+          { symbol: market(args.exchange, "BTC").symbol, last: 62100, reportedChangePct: 4.2, turnover: 3900000 },
         ] });
+      } else if (message.name === "FocusGroup" && (args as { symbol?: string }).symbol?.startsWith("PERP.")) {
+        ack();
       } else server.send(raw);
     });
   });
@@ -156,15 +159,13 @@ test("Account switches a linked Crypto Scanner across windows and restores the l
   const venue = accountHeader.getByRole("combobox", { name: "Execution Venue" });
   const stocks = accountHeader.getByRole("button", { name: "Stocks", exact: true });
   const crypto = accountHeader.getByRole("button", { name: "Crypto", exact: true });
-  const fixed = scannerWindow.getByRole("table", { name: "MEXC crypto Scanner results" });
-  const demo = scannerWindow.getByRole("table", { name: "Binance Futures Demo crypto Scanner results" });
-  const paused = scannerWindow.getByText("Paused while Green is on Stocks");
+  const fixed = scannerWindow.getByRole("table", { name: "MEXC Crypto List" });
+  const demo = scannerWindow.getByRole("table", { name: "Binance Futures Demo Crypto List" });
+  const paused = scannerWindow.getByText("Paused while the Link Group is on Stocks");
 
   await expect(venue).toHaveValue("sim-paper");
   await expect(symbol).toHaveText("AAPL");
-  await scannerWindow.getByTestId("scanner-header-controls").first().getByRole("button", { name: "filters" }).click();
-  await scannerWindow.getByLabel("Crypto Scanner exchange").selectOption("follow-account");
-  await scannerWindow.getByRole("button", { name: "Apply", exact: true }).click();
+  await scannerWindow.getByLabel("Crypto List exchange").first().selectOption("follow-account");
   await expect(paused).toBeVisible();
   await expect(fixed.getByRole("button", { name: "BTC/USDT" })).toBeVisible();
 
@@ -181,7 +182,7 @@ test("Account switches a linked Crypto Scanner across windows and restores the l
   await expect(venue).toHaveValue("mexc-live");
   await expect(fixed).toHaveCount(2);
   await venue.selectOption("bingx-paper");
-  const bingx = scannerWindow.getByRole("table", { name: "BingX crypto Scanner results" });
+  const bingx = scannerWindow.getByRole("table", { name: "BingX Crypto List" });
   await expect(bingx).toBeVisible();
   page.once("dialog", dialog => dialog.accept());
   await venue.selectOption("bingx-live");
@@ -191,7 +192,11 @@ test("Account switches a linked Crypto Scanner across windows and restores the l
   await expect(symbol).toHaveText("—");
   const btc = demo.getByRole("button", { name: "BTC/USDT" });
   await expect(btc).toBeVisible();
-  await btc.dblclick();
+  await expect(page.getByRole("button", { name: "Browse USDT perpetuals" })).toHaveCount(0);
+  const search = scannerWindow.getByRole("searchbox", { name: "Search USDT perpetuals" }).first();
+  await search.fill("BTC");
+  await expect(demo.getByText("ETH/USDT")).toHaveCount(0);
+  await search.press("Enter");
   await expect.poll(() => docs.get(`workspace.${trading.name}`)?.groups?.green).toBe("PERP.BINANCE-DEMO.BTCUSDT");
 
   await stocks.click();

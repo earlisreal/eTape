@@ -19,10 +19,10 @@ was using.
   selection sets its venue and market together. Opening a symbol also selects
   its market. Account, Order Ticket, chart, DOM Ladder, locate, and hotkey
   actions share that context. Symbol-specific actions require a matching symbol.
-- A Crypto Scanner set to Follow Account reads the exchange of its Link Group
+- A Crypto List set to Follow Account reads the exchange of its Link Group
   and pauses in Stocks mode or when that exchange lacks a configured account.
-  Explicit Scanner exchanges and the app-default
-  Scanner setting support independent monitoring. Scanner data does not select
+  Explicit list exchanges and the app-default
+  exchange setting support independent monitoring. List data does not select
   an Execution Venue.
 - A legacy single saved venue resolves only for the market supported by its
   configured broker. A missing or incompatible selection leaves trading

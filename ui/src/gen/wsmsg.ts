@@ -279,16 +279,16 @@ export interface SubmitRiskEntryArgs {
 }
 export interface CryptoScannerRow {
   symbol: string;
-  base: string;
-  last: number /* float64 */;
-  changePct: number | null;
+  last: number | null;
+  reportedChangePct: number | null;
   turnover: number | null;
-  spreadBps: number | null;
 }
 export interface CryptoScannerSnapshot {
   asOfMs: number /* int64 */;
-  warming: boolean;
   rows: CryptoScannerRow[];
+}
+export interface ListPerpetualMarketsArgs {
+  exchange?: string;
 }
 export interface PerpetualMarket {
   symbol: string;

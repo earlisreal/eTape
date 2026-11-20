@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import type { CommandClient } from "./catalogs";
-import { binanceDemoExchange, cryptoBrokerExchange, cryptoExchange, cryptoExchangeKey, defaultCryptoExchange, rankCryptoScanner, readCryptoScanner, resolveScannerExchange, type CryptoExchange, useCryptoPreference, useCryptoScannerData } from "./cryptoScanner";
+import { binanceDemoExchange, cryptoBrokerExchange, cryptoExchange, cryptoExchangeKey, defaultCryptoExchange, rankCryptoList, readCryptoList, resolveListExchange, type CryptoExchange, useCryptoPreference, useCryptoListData } from "./cryptoScanner";
 import type { ExecStatus } from "../wire/contract";
 import { savedLinkMarket } from "./linkGroups";
 import { buildCryptoMonitoringWorkspace } from "./presets";
@@ -10,7 +10,7 @@ import { CRYPTO_MONITORING_WORKSPACE_ID as targetId, type PanelConfig, type Work
 function exchangeForPanel(panel: PanelConfig, workspace: Workspace | null | undefined, appDefault: CryptoExchange, configured: ReadonlySet<CryptoExchange>) {
   const group = panel.group;
   const market = group ? savedLinkMarket(workspace?.groups?.[group], workspace?.linkMarkets?.[group]?.emptyMarket) : undefined;
-  return resolveScannerExchange(readCryptoScanner(panel.settings).exchange, market, appDefault, configured);
+  return resolveListExchange(readCryptoList(panel.settings).exchange, market, appDefault, configured);
 }
 
 function useWatchedWorkspace(store: WorkspaceStore, id: string | undefined) {
@@ -56,16 +56,16 @@ export function useCryptoFollowing({ name, workspace, current, apply, store, com
   const sourceExchange = source ? exchangeForPanel(source, sourceWorkspace, exchange, configuredExchanges) : undefined;
   const requested = new Set(localPanels.map(panel => exchangeForPanel(panel, workspace, exchange, configuredExchanges)));
   if (isTarget && sync?.enabled && sourceExchange) requested.add(sourceExchange);
-  const mexc = useCryptoScannerData(commands, connected, requested.has("MEXC"), "MEXC");
-  const binance = useCryptoScannerData(commands, connected, requested.has("BINANCE"), "BINANCE");
-  const binanceDemo = useCryptoScannerData(commands, connected, requested.has(binanceDemoExchange), binanceDemoExchange);
-  const bingx = useCryptoScannerData(commands, connected, requested.has("BINGX"), "BINGX");
+  const mexc = useCryptoListData(commands, connected, requested.has("MEXC"), "MEXC");
+  const binance = useCryptoListData(commands, connected, requested.has("BINANCE"), "BINANCE");
+  const binanceDemo = useCryptoListData(commands, connected, requested.has(binanceDemoExchange), binanceDemoExchange);
+  const bingx = useCryptoListData(commands, connected, requested.has("BINGX"), "BINGX");
   const data = useMemo(() => ({
     defaultExchange: exchange,
     configuredExchanges,
     byExchange: { MEXC: mexc, BINANCE: binance, [binanceDemoExchange]: binanceDemo, BINGX: bingx },
   }), [exchange, configuredExchanges, mexc, binance, binanceDemo, bingx]);
-  const sourceSnapshot = sourceExchange ? data.byExchange[sourceExchange].snapshot : undefined;
+  const sourceData = sourceExchange ? data.byExchange[sourceExchange] : undefined;
 
   const save = useCallback((next: Workspace) => { apply(next); store.save(next); }, [apply, store]);
   useEffect(() => {
@@ -94,10 +94,10 @@ export function useCryptoFollowing({ name, workspace, current, apply, store, com
       return panel ? [{ id, symbol: typeof panel.settings.symbol === "string" ? panel.settings.symbol : undefined }] : [];
     }) : [];
     return planScannerSync({
-      slots, enabled: sync?.enabled === true, sourceAvailable: !!source && !!sourceSnapshot,
-      rankedSymbols: source && sourceSnapshot ? rankCryptoScanner(sourceSnapshot.rows, readCryptoScanner(source.settings)).map(row => row.symbol) : [],
+      slots, enabled: sync?.enabled === true, sourceAvailable: !!source && !!sourceData?.markets && !!sourceData.snapshot,
+      rankedSymbols: source ? rankCryptoList(sourceData, readCryptoList(source.settings).sort, true).map(row => row.market.symbol) : [],
     });
-  }, [sourceSnapshot, isTarget, orderedIds, source, sync?.enabled, workspace]);
+  }, [sourceData, isTarget, orderedIds, source, sync?.enabled, workspace]);
 
   useEffect(() => {
     const base = current.current;

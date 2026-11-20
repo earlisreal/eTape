@@ -18,19 +18,19 @@ close first. General preferences save as you go. Orders & hotkeys requires Save
 before closing or switching sections. See the [chrome guide](src/chrome/README.md)
 for the interaction conventions.
 
-The search icon next to a Chart, Time & Sales, DOM Ladder, or Order Ticket
-symbol opens the USDT perpetual market list. Search a coin, pair or exchange to
-load a MEXC, Binance, or BingX market in the panel or its Link Group. Add the MEXC
+Search **Crypto List** for USDT perpetuals and open a contract in its Link Group.
+Time & Sales, DOM Ladder, and Order Ticket also offer **Browse USDT perpetuals**
+next to the symbol. Add the MEXC
 Perpetual Simulator in Settings → Venues & creds, then select it as the Link
 Group's Execution Venue for paper orders on MEXC markets. Choose **Stocks** or
 **Crypto** in the linked Account header, then pick a configured account from
 the **Execution Venue** dropdown. The crypto account determines the exchange.
 Each Link Group remembers its last crypto exchange and restores its last
 symbol and account for stocks or for the selected exchange. If the group has
-no saved symbol for that market, pick one from the Scanner or market picker.
+no saved symbol for that market, pick one from Crypto List or the market picker.
 MEXC paper and live share the MEXC feed, and BingX Virtual and Live share the
 BingX feed. Binance Futures Demo uses its demo feed. You can browse exchanges
-without a trading account from the market picker or a standalone Crypto Scanner.
+without a trading account from the market picker or a standalone Crypto List.
 Explicitly switching from paper to live or returning from paper to a saved live
 perpetual account requires confirmation.
 For MEXC Live Chart Risk Entry, review and enable Stop-Limit for the account in
@@ -87,28 +87,29 @@ Named workspaces are cataloged in engine config (`windows.v1`) by stable UUID; `
 
 React/Vite shell around imperative market-data stores and renderers. Wire messages enter `src/wire`, route into `src/data`, then panels/controllers schedule chart or canvas work. The Account panel keeps live Open Orders and the read-only Closed Orders projection in the imperative execution store; the upper tab is session-local while each table's sort preference is persisted. Time & Sales ticks retain the engine-stamped Significant Print level in the imperative tape ring; the separate `md.tape.status` read model feeds read-only settings text. React owns layout/settings, never high-frequency payload state.
 
-**New window → Crypto Monitoring** opens four pinned charts and a Crypto Scanner.
-You can also add a **Crypto Scanner** to any workspace. Open its header gear to
-choose MEXC, Binance, Binance Futures Demo or BingX, rank USDT perpetuals by
-5-minute gain, 5-minute loss or 24-hour USDT turnover, and set filters. Select
-**Apply** to save changes. Each Scanner saves its own exchange, filters, sort
-and sound settings. To follow Account, assign both panels the same Link Group
-color, set the Scanner exchange to **Follow Account**, and select **Apply**.
-The Scanner switches feeds with Account and pauses while the group is on
-Stocks. Use a fixed exchange or **App default** for independent scanning.
-Click a column header to sort or a row to select it.
-Double-click the row or press Enter on the market name to load the exact exchange
-contract in a Link Group. Binance Futures Demo uses the public demo market feed
-and opens demo contracts from its results.
+**New window → Crypto Monitoring** opens four pinned charts and a Crypto List.
+Add **Crypto List** to any workspace and choose MEXC, Binance, Binance Futures
+Demo, or BingX. The full contract catalog is searchable as soon as it loads.
+The list shows Last, exchange-reported Change %, and 24h Turnover in USDT.
+Missing quotes display as a dash. Click a column header to sort. Each list
+saves its exchange and sort, with highest turnover first by default.
+
+Assign the list and Chart the same Link Group color, even across windows.
+Search by coin, pair, or contract ID. Double-click a row or activate its Market
+button with Enter to load the exact contract. Press Enter in search when there
+is one match. If using **Follow Account**, give both panels the same Link Group
+color. The list follows the Account exchange and pauses while the group is on
+Stocks or lacks an account for the exchange.
 
 Use **Sync to Following** to fill the pinned charts in Crypto Monitoring.
-**Use this Scanner** selects a different Crypto Scanner as its source. Stock
-Monitoring and Crypto Monitoring can follow their own source at the same time.
-Charts retain their symbols when sync is turned off or data goes stale.
-A five-minute ranking needs recent samples before it can admit a market.
+**Use this List** selects a different Crypto List as its source. Following ranks
+the full list by its saved sort and uses fresh quotes with a value for that
+column. Typing in search only narrows the table. Stock and Crypto Monitoring
+follow their own sources. Charts keep their symbols when Following is off or
+quotes are stale.
 
 Set **Default crypto exchange** in **Settings → Data & storage**. The market
-picker and Crypto Scanners set to **App default** follow this preference.
+picker and Crypto Lists set to **App default** follow this preference.
 **Settings → Venues & creds → Preferred crypto account** adds an explicit
 **Use preferred account** action to a compatible linked Order Ticket.
 For a contract on a different exchange, **Open on** loads the matching contract

@@ -238,7 +238,7 @@ Notes:
 
 **Binance Futures Demo.** In **Settings → Venues & creds → Binance Futures Demo**,
 enter an API key and secret from [Binance Demo API Management](https://demo.binance.com/en/my/settings/api-management).
-Use **Test connection**, save, and restart eTape. Open **Browse USDT perpetuals**
+Use **Test connection**, save, and restart eTape. Open **Crypto List**
 and choose **Binance Futures Demo**, or enter `binance-demo.btc.usdt`.
 Select the **binance-demo** execution venue in the linked Order Ticket and confirm
 the **DEMO** badge. Charts, depth and tape for that symbol use Binance's demo feed.
@@ -250,12 +250,14 @@ enter the same leverage in eTape. The ticket accepts lots or USDT position
 value and previews the base-asset quantity. Chart Risk Entry and attached
 stops are available on the MEXC Perpetual Simulator.
 
-Open a Chart, Time & Sales, DOM Ladder, or Order Ticket. Use **Browse USDT perpetuals**
-next to the symbol to search MEXC, Binance USDⓈ-M, or BingX. You can also type
+Add **Crypto List**, select an exchange, and search for a USDT perpetual.
+Assign the list and Chart the same Link Group color to open a contract from the
+list. Time & Sales, DOM Ladder, and Order Ticket also offer **Browse USDT perpetuals**
+next to the symbol. You can also type
 `mexc.btc.usdt`, `binance.btc.usdt`, or `bingx.btc.usdt` followed by Enter.
 Binance and BingX supply candles, tape and depth. Binance tape displays the
 venue's aggregate trades. Binance and BingX display fractional base-asset sizes.
-Use the same Link Group to follow the contract in all three panels. MEXC USDT
+Share a Link Group to follow the same contract across those panels. MEXC USDT
 perpetuals use public Futures market data, UTC chart buckets and contract counts
 for volume and depth. They work during weekends and with OpenD disconnected.
 Enable the **MEXC Perpetual Simulator** under Settings → Venues & creds.
@@ -294,7 +296,7 @@ Under **Settings → Venues & creds**, choose **MEXC Live**, **BingX Live** or
 **Test connection**, save, and restart the engine. Set the exchange account
 to one-way mode and the contract to isolated margin. Set the intended leverage
 on the exchange for manual entries and fixed-leverage presets. Find the exchange
-in **Crypto Scanner → Exchange**
+in **Crypto List → Exchange**
 or **Browse USDT perpetuals**, then select its **Execution Venue** in the
 linked Order Ticket. BingX Live uses production USDT collateral and displays
 the LIVE badge. BingX Virtual uses exchange-hosted simulated funds and

@@ -97,7 +97,7 @@ export function prepareImportedWorkspace(imported: Workspace, currentName: strin
 export function applyPanelConstraintsToLayout(
   layout: unknown,
   panelConfigs: readonly Pick<PanelConfig, "id" | "panelId">[],
-  panelDefs: Record<string, { minimumWidth?: number }>,
+  panelDefs: Record<string, { minimumWidth?: number; title?: string }>,
 ): unknown {
   if (typeof layout !== "object" || layout === null || Array.isArray(layout)) return layout;
   const serialized = layout as { panels?: unknown };
@@ -106,10 +106,14 @@ export function applyPanelConstraintsToLayout(
   const configById = new Map(panelConfigs.map((config) => [config.id, config]));
   let changed = false;
   const panels = Object.fromEntries(Object.entries(serialized.panels).map(([id, panel]) => {
-    const minimumWidth = panelDefs[configById.get(id)?.panelId ?? ""]?.minimumWidth;
-    if (minimumWidth === undefined || typeof panel !== "object" || panel === null || Array.isArray(panel)) return [id, panel];
+    if (typeof panel !== "object" || panel === null || Array.isArray(panel)) return [id, panel];
+    const panelId = configById.get(id)?.panelId ?? "";
+    const def = panelDefs[panelId];
+    const title = panelId === "crypto-scanner" ? def?.title : undefined;
+    const minimumWidth = def?.minimumWidth;
+    if (title === undefined && minimumWidth === undefined) return [id, panel];
     changed = true;
-    return [id, { ...panel, minimumWidth }];
+    return [id, { ...panel, ...(title !== undefined && { title }), ...(minimumWidth !== undefined && { minimumWidth }) }];
   }));
   return changed ? { ...layout, panels } : layout;
 }

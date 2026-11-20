@@ -472,7 +472,7 @@ export function PanelFrame(
             </span>
           )
         )}
-        {!tl.editing && ["chart", "ladder", "tape", "order-ticket"].includes(config.panelId) && (
+        {!tl.editing && ["ladder", "tape", "order-ticket"].includes(config.panelId) && (
           <HoverButton type="button" aria-label="Browse USDT perpetuals" title="Browse USDT perpetuals"
             onClick={() => setShowMarketPicker(true)}
             style={{ display: "inline-flex", border: "none", background: "transparent", color: palette.textMuted, padding: 2, cursor: "pointer" }}>

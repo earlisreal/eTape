@@ -90,7 +90,7 @@ function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApp
   const scheduler = new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const commands = {
-    sendCommand: vi.fn(async (name: string, args: unknown) => ({ kind: "ack" as const, corrId: "c", status: "accepted" as const, value: opts?.commandValue?.(name, args) })),
+    sendCommand: vi.fn(async (name: string, args: unknown) => ({ kind: "ack" as const, corrId: "c", status: "accepted" as const, value: await opts?.commandValue?.(name, args) })),
     sendQuery: vi.fn(async () => []),
   };
   const demandRegistry = new DemandRegistry({ sendCommand: commands.sendCommand, onState: () => {} });
@@ -456,87 +456,100 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
   });
 });
 
-describe("Crypto Monitoring Scanner Sync", () => {
-  it("saves Binance Futures Demo and follows the demo contract with the same ticker as production", async () => {
+describe("Crypto Monitoring Following", () => {
+  function catalog(exchange: string, ...entries: [string, string][]) {
+    return entries.map(([base, native]) => ({ symbol: `PERP.${exchange}.${native}`, exchange, base, settlement: "USDT", tradingEnabled: false }));
+  }
+
+  it("renders catalog entries before quotes and opens an exact demo contract through checked focus", async () => {
     const seed = buildCryptoMonitoringWorkspace();
     const scanner = seed.panels.find(panel => panel.panelId === "crypto-scanner")!;
-    scanner.settings = { ...scanner.settings, cryptoExchange: "BINANCE" };
+    scanner.group = "blue";
+    scanner.settings = { ...scanner.settings, cryptoExchange: "BINANCE", cryptoSort: { col: "spreadBps", dir: "asc" } };
     const demoSymbol = "PERP.BINANCE-DEMO.BTCUSDT";
     const crypto = mount(seed, {
       workspaceName: "crypto-monitoring",
       commandValue: (name, args) => {
-        if (name !== "GetCryptoScanner") return undefined;
-        const exchange = (args as { exchange: string }).exchange;
-        return {
-          asOfMs: Date.now(), warming: false,
-          rows: [{ symbol: `PERP.${exchange}.BTCUSDT`, base: "BTC", last: 62000, changePct: 6, turnover: 3000000, spreadBps: 1 }],
-        };
+        if (name === "ListPerpetualMarkets") {
+          const exchange = (args as { exchange: string }).exchange;
+          return catalog(exchange, ["BTC", "BTCUSDT"], ["ETH", "ETHUSDT"]);
+        }
+        if (name === "GetCryptoScanner") return new Promise(() => {});
+        return undefined;
       },
     });
+    const focus = vi.spyOn(crypto.linkGroups, "focusChecked");
     const ui = within(crypto.container);
-    const header = within(await ui.findByTestId("scanner-header-controls"));
-    const filters = header.getByRole("button", { name: "filters" });
-    fireEvent.click(filters);
-    const exchange = await ui.findByRole("combobox", { name: "Crypto Scanner exchange" }) as HTMLSelectElement;
+    const exchange = await ui.findByRole("combobox", { name: "Crypto List exchange" }) as HTMLSelectElement;
     expect(exchange.value).toBe("BINANCE");
-    const production = ui.getByRole("table", { name: "Binance crypto Scanner results" });
-    await within(production).findByRole("button", { name: "BTC/USDT" });
-    expect(crypto.commands.sendCommand).not.toHaveBeenCalledWith("GetCryptoScanner", { exchange: "BINANCE-DEMO" });
+    const production = ui.getByRole("table", { name: "Binance Crypto List" });
+    const productionMarket = await within(production).findByRole("button", { name: "BTC/USDT" });
+    expect(within(productionMarket.closest("tr")!).getAllByText("—")).toHaveLength(3);
+    expect(within(production).getByRole("columnheader", { name: "24h Turnover (USDT)" }).getAttribute("aria-sort")).toBe("descending");
+    expect(crypto.commands.sendCommand).not.toHaveBeenCalledWith("ListPerpetualMarkets", { exchange: "BINANCE-DEMO" });
 
     fireEvent.change(exchange, { target: { value: "BINANCE-DEMO" } });
-    expect(exchange.selectedOptions[0]?.textContent).toBe("Binance Futures Demo");
-    expect(crypto.commands.sendCommand).not.toHaveBeenCalledWith("GetCryptoScanner", { exchange: "BINANCE-DEMO" });
-    fireEvent.click(ui.getByRole("button", { name: "Apply" }));
-    expect(filters.getAttribute("aria-expanded")).toBe("false");
-    const demo = ui.getByRole("table", { name: "Binance Futures Demo crypto Scanner results" });
+    const demo = await ui.findByRole("table", { name: "Binance Futures Demo Crypto List" });
     const market = await within(demo).findByRole("button", { name: "BTC/USDT" });
     fireEvent.click(market, { detail: 1 });
-    expect(crypto.linkGroups.symbolFor(scanner.group ?? "green")).not.toBe(demoSymbol);
+    expect(focus).not.toHaveBeenCalled();
     expect(market.closest("tr")?.classList.contains("scanner-selected")).toBe(true);
-    fireEvent.doubleClick(market);
-    expect(crypto.linkGroups.symbolFor(scanner.group ?? "green")).toBe(demoSymbol);
-    expect(crypto.commands.sendCommand).toHaveBeenCalledWith("GetCryptoScanner", { exchange: "BINANCE-DEMO" });
-
-    fireEvent.click(ui.getByRole("button", { name: "Enable Scanner Sync" }));
-    await waitFor(() => {
-      const saved = crypto.saved.at(-1);
-      expect(saved?.panels.find(panel => panel.id === scanner.id)?.settings.cryptoExchange).toBe("BINANCE-DEMO");
-      expect(saved?.panels.find(panel => panel.id === "m-chart-red")?.settings.symbol).toBe(demoSymbol);
-    });
+    const search = ui.getByRole("searchbox", { name: "Search USDT perpetuals" });
+    const requests = crypto.commands.sendCommand.mock.calls.length;
+    fireEvent.change(search, { target: { value: "PERP.BINANCE-DEMO.BTCUSDT" } });
+    expect(within(demo).queryByText("ETH/USDT")).toBeNull();
+    expect(crypto.commands.sendCommand.mock.calls).toHaveLength(requests);
+    fireEvent.submit(search.closest("form")!);
+    await waitFor(() => expect(crypto.linkGroups.symbolFor("blue")).toBe(demoSymbol));
+    expect(focus).toHaveBeenCalledWith("blue", demoSymbol);
+    await waitFor(() => expect(crypto.saved.at(-1)?.panels.find(panel => panel.id === scanner.id)?.settings.cryptoExchange).toBe("BINANCE-DEMO"));
   });
 
-  it("follows exact perpetuals independently of stock Monitoring and persists OFF", async () => {
+  it("follows the saved sort across the full list independently of stock Monitoring", async () => {
+    const exchange = "MEXC";
+    const btc = "PERP.MEXC.BTC_USDT";
+    const eth = "PERP.MEXC.ETH_USDT";
     const crypto = mount(buildCryptoMonitoringWorkspace(), {
       workspaceName: "crypto-monitoring",
-      commandValue: name => name === "GetCryptoScanner" ? {
-        asOfMs: Date.now(), warming: false,
-        rows: [
-          { symbol: "PERP.MEXC.BTC_USDT", base: "BTC", last: 12000, changePct: 8, turnover: 3000000, spreadBps: 1 },
-          { symbol: "PERP.MEXC.ETH_USDT", base: "ETH", last: 500, changePct: -2, turnover: 2000000, spreadBps: 1 },
-        ],
-      } : undefined,
+      commandValue: name => name === "ListPerpetualMarkets" ? catalog(exchange, ["BTC", "BTC_USDT"], ["ETH", "ETH_USDT"], ["SOL", "SOL_USDT"])
+        : name === "GetCryptoScanner" ? {
+          asOfMs: Date.now(),
+          rows: [
+            { symbol: btc, last: 12000, reportedChangePct: 8, turnover: 3000000 },
+            { symbol: eth, last: 500, reportedChangePct: -2, turnover: 2000000 },
+          ],
+        } : undefined,
     });
     const stock = mount(buildMonitoringWorkspace(), { workspaceName: "monitoring" });
     const cryptoUI = within(crypto.container);
     const stockUI = within(stock.container);
-    await waitFor(() => expect(crypto.commands.sendCommand).toHaveBeenCalledWith("GetCryptoScanner", { exchange: "MEXC" }));
-    await waitFor(() => expect(cryptoUI.getByRole("table", { name: "MEXC crypto Scanner results" })).toBeTruthy());
-    await waitFor(() => expect(cryptoUI.getByText("BTC/USDT")).toBeTruthy());
-    expect(cryptoUI.queryByText("ETH/USDT")).toBeNull();
+    const table = within(await cryptoUI.findByRole("table", { name: "MEXC Crypto List" }));
+    const ethButton = await table.findByRole("button", { name: "ETH/USDT" });
+    expect(ethButton).toHaveProperty("disabled", true);
+    expect(cryptoUI.getByText("Choose a Link Group color to load symbols.")).toBeTruthy();
+
+    const turnover = table.getByRole("button", { name: "24h Turnover (USDT)" });
+    fireEvent.click(turnover);
+    expect(turnover.closest("th")?.getAttribute("aria-sort")).toBe("ascending");
+    expect(table.getAllByRole("row").at(-1)?.textContent).toContain("SOL/USDT");
+    fireEvent.change(cryptoUI.getByRole("searchbox"), { target: { value: "btc" } });
+    expect(table.queryByText("ETH/USDT")).toBeNull();
     fireEvent.click(cryptoUI.getByRole("button", { name: "Enable Scanner Sync" }));
     fireEvent.click(stockUI.getByRole("button", { name: "Use this Scanner as Monitoring Source" }));
     act(() => stock.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
       scannerId: "monitoring/m-scanner", session: "rth", status: "ready", refreshedAt: new Date().toISOString(),
       rows: [{ ...scannerShortInterestDefaults, symbol: "US.AAPL", last: 100, changePct: 3, floatShares: 1, volume: 1 }],
     } }));
-    const firstChart = (saved: Workspace[]) => saved.at(-1)?.panels.find(panel => panel.id === "m-chart-red")?.settings.symbol;
+    const chartSource = (saved: Workspace[], color: string) => saved.at(-1)?.panels.find(panel => panel.id === `m-chart-${color}`)?.settings.symbol;
     await waitFor(() => {
-      expect(firstChart(crypto.saved)).toBe("PERP.MEXC.BTC_USDT");
-      expect(firstChart(stock.saved)).toBe("US.AAPL");
+      expect(chartSource(crypto.saved, "red")).toBe(eth);
+      expect(chartSource(crypto.saved, "green")).toBe(btc);
+      expect(chartSource(crypto.saved, "blue")).toBeUndefined();
+      expect(chartSource(stock.saved, "red")).toBe("US.AAPL");
     });
     fireEvent.click(cryptoUI.getByRole("button", { name: "Disable Scanner Sync" }));
     await waitFor(() => expect(crypto.saved.at(-1)?.scannerSync?.enabled).toBe(false));
-    expect(firstChart(crypto.saved)).toBe("PERP.MEXC.BTC_USDT");
+    expect(chartSource(crypto.saved, "red")).toBe(eth);
     expect(stockUI.getByRole("button", { name: "Disable Scanner Sync" })).toBeTruthy();
   });
 });

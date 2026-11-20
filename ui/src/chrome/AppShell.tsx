@@ -43,7 +43,7 @@ import { openWorkspaceWindow } from "./windows";
 import { planDemoEntry, planDemoRevert } from "./demoTransition";
 import { PanelHeaderTab } from "./PanelHeaderTab";
 import { PanelHeaderHostProvider } from "./panels/headerSlot";
-import { CryptoScannerContext } from "./cryptoScanner";
+import { CryptoListContext } from "./cryptoScanner";
 import { useCryptoFollowing } from "./useCryptoFollowing";
 import { PanelSymbolRuntime, planScannerSync, rankScannerRows, readScannerSort, ScannerSyncRuntime, type ScannerSyncPanelState, type ScannerSyncPlan } from "./scannerSync";
 import { DEFAULT_SCANNER_FILTERS, scannerFiltersFromSettings } from "./scannerFilters";
@@ -870,7 +870,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     wsRef.current = next;
     setWs(next);
   }, []);
-  const { runtime: cryptoSyncRuntime, data: cryptoScannerData } = useCryptoFollowing({
+  const { runtime: cryptoSyncRuntime, data: cryptoListData } = useCryptoFollowing({
     name: workspaceName, workspace: ws, current: wsRef, apply: applyCryptoWorkspace, store: workspaceStore,
     commands, connected: engineState === "open", symbols: panelSymbols, orderedIds: orderedPanelIds, venues: execStatus?.venues,
   });
@@ -990,7 +990,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             // doesn't reference dockview's pre-clear() state at all.
             next.panels.forEach((p, i) => {
               api.addPanel({
-                id: p.id, component: p.id, title: p.panelId,
+                id: p.id, component: p.id, title: p.panelId === "crypto-scanner" ? PANELS[p.panelId]?.title ?? p.panelId : p.panelId,
                 ...dockviewPanelConstraints(p.panelId),
                 ...(i === 0 ? {} : { position: { direction: i % 2 ? "right" : "below" } as const }),
               });
@@ -1082,7 +1082,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     if (!restored) {
       ws.panels.forEach((p, i) => {
         event.api.addPanel({
-          id: p.id, component: p.id, title: p.panelId,
+          id: p.id, component: p.id, title: p.panelId === "crypto-scanner" ? PANELS[p.panelId]?.title ?? p.panelId : p.panelId,
           ...dockviewPanelConstraints(p.panelId),
           ...(i === 0 ? {} : { position: { direction: i % 2 ? "right" : "below" } as const }),
         });
@@ -1117,7 +1117,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   };
 
   return (
-    <CryptoScannerContext.Provider value={cryptoScannerData}>
+    <CryptoListContext.Provider value={cryptoListData}>
     <OpenSettingsProvider value={{
       openOrderSettings: () => setSettings({ open: true, section: "orders" }),
       openVenueSettings: () => setSettings({ open: true, section: "venues" }),
@@ -1177,6 +1177,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} onTryDemo={onTryDemo} />}
       </div>
     </OpenSettingsProvider>
-    </CryptoScannerContext.Provider>
+    </CryptoListContext.Provider>
   );
 }
