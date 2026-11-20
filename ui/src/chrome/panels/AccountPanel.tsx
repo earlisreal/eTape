@@ -10,7 +10,7 @@ import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
 import { useVenueSelection } from "../exec/venueSelection";
-import { cryptoExchange, cryptoExchangeKey, cryptoExchangeLabel, cryptoExchanges, defaultCryptoExchange, useCryptoPreference } from "../cryptoScanner";
+import { cryptoBrokerExchange } from "../cryptoScanner";
 import { VenueEnvironmentBadge, venueEnvironment } from "../exec/VenueEnvironmentBadge";
 import { useAccountDemand } from "../exec/useAccountDemand";
 import { useOrderConfig } from "../exec/useOrderConfig";
@@ -590,9 +590,8 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   useSyncExternalStore((cb) => stores.quote.subscribe(cb), () => stores.quote.getRev());
   const group = groupProp === undefined ? config.group : groupProp;
   const openPositionSymbol = (symbol: string) => linkGroups.focus(group ?? "green", symbol);
-  const { market, venue, venues, selectVenue, placeholder } = useVenueSelection(group, linkGroups, stores);
-  const exchange = cryptoExchange(market);
-  const cryptoPreference = useCryptoPreference(commands, cryptoExchangeKey, group !== null);
+  const { market, venue, venues, selectVenue, placeholder } = useVenueSelection(group, linkGroups, stores, true);
+  const cryptoMode = market !== undefined && market !== "stocks";
   useAccountDemand(commands, config.id, group === null ? "" : venue);
   const status = stores.exec.status();
   const venueStatus = status?.venues.find((v) => v.venue === venue);
@@ -616,7 +615,17 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   const oldOrders = previousVenue && previousVenue !== venue ? stores.exec.orders().filter((o) => o.order.venue === previousVenue && (o.optimistic || isWorking(o.order.status))).length : 0;
   const headerActions = (
     <div style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
-      {exchange && status && venues.length === 0 ? <span className="mono">Browse only</span> : venueSelect}
+      {group !== null && <div role="group" aria-label="Account market" className="account-market-switch">
+        <button type="button" className="ctl" aria-pressed={!cryptoMode}
+          onClick={() => linkGroups.focusMarket(group, "stocks")}>Stocks</button>
+        <button type="button" className="ctl" aria-pressed={cryptoMode} onClick={() => {
+          if (cryptoMode) return;
+          const remembered = linkGroups.lastCryptoFor(group);
+          const configured = remembered && status?.venues.some(v => cryptoBrokerExchange(v.broker) === remembered);
+          linkGroups.focusMarket(group, configured ? remembered : "crypto");
+        }}>Crypto</button>
+      </div>}
+      {venueSelect}
       <VenueEnvironmentBadge environment={venueEnvironment(venueStatus)} />
     </div>
   );
@@ -682,21 +691,6 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontFamily: "inherit" }}>
       {actionsSlot === undefined ? headerActions : actionsSlot ? createPortal(headerActions, actionsSlot) : null}
-      {group !== null && <div className="account-market">
-        <div role="group" aria-label="Account market" className="account-market-switch">
-          <button type="button" className="ctl" aria-pressed={!exchange}
-            onClick={() => linkGroups.focusMarket(group, "stocks")}>Stocks</button>
-          <button type="button" className="ctl" aria-pressed={!!exchange}
-            onClick={() => linkGroups.focusMarket(group, linkGroups.lastCryptoFor(group) ?? cryptoExchange(cryptoPreference.value) ?? defaultCryptoExchange)}>Crypto</button>
-        </div>
-        {exchange && <select className="ctl mono venue-selector" aria-label="Account exchange" value={exchange}
-          onChange={event => {
-            const next = cryptoExchange(event.target.value);
-            if (next) linkGroups.focusMarket(group, next);
-          }}>
-          {cryptoExchanges.map(value => <option key={value} value={value}>{cryptoExchangeLabel[value]}</option>)}
-        </select>}
-      </div>}
       {oldOrders > 0 && <div data-testid="venue-switch-warning" style={{ padding: "3px 8px", color: palette.warn, fontSize: 11 }}>Working orders remain on {previousVenue} ({oldOrders}).</div>}
       <StatsStrip stores={stores} palette={palette} venue={venue} />
       {(venueStatus?.protectionWarnings ?? []).map((warning) => <div key={warning.symbol} role="alert" data-testid="account-protection-warning"

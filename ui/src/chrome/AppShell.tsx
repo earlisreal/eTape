@@ -872,7 +872,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   }, []);
   const { runtime: cryptoSyncRuntime, data: cryptoScannerData } = useCryptoFollowing({
     name: workspaceName, workspace: ws, current: wsRef, apply: applyCryptoWorkspace, store: workspaceStore,
-    commands, connected: engineState === "open", symbols: panelSymbols, orderedIds: orderedPanelIds,
+    commands, connected: engineState === "open", symbols: panelSymbols, orderedIds: orderedPanelIds, venues: execStatus?.venues,
   });
 
   // Dockview forces layout when its component map changes, restoring pre-drag

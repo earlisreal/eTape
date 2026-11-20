@@ -88,8 +88,11 @@ export function resolveScannerExchange(
   selection: ReturnType<typeof readCryptoScanner>["exchange"],
   groupMarket: string | undefined,
   appDefault: CryptoExchange,
+  configuredExchanges: ReadonlySet<CryptoExchange>,
 ): CryptoExchange | undefined {
-  return selection === followAccountExchange ? cryptoExchange(groupMarket) : selection ?? appDefault;
+  if (selection !== followAccountExchange) return selection ?? appDefault;
+  const exchange = cryptoExchange(groupMarket);
+  return exchange && configuredExchanges.has(exchange) ? exchange : undefined;
 }
 
 export function rankCryptoScanner(rows: readonly CryptoScannerRow[], settings: ReturnType<typeof readCryptoScanner>): CryptoScannerRow[] {
@@ -118,11 +121,13 @@ export interface CryptoScannerData {
 
 export interface CryptoScannerBoards {
   defaultExchange: CryptoExchange;
+  configuredExchanges: ReadonlySet<CryptoExchange>;
   byExchange: Record<CryptoExchange, CryptoScannerData>;
 }
 
 export const CryptoScannerContext = createContext<CryptoScannerBoards>({
   defaultExchange: defaultCryptoExchange,
+  configuredExchanges: new Set(),
   byExchange: {
     MEXC: { exchange: "MEXC" },
     BINANCE: { exchange: "BINANCE" },

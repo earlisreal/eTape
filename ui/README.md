@@ -23,12 +23,14 @@ symbol opens the USDT perpetual market list. Search a coin, pair or exchange to
 load a MEXC, Binance, or BingX market in the panel or its Link Group. Add the MEXC
 Perpetual Simulator in Settings → Venues & creds, then select it as the Link
 Group's Execution Venue for paper orders on MEXC markets. Choose **Stocks** or
-**Crypto** in a linked Account panel, then choose the exchange in Crypto mode.
+**Crypto** in the linked Account header, then pick a configured account from
+the **Execution Venue** dropdown. The crypto account determines the exchange.
 Each Link Group remembers its last crypto exchange and restores its last
 symbol and account for stocks or for the selected exchange. If the group has
 no saved symbol for that market, pick one from the Scanner or market picker.
-Account and Order Ticket offer compatible accounts when configured. You can
-browse exchanges without a trading account.
+MEXC paper and live share the MEXC feed, and BingX Virtual and Live share the
+BingX feed. Binance Futures Demo uses its demo feed. You can browse exchanges
+without a trading account from the market picker or a standalone Crypto Scanner.
 Explicitly switching from paper to live or returning from paper to a saved live
 perpetual account requires confirmation.
 
@@ -96,9 +98,8 @@ Monitoring and Crypto Monitoring can follow their own source at the same time.
 Charts retain their symbols when sync is turned off or data goes stale.
 A five-minute ranking needs recent samples before it can admit a market.
 
-Set **Default crypto exchange** in **Settings → Data & storage**. Account uses
-it when a Link Group first switches to Crypto. The market picker and Crypto
-Scanners set to **App default** also follow this preference.
+Set **Default crypto exchange** in **Settings → Data & storage**. The market
+picker and Crypto Scanners set to **App default** follow this preference.
 **Settings → Venues & creds → Preferred crypto account** adds an explicit
 **Use preferred account** action to a compatible linked Order Ticket.
 For a contract on a different exchange, **Open on** loads the matching contract

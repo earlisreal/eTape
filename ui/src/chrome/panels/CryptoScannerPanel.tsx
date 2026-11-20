@@ -33,12 +33,12 @@ export function CryptoScannerPanel({ config, scannerSync, group: groupProp, link
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   useDismissibleLayer(filtersRef, () => setDraft(null), { enabled: draft !== null, anchor: filterTriggerRef.current });
 
-  const { defaultExchange, byExchange } = useContext(CryptoScannerContext);
+  const { defaultExchange, configuredExchanges, byExchange } = useContext(CryptoScannerContext);
   const filters = useMemo(() => readCryptoScanner(settings), [settings]);
   const group = groupProp === undefined ? config.group : groupProp;
   const groupMarket = useSyncExternalStore((cb) => linkGroups.subscribe(cb), () => linkGroups.marketFor(group));
   const followsAccount = filters.exchange === followAccountExchange;
-  const exchange = resolveScannerExchange(filters.exchange, groupMarket, defaultExchange);
+  const exchange = resolveScannerExchange(filters.exchange, groupMarket, defaultExchange, configuredExchanges);
   const data = exchange ? byExchange[exchange] : undefined;
   const snapshot = data?.snapshot;
   const exchangeLabel = exchange ? cryptoExchangeLabel[exchange] : undefined;
@@ -90,7 +90,9 @@ export function CryptoScannerPanel({ config, scannerSync, group: groupProp, link
     filters.maxSpread > 0 && `spread ≤ ${filters.maxSpread} bps`,
   ].filter(Boolean).join(" · ");
   const status = !exchange
-    ? group ? `Paused while ${groupLabel} is on Stocks` : "Choose a Link Group to follow Account"
+    ? !group ? "Choose a Link Group to follow Account"
+      : groupMarket === "stocks" ? `Paused while ${groupLabel} is on Stocks`
+      : "Choose a configured crypto account in Account"
     : data?.error || (!snapshot ? "Loading markets…" : warming ? "Collecting a 5-minute baseline…" : null);
 
   return (
