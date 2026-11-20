@@ -103,6 +103,27 @@ func (a *Adapter) PendingOrderIDs() []string {
 	return ids
 }
 
+// RecordRejection restores a previously observed definitive submit rejection.
+// The poller still waits for the persisted terminal engine event.
+func (a *Adapter) RecordRejection(id, symbol, reason string) (bool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p, ok := a.journal.Pending[id]
+	if !ok || p.Request.Symbol != symbol {
+		return false, nil
+	}
+	if p.Rejection == "" {
+		saved := p
+		p.Rejection = reason
+		a.journal.Pending[id] = p
+		if err := a.save(); err != nil {
+			a.journal.Pending[id] = saved
+			return false, err
+		}
+	}
+	return p.Rejection == reason, nil
+}
+
 func (a *Adapter) SubmitOrder(ctx context.Context, req exec.OrderRequest) (exec.OrderAck, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -139,10 +160,10 @@ func (a *Adapter) SubmitOrder(ctx context.Context, req exec.OrderRequest) (exec.
 			p.Rejection = declined.Error()
 			a.journal.Pending[req.ClientOrderID] = p
 			if saveErr := a.save(); saveErr != nil {
-				return exec.OrderAck{}, errors.Join(err, saveErr)
+				return exec.OrderAck{}, fmt.Errorf("persist perpetual submit rejection (%v): %w", err, saveErr)
 			}
 			// The poller keeps the rejection until the engine has persisted it.
-			return exec.OrderAck{}, errors.New(p.Rejection)
+			return exec.OrderAck{}, declined
 		}
 		return exec.OrderAck{}, err
 	}

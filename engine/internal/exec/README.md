@@ -33,6 +33,12 @@ price under its ledger lock and live verifies the original MEXC position ID.
 
 The held entry uses an eligible MEXC trade and submits an IOC limit order.
 Before the trigger, the stop is checked against the planned entry trigger.
+The preview reads the selected account's isolated leverage and quantity limit
+for the contract and direction. Admission rechecks those terms before arming.
+Auto sizes at the reviewed account leverage within the preset cap and
+liquidation buffer. Fixed leverage requires an exact match.
+Pending chart edits keep the verified opening size ceiling. IOC preflight
+rechecks the latest exchange limits before sending.
 When the entry triggers, eTape pauses it if fair price has crossed the stop. After
 the adapter reconciles the IOC and the open position, eTape creates a separate
 fair-price stop for the confirmed quantity. Its venue, account identity and
@@ -42,7 +48,9 @@ the engine's timer and after broker reconciliation.
 The stop starts one journaled reduce-only market close at the trigger. It can
 close while the engine is disarmed. A restart or disconnect that pauses the
 order requires Resume in Account. An ambiguous exchange response stays pending
-until reconciliation. A terminal close with remaining exposure produces an
+until reconciliation. MEXC code 6002 is a definitive opening rejection, including
+when the engine recovers the recorded 6002 response from an earlier run.
+A terminal close with remaining exposure produces an
 Account warning. Manual reductions shrink the remaining stop quantity and a
 flat or changed position retires the untriggered stop.
 

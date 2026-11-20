@@ -166,6 +166,42 @@ func TestPlaceOrderBlocksUnsupportedAccountBeforePOST(t *testing.T) {
 	}
 }
 
+func TestMEXCOpeningTermsAndDefinitiveRejection(t *testing.T) {
+	var posts atomic.Int32
+	c := fixture(t, func(w http.ResponseWriter, r *http.Request, _ []byte) {
+		switch r.URL.Path {
+		case "/api/v1/private/account/risk_limit":
+			if r.Method != http.MethodGet || r.URL.Query().Get("symbol") != "BTC_USDT" {
+				t.Errorf("unexpected risk tier request: %s %s", r.Method, r.URL)
+			}
+			sendResult(w, `{"BTC_USDT":[{"positionType":1,"openType":1,"maxVol":20,"leverage":5,"maxLeverage":10},
+				{"positionType":2,"openType":2,"maxVol":20,"leverage":3,"maxLeverage":10}]}`)
+		case "/api/v1/private/order/create":
+			posts.Add(1)
+			_, _ = io.WriteString(w, `{"success":false,"code":6002,"data":null}`)
+		default:
+			if !snapshotFixture(w, r, "[]", oneWay) {
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+			}
+		}
+	})
+	terms, err := c.openingTerms(t.Context(), "BTC_USDT")
+	if err != nil || terms.Long != (exec.PerpetualOpeningLimit{Leverage: 5, MaxContracts: 20}) || terms.Short.Leverage != 0 {
+		t.Fatalf("wrong isolated terms: %+v, %v", terms, err)
+	}
+	req := exec.OrderRequest{Symbol: "PERP.MEXC.BTC_USDT", ClientOrderID: "ETfixture", Side: exec.SideBuy,
+		Type: exec.TypeLimit, TIF: exec.TIFIOC, LimitPrice: 100_000, Qty: 7,
+		Perpetual: &exec.PerpetualOrder{Leverage: 1, Multiplier: .0001}}
+	if _, err := c.placeOrder(t.Context(), req, tradingRules(), 100_000); err == nil || !strings.Contains(err.Error(), "isolated leverage is 5×") || posts.Load() != 0 {
+		t.Fatalf("leverage mismatch reached submit or lacked a specific reason: %v", err)
+	}
+	req.Perpetual.Leverage = 5
+	var declined exec.PerpetualSubmitDeclined
+	if _, err := c.placeOrder(t.Context(), req, tradingRules(), 100_000); !errors.As(err, &declined) || !strings.Contains(err.Error(), "6002") || posts.Load() != 1 {
+		t.Fatalf("expected definitive 6002 after one post, got %v after %d", err, posts.Load())
+	}
+}
+
 func TestPositionBoundCloseRejectsDifferentMEXCPositionBeforePOST(t *testing.T) {
 	p := `[{"symbol":"BTC_USDT","positionId":` + fixturePositionID + `,"positionType":1,"openType":1,"holdVol":4,"frozenVol":0}]`
 	c := fixture(t, func(w http.ResponseWriter, r *http.Request, _ []byte) {

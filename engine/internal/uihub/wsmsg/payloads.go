@@ -143,10 +143,11 @@ type Order struct {
 }
 
 type PerpetualRiskTerms struct {
-	Budget       float64      `json:"budget"`
-	Leverage     int          `json:"leverage"`
-	AutoLeverage bool         `json:"autoLeverage,omitempty"`
-	EntryCushion LimitCushion `json:"entryCushion"`
+	Budget        float64      `json:"budget"`
+	Leverage      int          `json:"leverage"`
+	AutoLeverage  bool         `json:"autoLeverage,omitempty"`
+	OpeningMaxQty int64        `json:"openingMaxQty,omitempty"`
+	EntryCushion  LimitCushion `json:"entryCushion"`
 }
 
 type LimitCushion struct {
@@ -204,6 +205,22 @@ type PerpetualMarket struct {
 	Base           string `json:"base"`
 	Settlement     string `json:"settlement"`
 	TradingEnabled bool   `json:"tradingEnabled"`
+}
+
+type QueryPerpetualOpeningArgs struct {
+	Venue  string `json:"venue"`
+	Symbol string `json:"symbol"`
+}
+
+type PerpetualOpeningLimit struct {
+	Leverage     int   `json:"leverage"`
+	MaxContracts int64 `json:"maxContracts"`
+}
+
+type PerpetualOpeningPreview struct {
+	Long   PerpetualOpeningLimit `json:"long"`
+	Short  PerpetualOpeningLimit `json:"short"`
+	Reason string                `json:"reason,omitempty"`
 }
 
 type SubmitPerpetualRiskEntryArgs struct {

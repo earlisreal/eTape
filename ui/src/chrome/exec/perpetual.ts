@@ -1,4 +1,4 @@
-import type { Order, PerpetualContract } from "../../gen/wsmsg";
+import type { Order, PerpetualContract, PerpetualOpeningLimit } from "../../gen/wsmsg";
 import { isWorking } from "../../wire/orderStatus";
 import { defaultLeverageCap, type RiskEntryTemplate } from "./actionTemplate";
 
@@ -18,11 +18,13 @@ export function perpetualTick(price: number, contract: PerpetualContract, roundi
 
 export function perpetualRiskSize(
   template: Pick<RiskEntryTemplate, "perpetual" | "mode" | "value" | "buyCushion">, contract: PerpetualContract | undefined, trigger: number, stop: number, collateral: number,
-  maxQty = Infinity,
+  maxQty = Infinity, openingLimit?: PerpetualOpeningLimit,
 ) {
   const p = template.perpetual;
   if (!p || !contract || !contract.tradingEnabled || trigger <= 0 || stop <= 0 ||
       (p.side === "BUY" ? stop >= trigger : stop <= trigger)) return null;
+  const autoLeverage = p.leverageCap !== undefined || p.leverage === undefined;
+  if (!autoLeverage && openingLimit && p.leverage !== openingLimit.leverage) return null;
   const long = p.side === "BUY";
   const cushion = template.buyCushion.unit === "%" ? trigger * template.buyCushion.value / 100 : template.buyCushion.value;
   const limit = perpetualTick(trigger + (long ? cushion : -cushion), contract, long ?
@@ -32,13 +34,12 @@ export function perpetualRiskSize(
   const fees = (limit + stop) * unit * fee;
   const riskPerContract = Math.abs(limit - stop) * unit + fees;
   const budget = template.mode === "Dollar" ? template.value : collateral * template.value / 100;
-  const target = Math.min(contract.maximum, budget / riskPerContract, maxQty);
+  const target = Math.min(contract.maximum, openingLimit?.maxContracts ?? Infinity, budget / riskPerContract, maxQty);
   const sizeAt = (leverage: number, maximum: number) => {
     const available = Math.min(target, maximum, collateral / (limit * unit / leverage + fees));
     const qty = Math.floor(available / contract.quantityStep + 1e-10) * contract.quantityStep;
     return Number.isSafeInteger(qty) && qty >= contract.minimum ? qty : 0;
   };
-  const autoLeverage = p.leverageCap !== undefined || p.leverage === undefined;
   let qty = 0, leverage = p.leverage ?? 0;
   if (autoLeverage) {
     // Match ContractRules.AutoRiskSize at the buffered mark beyond the stop.
@@ -49,7 +50,9 @@ export function perpetualRiskSize(
       const required = Math.abs(limit - mark) + Math.max(limit, mark) *
         (tier.maintenance + tier.liquidationFee) + (limit + mark) * fee;
       const maxInTier = Math.min(cap, tier.maxLeverage);
-      for (let candidate = contract.minLeverage; candidate <= maxInTier; candidate++) {
+      const first = openingLimit ? Math.max(contract.minLeverage, openingLimit.leverage) : contract.minLeverage;
+      const last = openingLimit ? Math.min(maxInTier, openingLimit.leverage) : maxInTier;
+      for (let candidate = first; candidate <= last; candidate++) {
         if (mark <= 0 || limit / candidate <= required) break;
         const size = sizeAt(candidate, tier.maxContracts);
         if (size > qty || (size > 0 && size === qty && candidate < leverage)) {

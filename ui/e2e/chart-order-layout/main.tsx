@@ -130,6 +130,9 @@ const chartBars = axisFlicker ? Array.from({ length: 90 }, (_, i) => {
     l: close - 0.1, c: close, v: 100 + i, inProgress: false };
 });
 const sendQuery = async (name, args) => {
+  if (name === "QueryPerpetualOpening") return {
+    long: { leverage: 5, maxContracts: 100000 }, short: { leverage: 4, maxContracts: 100000 },
+  };
   if (name === "QueryChartWindow") return { ...(args ?? {}), symbol: chartSymbol, timeframe: chartTimeframe,
     fromMs: Date.parse(chartBars[0].bucketStart), toMs: Date.parse(chartBars.at(-1).bucketStart) + (axisFlicker ? 300_000 : 60_000),
     bars: chartBars, indicators: [], historyRevision: 1 };

@@ -240,6 +240,7 @@ export interface PerpetualRiskTerms {
   budget: number /* float64 */;
   leverage: number /* int */;
   autoLeverage?: boolean;
+  openingMaxQty?: number /* int64 */;
   entryCushion: LimitCushion;
 }
 export interface LimitCushion {
@@ -292,6 +293,19 @@ export interface PerpetualMarket {
   base: string;
   settlement: string;
   tradingEnabled: boolean;
+}
+export interface QueryPerpetualOpeningArgs {
+  venue: string;
+  symbol: string;
+}
+export interface PerpetualOpeningLimit {
+  leverage: number /* int */;
+  maxContracts: number /* int64 */;
+}
+export interface PerpetualOpeningPreview {
+  long: PerpetualOpeningLimit;
+  short: PerpetualOpeningLimit;
+  reason?: string;
 }
 export interface SubmitPerpetualRiskEntryArgs {
   venue: string;

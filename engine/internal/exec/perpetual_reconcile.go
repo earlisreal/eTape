@@ -24,6 +24,36 @@ type perpetualOrderJournal interface {
 	PendingOrderIDs() []string
 }
 
+type perpetualRejectionRecovery interface {
+	RecoverPerpetualRejection(id, symbol, reported string) (string, error)
+}
+
+func (c *Core) recoverHeldPerpetualRejections(reports map[string]string) error {
+	for id, reported := range reports {
+		o := c.order(id)
+		if o.Status != StatusSubmitted || o.ExecutedQty != 0 || o.Held == nil ||
+			o.Held.ChildClientID != id || o.Held.ChildBrokerID != "" ||
+			!o.Perpetual.IsRiskEntry() || !o.Perpetual.LocalProtection ||
+			o.Perpetual.AccountIdentity == "" || o.Perpetual.AccountIdentity != c.heldLiveIdentity[o.Venue] {
+			continue
+		}
+		broker, ok := c.brokers[o.Venue].(perpetualRejectionRecovery)
+		if !ok {
+			continue
+		}
+		reason, err := broker.RecoverPerpetualRejection(id, o.Symbol, reported)
+		if err != nil {
+			return err
+		}
+		if reason != "" {
+			if err := c.foldPerpetualObservation(PerpetualObservation{Venue: o.Venue, OrderID: id, Rejection: reason}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 type perpetualRiskHistoryStore interface {
 	ReadExecPerpetualRiskOrderHistories(VenueID) ([]EventEnvelope, error)
 }

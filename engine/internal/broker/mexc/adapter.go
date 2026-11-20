@@ -28,10 +28,32 @@ type liveAPI struct {
 	quotes sync.Map
 }
 
+const openingForbidden = "MEXC forbids opening this position (6002). Contact MEXC support."
+
 func (a *Live) Capabilities() exec.Capabilities {
 	caps := a.Adapter.Capabilities()
 	caps.EngineHeldPerpetualRiskEntry = true
 	return caps
+}
+
+func (a *Live) OpeningTerms(ctx context.Context, symbol string) (exec.PerpetualOpeningTerms, error) {
+	id, ok := instrument.ParsePerpetual(symbol)
+	if !ok || id.Exchange != market.Exchange {
+		return exec.PerpetualOpeningTerms{}, errors.New("invalid MEXC Futures contract")
+	}
+	return a.api.openingTerms(ctx, id.Native)
+}
+
+func (a *Live) RecoverPerpetualRejection(id, symbol, reported string) (string, error) {
+	// Older versions persisted this authoritative submit rejection as unknown.
+	if reported != (apiError{Code: 6002}).Error() {
+		return "", nil
+	}
+	ok, err := a.RecordRejection(id, symbol, openingForbidden)
+	if !ok {
+		return "", err
+	}
+	return openingForbidden, nil
 }
 
 func NewLive(venue exec.VenueID, cr creds.Pair, clk clock.Clock, path string, data *market.Client) (*Live, error) {
@@ -85,17 +107,6 @@ func (a *liveAPI) Prepare(ctx context.Context, req exec.OrderRequest) (func(cont
 			return exec.PerpetualSubmitDeclined{Cause: errors.New("MEXC fair price changed; review the order")}
 		}
 		_, err := a.sendOrder(ctx, input)
-		var apiErr apiError
-		if errors.As(err, &apiErr) {
-			// Duplicate IDs, busy responses and transport failures still
-			// require lookup; these codes definitively reject this submit.
-			switch apiErr.Code {
-			case 401, 402, 406, 511, 600, 601, 602, 702, 704, 1001, 1002, 1004,
-				2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2011, 2015,
-				2021, 2027, 2029, 2030, 2038, 2043, 2051, 2057, 7005, 7008, 8920:
-				return exec.PerpetualSubmitDeclined{Cause: err}
-			}
-		}
 		return err
 	}, nil
 }

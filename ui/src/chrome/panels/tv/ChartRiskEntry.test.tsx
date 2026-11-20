@@ -10,6 +10,7 @@ import { ChartRiskEntry } from "./ChartRiskEntry";
 import { ThemeProvider } from "../../ThemeProvider";
 import { ToastProvider } from "../../Toast";
 import type { AckMsg, Order, StopLimitRoutePreview } from "../../../wire/contract";
+import type { PerpetualOpeningPreview } from "../../../gen/wsmsg";
 const template: RiskEntryTemplate = { kind: "risk", id: "r", label: "Risk", mode: "Dollar", value: 100, buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
 const mexcSymbol = "PERP.MEXC.BTC_USDT";
 const autoPreset: RiskEntryTemplate = { ...template, auto: { leverage: 5 }, value: 1 };
@@ -28,7 +29,10 @@ function mount(auto = false, preset = template, chartSymbol = preset.perpetual ?
     host.getBoundingClientRect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 500, bottom: 400, width: 500, height: 400, toJSON: () => ({}) });
     const facadeRef = { current: { setOrderCrosshair: vi.fn(), priceScaleWidth: () => 60, paneHeights: () => [400], coordinateToPrice: (y: number) => 12 - y / 100, priceToCoordinate: (p: number) => (12 - p) * 100 } as unknown as ChartApiFacade };
     const sendCommand = vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { void name; void args; return { kind: "ack", corrId: "1", status: "accepted", orderId: "E1" }; });
-    const sendQuery = vi.fn(async (): Promise<StopLimitRoutePreview> => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "RTH", deadlineMs: Date.now() + 100000, hasTrustedEligiblePrint: true, lastEligiblePrice: 9, lastEligibleTsMs: Date.now() }));
+    const sendQuery = vi.fn(async (name?: string): Promise<StopLimitRoutePreview | PerpetualOpeningPreview> => {
+        if (name === "QueryPerpetualOpening") return { long: { leverage: 5, maxContracts: 1000 }, short: { leverage: 5, maxContracts: 1000 } };
+        return { route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "RTH", deadlineMs: Date.now() + 100000, hasTrustedEligiblePrint: true, lastEligiblePrice: 9, lastEligibleTsMs: Date.now() };
+    });
     const layoutRef = { current: () => {} };
     const element = (symbol = chartSymbol) => <ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol={symbol} contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: venue, templates: [preset], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} layoutRef={layoutRef} sendCommand={sendCommand} sendQuery={sendQuery}/>;
     const result = render(element(), { container: host, wrapper: ({ children }) => <ThemeProvider><ToastProvider>{children}</ToastProvider></ThemeProvider> });
@@ -55,12 +59,47 @@ it.each([["sim", "BUY"], ["sim", "SHORT"], ["mexc-live", "BUY"], ["mexc-live", "
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 100, clientY: side === "BUY" ? 220 : 180 });
     fireEvent.pointerUp(window, { pointerId: 1 });
     expect(host.querySelector("[data-risk-readout]")?.textContent).toContain("contracts");
-    if (venue === "mexc-live") expect(host.querySelector("[data-risk-status]")?.textContent).toContain("mexc-live LIVE · eTape-held fair-price stop");
+    if (venue === "mexc-live") {
+        expect(host.querySelector("[data-risk-status]")?.textContent).toContain("mexc-live LIVE · eTape-held fair-price stop");
+        await waitFor(() => expect(host.querySelector("[data-risk-readout]")?.textContent).toContain("45 contracts"));
+    }
     fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.objectContaining({
         venue, symbol: mexcSymbol, side, trigger: 10, stop: side === "BUY" ? 9.8 : 10.2, leverage: 5, maxQty: 45,
     })));
-    expect(sendQuery).not.toHaveBeenCalled();
+    if (venue === "mexc-live") expect(sendQuery).toHaveBeenCalledWith("QueryPerpetualOpening", { venue, symbol: mexcSymbol });
+    else expect(sendQuery).not.toHaveBeenCalled();
+});
+
+it.each(["BUY", "SHORT"] as const)("uses the MEXC isolated terms for a live %s", async side => {
+    const preset: RiskEntryTemplate = { ...template, auto: { leverageCap: 8 }, value: 1 };
+    const { host, stores, sendCommand, sendQuery } = mount(false, preset, mexcSymbol, true);
+    seedMexcContract(stores);
+    sendQuery.mockResolvedValue({ long: { leverage: 5, maxContracts: 7 }, short: { leverage: 4, maxContracts: 9 } });
+    initiateChartRiskEntry(preset);
+    fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
+    const release = { pointerId: 1, clientX: 130, clientY: side === "BUY" ? 220 : 180 };
+    fireEvent.pointerMove(window, release);
+    fireEvent.pointerUp(window, release);
+    const [qty, leverage] = side === "BUY" ? [7, 5] : [9, 4];
+    await waitFor(() => expect(host.querySelector("[data-risk-readout]")?.textContent).toContain(`${qty} contracts`));
+    expect(host.querySelector("[data-risk-readout]")?.textContent).toContain(`${leverage}× Auto`);
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitPerpetualRiskEntry",
+        expect.objectContaining({ side, leverage, maxQty: qty, autoLeverage: true })));
+});
+
+it("blocks live Auto entry when MEXC leverage exceeds the preset cap", async () => {
+    const preset: RiskEntryTemplate = { ...template, auto: { leverageCap: 3 }, value: 1 };
+    const { host, stores, sendCommand } = mount(true, preset, mexcSymbol, true);
+    seedMexcContract(stores);
+    initiateChartRiskEntry(preset);
+    fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
+    const release = { pointerId: 1, clientX: 130, clientY: 220 };
+    fireEvent.pointerMove(window, release);
+    fireEvent.pointerUp(window, release);
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toContain("5×, above this preset’s 3× Auto cap"));
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.anything());
 });
 it.each([[10, 4, 45, "11.25"], [3, 3, 35, "11.67"]])(
     "previews and submits Auto leverage with a %i× cap", async (leverageCap, leverage, maxQty, margin) => {

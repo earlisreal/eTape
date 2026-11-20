@@ -77,6 +77,9 @@ func (c *Core) replacePerpetualEntry(ctx context.Context, cm ReplaceOrder, o Ord
 		return blocked("fresh account data and a reviewed contract quantity required")
 	}
 	options := *o.Perpetual
+	if options.OpeningMaxQty > 0 {
+		rules.Maximum = min(rules.Maximum, options.OpeningMaxQty)
+	}
 	trigger, limit := o.StopPrice, o.LimitPrice
 	long := o.Side == SideBuy
 	if cm.PendingProtection {

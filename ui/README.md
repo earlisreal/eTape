@@ -34,7 +34,11 @@ without a trading account from the market picker or a standalone Crypto Scanner.
 Explicitly switching from paper to live or returning from paper to a saved live
 perpetual account requires confirmation.
 For MEXC Live Chart Risk Entry, review and enable Stop-Limit for the account in
-Orders & hotkeys. The linked chart and Account show the planned sell or cover
+Orders & hotkeys. The preview reads the contract's isolated leverage and size
+limit from the selected account for the entry direction. Auto sizes at that
+leverage when it fits the preset cap and liquidation buffer. A fixed leverage
+preset must match MEXC. Change the contract's isolated leverage on MEXC if the
+chart flags a mismatch or cap. The linked chart and Account show the planned sell or cover
 stop as pending while the entry is working. After the IOC and position
 reconcile, the engine-held stop appears for the filled quantity. Account lets
 you resume paused MEXC orders.

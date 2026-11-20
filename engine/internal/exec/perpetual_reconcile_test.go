@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"math/rand"
 	"strings"
 	"testing"
@@ -21,15 +22,126 @@ func (mexcRiskBroker) Capabilities() Capabilities {
 func (mexcRiskBroker) ContractRules(symbol string) (instrument.ContractRules, bool) {
 	return instrument.ContractRules{Base: "BTC", Settlement: "USDT", Multiplier: "0.001", PriceTick: "1",
 		QuantityStep: 1, Minimum: 1, Maximum: 1000, MinLeverage: 1, MaxLeverage: 10, TakerFee: "0.0005",
-		TradingEnabled: true}, symbol == "PERP.MEXC.BTC_USDT"
+		TradingEnabled: true, RiskTiers: []instrument.RiskTier{{MaxContracts: 1000, MaxLeverage: 10, Maintenance: .005}}}, symbol == "PERP.MEXC.BTC_USDT"
 }
 func (b *mexcRiskBroker) FairPrice(string) (float64, bool) { return b.fair, b.fair > 0 }
 func (*mexcRiskBroker) PendingOrderIDs() []string          { return nil }
+func (*mexcRiskBroker) OpeningTerms(context.Context, string) (PerpetualOpeningTerms, error) {
+	return PerpetualOpeningTerms{
+		Long:  PerpetualOpeningLimit{Leverage: 5, MaxContracts: 2},
+		Short: PerpetualOpeningLimit{Leverage: 4, MaxContracts: 3},
+	}, nil
+}
 
 type mexcRiskHistoryFixture struct{ *heldTestStore }
 
 func (s mexcRiskHistoryFixture) ReadExecPerpetualRiskOrderHistories(VenueID) ([]EventEnvelope, error) {
 	return s.ReadExecOrderHistoriesFor([]string{"entry", "stop"})
+}
+
+func TestMEXCLiveChartRiskEntryChecksCurrentLeverageBeforeArming(t *testing.T) {
+	const venue, symbol = VenueID("mexc-live"), "PERP.MEXC.BTC_USDT"
+	broker := &mexcRiskBroker{heldTestBroker: newHeldTestBroker(), fair: 100_000}
+	clk := clock.NewFake(time.Date(2026, 11, 21, 1, 0, 0, 0, time.UTC))
+	store := &heldTestStore{}
+	core := NewCore(CoreConfig{Venues: []VenueID{venue}, Clock: clk, Store: store, IDGen: NewOrderIDGen(clk, rand.New(rand.NewSource(1))),
+		Gate:    GateConfig{Venue: map[VenueID]VenueLimits{venue: {}}},
+		Brokers: map[VenueID]Broker{venue: broker}, HeldStopLimitLiveIdentity: map[VenueID]string{venue: "account"}})
+	core.heldDemand = &heldDemandStub{}
+	core.state.SetMasterArmed(true)
+	core.state.SetPositionsReady(venue, true)
+	core.state.ReconcileAccount(AccountSnapshot{Venue: venue, AvailableCash: 1000, TsMs: clk.Now().UnixMilli()})
+	core.heldLiveAck[venue] = "account"
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = core.Run(ctx)
+	}()
+	defer func() { cancel(); <-done }()
+	cmd := SubmitPerpetualRiskEntry{Venue: venue, Symbol: symbol, Side: SideBuy, Trigger: 100_000, Stop: 99_500,
+		Leverage: 1, AutoLeverage: true, Budget: 10, MaxQty: 7}
+	if ack := core.DoContext(ctx, cmd); ack.Accepted || !strings.Contains(ack.Reason, "isolated leverage is 5×") {
+		t.Fatalf("stale preview should block arming: %+v", ack)
+	}
+	cmd.Leverage = 5
+	ack := core.DoContext(ctx, cmd)
+	if !ack.Accepted {
+		t.Fatalf("reviewed account leverage should arm: %+v", ack)
+	}
+	history, err := store.ReadExecOrderHistoriesFor([]string{ack.OrderID})
+	if err != nil || len(history) != 1 || history[0].Kind != "order_submitted" {
+		t.Fatalf("expected one held submission: %+v, %v", history, err)
+	}
+	event, err := DecodeEvent(history[0].Kind, history[0].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order := event.(OrderSubmitted).Order
+	if order.Qty != 2 || order.Perpetual.Leverage != 5 || order.Held.Phase != HeldWaiting {
+		t.Fatalf("did not honor private leverage and quantity: %+v", order)
+	}
+	edit := core.DoContext(ctx, ReplaceOrder{Venue: venue, OrderID: order.ID, ExpectedHeldPhase: HeldWaiting,
+		ExpectedStopPrice: cmd.Trigger, ExpectedProtectionPrice: cmd.Stop, StopPrice: cmd.Trigger + 1, Qty: 7})
+	if !edit.Accepted {
+		t.Fatalf("could not amend the trigger: %+v", edit)
+	}
+	history, err = store.ReadExecOrderHistoriesFor([]string{order.ID})
+	if err != nil || len(history) != 2 || history[1].Kind != "risk_entry_changed" {
+		t.Fatalf("expected one modification after arming: %+v, %v", history, err)
+	}
+	event, err = DecodeEvent(history[1].Kind, history[1].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if amended := event.(RiskEntryChanged).Entry; amended.Qty != 2 {
+		t.Fatalf("amendment exceeded the verified contract limit: %+v", amended)
+	}
+}
+
+type mexcLegacyRejectionBroker struct {
+	*mexcRiskBroker
+	recovered bool
+}
+
+func (*mexcLegacyRejectionBroker) PendingOrderIDs() []string { return []string{"entry"} }
+func (b *mexcLegacyRejectionBroker) RecoverPerpetualRejection(id, symbol, reason string) (string, error) {
+	if id == "entry" && symbol == "PERP.MEXC.BTC_USDT" && reason == "MEXC Futures rejected the request (code 6002)" {
+		b.recovered = true
+		return "MEXC forbids opening this position (6002)", nil
+	}
+	return "", nil
+}
+
+func TestMEXCChartRiskEntryRestoresDefinitiveRejectionAcrossRestart(t *testing.T) {
+	const venue, symbol = VenueID("mexc-live"), "PERP.MEXC.BTC_USDT"
+	now := time.Date(2026, 11, 21, 1, 0, 0, 0, time.UTC)
+	broker := &mexcLegacyRejectionBroker{mexcRiskBroker: &mexcRiskBroker{heldTestBroker: newHeldTestBroker()}}
+	store := mexcRiskHistoryFixture{&heldTestStore{}}
+	cfg := CoreConfig{Venues: []VenueID{venue}, Clock: clock.NewFake(now.Add(-48 * time.Hour)), Store: store,
+		Brokers: map[VenueID]Broker{venue: broker}, HeldStopLimitLiveIdentity: map[VenueID]string{venue: "account"}}
+	before := NewCore(cfg)
+	order := Order{Venue: venue, ID: "entry", Symbol: symbol, Side: SideBuy, Type: TypeStopLimit, Qty: 7,
+		CreatedMs: before.now(), UpdatedMs: before.now(),
+		Held:      &HeldOrder{Phase: HeldActivating, ChildClientID: "entry"},
+		Perpetual: &PerpetualOrder{LocalProtection: true, AccountIdentity: "account", ProtectionID: "stop", ProtectionPrice: 99_000, RiskBudget: 1}}
+	if err := before.appendAndFold(OrderSubmitted{Order: order}, SrcLocal); err != nil {
+		t.Fatal(err)
+	}
+	before.handleBrokerEvent(t.Context(), HeldActivationOutcome{V: venue, OID: order.ID, Reason: "MEXC Futures rejected the request (code 6002)"})
+	held := *before.order(order.ID).Held
+	held.Phase, held.PausedReason, held.CancelRequested = HeldCancelRequested, "shutdown cancel unconfirmed", true
+	if err := before.appendAndFold(HeldOrderChanged{V: venue, OID: order.ID, Held: held, Ts: before.now()}, SrcLocal); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Clock = clock.NewFake(now)
+	restarted := NewCore(cfg)
+	if err := restarted.Recover(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if restored := restarted.order(order.ID); !broker.recovered || restored.Status != StatusRejected || !strings.Contains(restored.RejectReason, "6002") {
+		t.Fatalf("authoritative rejection was not restored: %+v", restored)
+	}
 }
 
 func TestMEXCLiveChartRiskEntry(t *testing.T) {
@@ -52,7 +164,8 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 				trigger, stop, crossed = 99_000, 99_500, 98_999
 			}
 			cmd := SubmitPerpetualRiskEntry{Venue: venue, Symbol: symbol, Side: side, Trigger: trigger, Stop: stop,
-				Leverage: 5, Cushion: LimitCushion{Value: 1, Unit: "$"}, Budget: 10, MaxQty: 3}
+				Leverage: 5, Cushion: LimitCushion{Value: 1, Unit: "$"}, Budget: 10, MaxQty: 3,
+				openingLimit: PerpetualOpeningLimit{Leverage: 5, MaxContracts: 10}}
 			if ack := core.handlePerpetualRiskEntry(ctx, cmd); ack.Accepted || !strings.Contains(ack.Reason, "enable Stop-Limit") {
 				t.Fatalf("entry without live acknowledgement: %+v", ack)
 			}

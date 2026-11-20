@@ -31,6 +31,10 @@ type eligiblePrintPreviewer interface {
 	PreviewEligiblePrint(context.Context, string) exec.EligiblePrintPreview
 }
 
+type perpetualOpeningPreviewer interface {
+	PreviewPerpetualOpening(context.Context, exec.VenueID, string) (exec.PerpetualOpeningTerms, error)
+}
+
 type queries struct {
 	fills  fillsQuerier
 	charts interface {
@@ -39,6 +43,7 @@ type queries struct {
 	clk           clock.Clock
 	locates       LocateRegistry
 	preview       eligiblePrintPreviewer
+	perpetual     perpetualOpeningPreviewer
 	profileReader *tickstore.ProfileReader
 	profileSlots  chan struct{}
 
@@ -96,7 +101,7 @@ func (q *queries) handleAsync(ctx context.Context, name string, args json.RawMes
 
 func isAsyncQuery(name string) bool {
 	switch name {
-	case "QueryVolumeProfile", "QueryStopLimitRoute", "QueryVenueInstrumentEligibility", "QueryLocateEligibility", "QueryLocateQuotes", "QueryLocates", "QueryLocate":
+	case "QueryVolumeProfile", "QueryStopLimitRoute", "QueryPerpetualOpening", "QueryVenueInstrumentEligibility", "QueryLocateEligibility", "QueryLocateQuotes", "QueryLocates", "QueryLocate":
 		return true
 	default:
 		return false
@@ -107,6 +112,16 @@ func (q *queries) handleContext(ctx context.Context, name string, args json.RawM
 	switch name {
 	case "QueryVolumeProfile":
 		return q.volumeProfile(ctx, args)
+	case "QueryPerpetualOpening":
+		var a wsmsg.QueryPerpetualOpeningArgs
+		if json.Unmarshal(args, &a) != nil || q.perpetual == nil {
+			return wsmsg.PerpetualOpeningPreview{Reason: "live perpetual opening terms are unavailable"}
+		}
+		terms, err := q.perpetual.PreviewPerpetualOpening(ctx, exec.VenueID(a.Venue), a.Symbol)
+		if err != nil {
+			return wsmsg.PerpetualOpeningPreview{Reason: err.Error()}
+		}
+		return wsmsg.PerpetualOpeningPreview{Long: wsmsg.PerpetualOpeningLimit(terms.Long), Short: wsmsg.PerpetualOpeningLimit(terms.Short)}
 	case "QueryAppInfo":
 		return wsmsg.AppInfo{Version: buildinfo.Version}
 	case "QueryChartWindow":

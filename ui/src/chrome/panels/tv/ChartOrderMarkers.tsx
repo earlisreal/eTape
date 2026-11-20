@@ -140,7 +140,8 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         perpetual: { side: order.side === "SHORT" ? "SHORT" : "BUY", leverage: terms.leverage,
           ...(terms.autoLeverage ? { leverageCap: terms.leverage } : {}) },
       }, contract && terms.autoLeverage ? { ...contract, minLeverage: Math.max(contract.minLeverage, terms.leverage) } : contract,
-      protection ? order.stopPrice : price, protection ? price : order.pendingProtectionPrice, latest.current.availableCash ?? 0);
+      protection ? order.stopPrice : price, protection ? price : order.pendingProtectionPrice, latest.current.availableCash ?? 0,
+      terms.openingMaxQty);
       return estimate?.qty ? {
         detail: `${estimate.qty} planned contracts · Est. risk ${estimate.risk.toFixed(2)} USDT`,
         qty: estimate.qty, limit: estimate.buyLimit,

@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -20,6 +21,7 @@ type PerpetualOrder struct {
 	ProtectionID    string        `json:"protectionId,omitempty"`
 	RiskBudget      float64       `json:"riskBudget,omitempty"`
 	AutoLeverage    bool          `json:"autoLeverage,omitempty"`
+	OpeningMaxQty   int64         `json:"openingMaxQty,omitempty"`
 	LocalProtection bool          `json:"localProtection,omitempty"`
 	PositionID      string        `json:"positionId,omitempty"`
 	AccountIdentity string        `json:"accountIdentity,omitempty"`
@@ -49,9 +51,23 @@ type SubmitPerpetualRiskEntry struct {
 	Cushion        LimitCushion
 	Budget, MaxQty float64
 	CollateralPct  bool
+	openingLimit   PerpetualOpeningLimit
 }
 
 func (SubmitPerpetualRiskEntry) isCommand() {}
+
+// PreviewPerpetualOpening reads account terms from the configured venue
+// outside the execution loop. The broker map is fixed at startup.
+func (c *Core) PreviewPerpetualOpening(ctx context.Context, venue VenueID, symbol string) (PerpetualOpeningTerms, error) {
+	broker, _, err := c.perpetualRoute(venue, symbol)
+	if err != nil {
+		return PerpetualOpeningTerms{}, err
+	}
+	if reader, ok := broker.(perpetualOpeningTermReader); ok {
+		return reader.OpeningTerms(ctx, symbol)
+	}
+	return PerpetualOpeningTerms{}, errors.New("live perpetual opening terms are unavailable")
+}
 
 func (c *Core) perpetualRoute(venue VenueID, symbol string) (PerpetualBroker, instrument.ContractRules, error) {
 	b, ok := c.brokers[venue].(PerpetualBroker)
@@ -184,6 +200,22 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 	}
 	collateral := c.state.Venue(cm.Venue).Account.AvailableCash
 	leverage := cm.Leverage
+	if caps.EngineHeldPerpetualRiskEntry {
+		switch {
+		case cm.openingLimit.Leverage <= 0:
+			return deny("MEXC isolated leverage is unavailable for this direction")
+		case cm.openingLimit.Leverage != leverage:
+			return deny(fmt.Sprintf("MEXC isolated leverage is %d×. Review the entry at that leverage or change it on MEXC.", cm.openingLimit.Leverage))
+		case cm.openingLimit.MaxContracts < rules.Minimum:
+			return deny("MEXC isolated risk tier cannot support the minimum contract size")
+		}
+		rules.Maximum = min(rules.Maximum, cm.openingLimit.MaxContracts)
+		if cm.AutoLeverage {
+			// Auto uses the reviewed account leverage on live MEXC. The
+			// exchange setting is never changed by submitting the entry.
+			rules.MinLeverage = leverage
+		}
+	}
 	var size float64
 	if cm.AutoLeverage {
 		// The preview's leverage and quantity are ceilings. Once armed, retain
@@ -200,6 +232,7 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 	if caps.EngineHeldPerpetualRiskEntry {
 		options.LocalProtection = true
 		options.AccountIdentity = c.heldLiveIdentity[cm.Venue]
+		options.OpeningMaxQty = cm.openingLimit.MaxContracts
 	}
 	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeStopLimit, TIF: TIFIOC, Session: SessionAuto,
 		Qty: size, StopPrice: cm.Trigger, LimitPrice: limit, ClientOrderID: c.idgen.Next(), Perpetual: options}

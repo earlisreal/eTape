@@ -263,14 +263,25 @@ func (c *Core) ShutdownHeldSummary() HeldShutdownSummary { return c.shutdownHeld
 // Do submits a command and blocks for its accepted|blocked ack. Safe from any
 // goroutine.
 func (c *Core) Do(cmd Command) CmdAck {
-	reply := make(chan CmdAck, 1)
-	c.cmds <- cmdReq{cmd: cmd, reply: reply}
-	return <-reply
+	return c.DoContext(context.Background(), cmd)
 }
 
 // DoContext is the shutdown-safe form used by runtime observers that may be
 // called while the top-level engine context is being canceled.
 func (c *Core) DoContext(ctx context.Context, cmd Command) CmdAck {
+	if entry, ok := cmd.(SubmitPerpetualRiskEntry); ok {
+		if broker := c.brokers[entry.Venue]; broker != nil && broker.Capabilities().EngineHeldPerpetualRiskEntry {
+			terms, err := c.PreviewPerpetualOpening(ctx, entry.Venue, entry.Symbol)
+			if err != nil {
+				return CmdAck{Reason: err.Error()}
+			}
+			entry.openingLimit = terms.Long
+			if entry.Side == SideShort {
+				entry.openingLimit = terms.Short
+			}
+			cmd = entry
+		}
+	}
 	reply := make(chan CmdAck, 1)
 	select {
 	case c.cmds <- cmdReq{cmd: cmd, reply: reply}:
@@ -367,6 +378,7 @@ func (c *Core) Recover(ctx context.Context) error {
 		}
 		sort.Slice(envs, func(i, j int) bool { return envs[i].Seq < envs[j].Seq })
 	}
+	perpetualOutcomes := make(map[string]string)
 	for i, env := range envs {
 		if i > 0 && env.Seq == envs[i-1].Seq {
 			continue
@@ -376,6 +388,12 @@ func (c *Core) Recover(ctx context.Context) error {
 			return err
 		}
 		c.state.Apply(ev)
+		if change, ok := ev.(HeldOrderChanged); ok && env.Source == SrcLocal.String() &&
+			change.Held.Phase == HeldUnknown && change.Held.ChildClientID == change.OID {
+			if reason, ok := strings.CutPrefix(change.Held.PausedReason, "activation outcome unknown: "); ok {
+				perpetualOutcomes[change.OID] = reason
+			}
+		}
 		if fill, ok := ev.(OrderFilled); ok && fill.PositionExecID != "" {
 			c.positionExecIDs[positionExecKey(fill.F.Venue, fill.PositionExecID)] = true
 		}
@@ -393,6 +411,9 @@ func (c *Core) Recover(ctx context.Context) error {
 		}
 	}
 	if err := c.recoverPerpetualOrders(); err != nil {
+		return err
+	}
+	if err := c.recoverHeldPerpetualRejections(perpetualOutcomes); err != nil {
 		return err
 	}
 	cutoffMs := session.PoolDay(c.clk.Now()) * 1000
@@ -1678,6 +1699,9 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		}
 	case Event: // order-lifecycle or StreamGap — persist + fold + emit
 		before := c.order(e.OrderID())
+		if _, rejected := e.(OrderRejected); rejected && before.Perpetual != nil && before.Status == StatusRejected {
+			return // The durable perpetual poller can deliver the rejection first.
+		}
 		if err := c.appendAndFold(e, SrcWS); err != nil {
 			slog.Error("exec: append broker event failed", "kind", e.Kind(), "err", err)
 			return

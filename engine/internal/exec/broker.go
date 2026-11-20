@@ -58,6 +58,19 @@ type PerpetualBroker interface {
 	FairPrice(symbol string) (float64, bool)
 }
 
+type PerpetualOpeningLimit struct {
+	Leverage     int
+	MaxContracts int64
+}
+
+type PerpetualOpeningTerms struct {
+	Long, Short PerpetualOpeningLimit
+}
+
+type perpetualOpeningTermReader interface {
+	OpeningTerms(context.Context, string) (PerpetualOpeningTerms, error)
+}
+
 // BrokerEvent is anything a Broker pushes: order-lifecycle events (which also
 // satisfy Event and are persisted), connection transitions, and account/position
 // reconcile snapshots (which are not persisted).

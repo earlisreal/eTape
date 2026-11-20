@@ -218,6 +218,19 @@ func (c client) prepareOrder(ctx context.Context, req exec.OrderRequest, rules i
 func (c client) sendOrder(ctx context.Context, input orderSubmission) (orderReceipt, error) {
 	var result orderReceipt
 	if err := c.post(ctx, "/api/v1/private/order/create", input, &result); err != nil {
+		var apiErr apiError
+		if errors.As(err, &apiErr) {
+			// Duplicate IDs, busy responses and transport failures still
+			// require lookup; these codes definitively reject this submit.
+			switch apiErr.Code {
+			case 6002:
+				return orderReceipt{}, exec.PerpetualSubmitDeclined{Cause: errors.New(openingForbidden)}
+			case 401, 402, 406, 511, 600, 601, 602, 702, 704, 1001, 1002, 1004,
+				2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2011, 2015,
+				2021, 2027, 2029, 2030, 2038, 2043, 2051, 2057, 7005, 7008, 8920:
+				return orderReceipt{}, exec.PerpetualSubmitDeclined{Cause: err}
+			}
+		}
 		return orderReceipt{}, err
 	}
 	if !validExchangeID(result.ID) || result.TsMs <= 0 {
@@ -232,6 +245,34 @@ type riskTier struct {
 	MaxVolume   json.Number `json:"maxVol"`
 	MaxLeverage int         `json:"maxLeverage"`
 	Leverage    int         `json:"leverage"`
+}
+
+func (c client) openingTerms(ctx context.Context, symbol string) (exec.PerpetualOpeningTerms, error) {
+	var raw map[string][]riskTier
+	var terms exec.PerpetualOpeningTerms
+	if err := c.get(ctx, "/api/v1/private/account/risk_limit", url.Values{"symbol": {symbol}}, &raw); err != nil {
+		return terms, fmt.Errorf("read MEXC risk tier: %w", err)
+	}
+	for _, tier := range raw[symbol] {
+		if tier.MarginMode != isolated {
+			continue
+		}
+		var side *exec.PerpetualOpeningLimit
+		switch tier.Direction {
+		case longPosition:
+			side = &terms.Long
+		case shortPosition:
+			side = &terms.Short
+		default:
+			continue
+		}
+		maxQty, ok := quantity(tier.MaxVolume)
+		if !ok || tier.Leverage <= 0 || tier.MaxLeverage < tier.Leverage || side.Leverage != 0 {
+			return exec.PerpetualOpeningTerms{}, errors.New("MEXC returned invalid or ambiguous isolated risk terms")
+		}
+		*side = exec.PerpetualOpeningLimit{Leverage: tier.Leverage, MaxContracts: int64(maxQty)}
+	}
+	return terms, nil
 }
 
 func (c client) checkOpening(ctx context.Context, req exec.OrderRequest, rules instrument.ContractRules, fairPrice float64, input orderSubmission, direction int, state accountState, current *position) error {
@@ -256,20 +297,22 @@ func (c client) checkOpening(ctx context.Context, req exec.OrderRequest, rules i
 			return errors.New("resolve MEXC Futures TP/SL before adding")
 		}
 	}
-	var tiers map[string][]riskTier
-	if err := c.get(ctx, "/api/v1/private/account/risk_limit", url.Values{"symbol": {input.Symbol}}, &tiers); err != nil {
-		return fmt.Errorf("read MEXC risk tier: %w", err)
+	terms, err := c.openingTerms(ctx, input.Symbol)
+	if err != nil {
+		return err
 	}
-	supported := false
-	for _, t := range tiers[input.Symbol] {
-		maxQty, ok := quantity(t.MaxVolume)
-		if t.Direction == direction && t.MarginMode == isolated && t.Leverage == input.Leverage &&
-			t.MaxLeverage >= input.Leverage && ok && held+req.Qty <= maxQty {
-			supported = true
-		}
+	limit := terms.Long
+	if direction == shortPosition {
+		limit = terms.Short
 	}
-	if !supported {
-		return errors.New("MEXC Futures quantity or effective isolated leverage exceeds the verified tier")
+	if limit.Leverage == 0 {
+		return errors.New("MEXC isolated leverage is unavailable for this direction")
+	}
+	if limit.Leverage != input.Leverage {
+		return fmt.Errorf("MEXC isolated leverage is %d×, but this order uses %d×. Review the leverage on MEXC.", limit.Leverage, input.Leverage)
+	}
+	if held+req.Qty > float64(limit.MaxContracts) {
+		return fmt.Errorf("MEXC isolated tier permits at most %d total contracts", limit.MaxContracts)
 	}
 	collateral, _ := state.Balance.Available.Float64()
 	price := max(fairPrice, req.LimitPrice)

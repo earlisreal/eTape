@@ -133,6 +133,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	if previewer, ok := ex.(eligiblePrintPreviewer); ok {
 		qry.preview = previewer
 	}
+	qry.perpetual, _ = ex.(perpetualOpeningPreviewer)
 	qry.locates = locateRegistry
 	qry.eligibility = cfg.Eligibility
 	srv := NewServer(h, cmd, qry, ServerConfig{DistDir: cfg.DistDir, OutBuf: cfg.OutBuf})

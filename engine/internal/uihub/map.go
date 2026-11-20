@@ -171,7 +171,8 @@ func mapOrder(o exec.Order) wsmsg.Order {
 		pendingProtectionPrice = o.Perpetual.ProtectionPrice
 		cushion := o.RiskEntryCushion()
 		perpetualRisk = &wsmsg.PerpetualRiskTerms{Budget: o.Perpetual.RiskBudget, Leverage: o.Perpetual.Leverage,
-			AutoLeverage: o.Perpetual.AutoLeverage, EntryCushion: wsmsg.LimitCushion{Value: cushion.Value, Unit: cushion.Unit}}
+			AutoLeverage: o.Perpetual.AutoLeverage, OpeningMaxQty: o.Perpetual.OpeningMaxQty,
+			EntryCushion: wsmsg.LimitCushion{Value: cushion.Value, Unit: cushion.Unit}}
 	}
 	return wsmsg.Order{
 		Venue: string(o.Venue), ID: o.ID, Symbol: o.Symbol,

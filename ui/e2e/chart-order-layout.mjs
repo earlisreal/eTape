@@ -602,6 +602,7 @@ try {
     assert(Number(review[2]) > 1 && Number(review[2]) <= 10);
     assert(Number(review[3]) <= 300);
     if (isLive) {
+      assert.equal(Number(review[2]), isShort ? 4 : 5, "Preview must use the selected MEXC side’s isolated leverage");
       assert.match(await perpetualPage.locator("[data-risk-status]").innerText(), /mexc-live LIVE.*eTape-held fair-price stop/);
     }
     await perpetualPage.keyboard.press("Enter");
@@ -626,7 +627,8 @@ try {
       const changedStop = await perpetualPage.evaluate(() => window.chartPanelProbe.lastReplace);
       assert.equal(changedStop.expectedProtectionPrice, automatic.stop);
       assert.equal(changedStop.expectedStopPrice, automatic.trigger);
-      assert(changedStop.qty > 0 && changedStop.qty < automatic.maxQty);
+      assert(changedStop.qty > 0 && (isLive ? changedStop.qty <= automatic.maxQty : changedStop.qty < automatic.maxQty),
+        `${scenario}: moving the stop farther away must preserve or reduce margin-limited size`);
       await perpetualPage.waitForFunction(price => Number(document.querySelector("[data-testid='pending-protection-sim-risk']")?.dataset.price) === price, changedStop.stopPrice);
       await perpetualPage.getByTestId("order-label-sim-risk").press(isShort ? "ArrowDown" : "ArrowUp");
       await perpetualPage.waitForFunction(() => window.chartPanelProbe.lastReplace?.orderId === "sim-risk" && !window.chartPanelProbe.lastReplace.pendingProtection);
