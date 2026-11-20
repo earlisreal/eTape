@@ -49,8 +49,8 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 				if dispatchCheck.Load() && (r.Method != http.MethodPost || r.URL.Path != "/openApi/swap/v2/trade/order") {
 					t.Errorf("protected limit dispatch made an extra request: %s %s", r.Method, r.URL.Path)
 				}
-				if closeCheck.Load() && (r.URL.Path == "/openApi/swap/v3/user/balance" || r.URL.Path == "/openApi/swap/v2/trade/openOrders") {
-					t.Errorf("position-bound close unnecessarily waited for %s", r.URL.Path)
+				if closeCheck.Load() && (r.Method != http.MethodPost || r.URL.Path != closePositionPath) {
+					t.Errorf("position-bound close made a preflight request: %s %s", r.Method, r.URL.Path)
 				}
 				switch r.URL.Path {
 				case "/openApi/swap/v2/quote/contracts":
@@ -132,7 +132,8 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 				fmt.Fprintf(w, `{"code":0,"data":%s}`, msg)
 			}))
 			defer server.Close()
-			a, err := newAdapter(env, "venue", creds.Pair{KeyID: "fixture", SecretKey: "secret"}, clock.NewFake(time.UnixMilli(now)), journal)
+			clk := clock.NewFake(time.UnixMilli(now))
+			a, err := newAdapter(env, "venue", creds.Pair{KeyID: "fixture", SecretKey: "secret"}, clk, journal)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -171,14 +172,24 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 
 			close := exec.OrderRequest{Venue: "venue", Symbol: symbol, ClientOrderID: "held-stop", Side: exec.SideSell, Type: exec.TypeMarket, Qty: 2,
 				Perpetual: &exec.PerpetualOrder{Multiplier: 0.0001, PositionID: "90071992547409954", WholePosition: true, LocalProtection: true}}
-			closeCheck.Store(true)
 			if _, err := a.SubmitOrder(ctx, close); err == nil || closeWrites.Load() != 0 {
 				t.Fatal("attempted to close a different position")
 			}
 			close.Perpetual.PositionID = positionID
-			if ack, err := a.SubmitOrder(ctx, close); err != nil || !ack.Accepted || closeWrites.Load() != 1 {
+			clk.Advance(positionCloseSnapshotMaxAge)
+			positionState.Store(2)
+			if _, err := a.SubmitOrder(ctx, close); err == nil || closeWrites.Load() != 0 {
+				t.Fatal("stale evidence allowed a close after the position was replaced")
+			}
+			positionState.Store(1)
+			if _, _, _, err := a.Snapshot(ctx); err != nil {
+				t.Fatal(err)
+			}
+			closeCheck.Store(true)
+			if ack, err := a.SubmitOrder(ctx, close); err != nil || !ack.Accepted || ack.BrokerOrderID != closeOrderID || closeWrites.Load() != 1 {
 				t.Fatalf("protected position close was not sent: %+v, %v", ack, err)
 			}
+			closeCheck.Store(false)
 			data, err := os.ReadFile(journal)
 			if err != nil || !strings.Contains(string(data), closeOrderID) {
 				t.Fatalf("exchange-generated ID was not persisted: %v", err)

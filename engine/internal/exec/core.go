@@ -770,7 +770,9 @@ func (c *Core) Run(ctx context.Context) error {
 				c.emitProjectedAccount(v)
 			}
 		case p := <-c.printCh:
-			if p.Candle != nil {
+			if p.PerpetualMark != "" {
+				c.checkPerpetualRiskStops(ctx, p.PerpetualMark)
+			} else if p.Candle != nil {
 				c.handleTrailCandle(*p.Candle)
 			} else if p.Book != nil {
 				if instrument.IsPerpetual(p.Book.Symbol) {
@@ -794,7 +796,7 @@ func (c *Core) Run(ctx context.Context) error {
 		case <-heldTimer.C():
 			c.expireHeldOrders(ctx)
 			c.refreshHeldPerpetualOpening(ctx)
-			c.checkPerpetualRiskStops(ctx)
+			c.checkPerpetualRiskStops(ctx, "")
 			c.refreshProtectionWarnings(ctx)
 		case <-priceTimer:
 			priceDeadline = 0
@@ -1727,6 +1729,10 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		}
 	case Event: // order-lifecycle or StreamGap — persist + fold + emit
 		before := c.order(e.OrderID())
+		if _, accepted := e.(OrderAccepted); accepted && before.isPerpetualRiskStop() && before.Perpetual.WholePosition &&
+			(!before.Working() || before.Venue != e.Venue() || before.Held.ChildClientID != before.ID || before.Held.ChildBrokerID != "") {
+			return // The close can reconcile before its acknowledgement reaches the core.
+		}
 		if _, rejected := e.(OrderRejected); rejected && before.Perpetual != nil && before.Status == StatusRejected {
 			return // The durable perpetual poller can deliver the rejection first.
 		}
@@ -1905,7 +1911,7 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		if !e.observational {
 			c.setPositionsReady(v, true)
 			c.syncPerpetualProtection(ctx, v)
-			c.checkPerpetualRiskStops(ctx)
+			c.checkPerpetualRiskStops(ctx, "")
 			if err := c.confirmFlatRiskEntries(v, ""); err != nil {
 				c.syslog("exec.protection", err.Error())
 			}

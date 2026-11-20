@@ -15,7 +15,7 @@ import { VenueEnvironmentBadge, venueEnvironment } from "../exec/VenueEnvironmen
 import { useAccountDemand } from "../exec/useAccountDemand";
 import { useOrderConfig } from "../exec/useOrderConfig";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
-import { pendingPerpetualStop } from "../exec/perpetual";
+import { pendingPerpetualStop, wholePositionCloseStatus } from "../exec/perpetual";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
 import { formatClock, formatEtDateTime, formatPrice, formatSize, marketPriceDecimals, quoteDecimals } from "../../render/format";
 import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, abbrevType, isTerminal, isWorking, type DisplayStatus } from "../exec/orderStatus";
@@ -94,11 +94,13 @@ function chipVariant(ds: DisplayStatus): ChipVariant | null {
   return null;
 }
 
-function orderCustodyLabel(order: Pick<Order, "type" | "held" | "action" | "symbol" | "wholePositionProtection" | "perpetualRisk">, todayMs: number): string | null {
+function orderCustodyLabel(order: Pick<Order, "type" | "held" | "action" | "symbol" | "status" | "wholePositionProtection" | "perpetualRisk">, todayMs: number): string | null {
   if(order.held?.trail)return `eTape ${order.held.trail.config.mode} trail · ${order.held.phase}${order.held.pausedReason?` · ${order.held.pausedReason}`:""} · run-bound · expires ${formatEtDateTime(order.held.deadlineMs,todayMs)} ET`;
   if (order.held && (order.wholePositionProtection || order.type === "STOP" && order.symbol.startsWith("PERP.MEXC."))) {
     const basis = order.wholePositionProtection ? "mark-price" : "fair-price";
-    return `eTape-held ${basis} stop · ${order.held.phase}${order.held.pausedReason ? ` · ${order.held.pausedReason}` : ""}`;
+    if (order.wholePositionProtection && isTerminal(order.status)) return `eTape-held ${basis} stop`;
+    const phase = wholePositionCloseStatus(order) ?? order.held.phase;
+    return `eTape-held ${basis} stop · ${phase}${order.held.pausedReason ? ` · ${order.held.pausedReason}` : ""}`;
   }
   if (order.held?.phase === "PAUSED" && order.perpetualRisk?.wholePosition) return order.held.pausedReason ?? "Paused";
   if (order.type !== "LIMIT_IF_TOUCHED" || !order.held) return null;

@@ -104,9 +104,21 @@ func (c *Core) syncPerpetualProtection(ctx context.Context, v VenueID) {
 	}
 }
 
-func (c *Core) checkPerpetualRiskStops(ctx context.Context) {
+// NotifyPerpetualMark asks the core to evaluate the adapter's latest mark.
+// Under backpressure the normal held-order timer still checks cached marks.
+func (c *Core) NotifyPerpetualMark(symbol string) {
+	select {
+	case c.printCh <- executionInput{PerpetualMark: symbol}:
+	default:
+	}
+}
+
+func (c *Core) checkPerpetualRiskStops(ctx context.Context, symbol string) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
+		if symbol != "" && o.Symbol != symbol {
+			continue
+		}
 		if o.isPerpetualRiskStop() && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
 			c.activatePerpetualRiskStop(ctx, o)
 		}

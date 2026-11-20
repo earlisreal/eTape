@@ -8,7 +8,7 @@ import type { OrderConfig, PlaceOrderTemplate } from "../../exec/actionTemplate"
 import { chartBindingForModifiers, chartConditionalTemplate } from "../../exec/resolveChartConditionalOrder";
 import type { Tool } from "../../../render/chart/drawings/interaction";
 import {riskEntrySize} from "../../exec/riskEntry";
-import { perpetualRiskSize, perpetualTick } from "../../exec/perpetual";
+import { perpetualRiskSize, perpetualTick, wholePositionCloseStatus } from "../../exec/perpetual";
 import {resolveLimitCushionPrice} from "../../exec/priceSource";
 import type { TvChrome } from "../../../render/chart/tvTheme";
 import { Dialog } from "../../controls/Dialog";
@@ -53,7 +53,7 @@ function markerLabel(marker: ChartOrderMarker, price: number): string {
 function orderTitle(marker: ChartOrderMarker): string {
   if (marker.kind === "pending-protection") return `${markerSide(marker)} pending protective stop`;
   if(marker.order.held?.trail && marker.kind!=="limit")return `${marker.order.side} ${trailModeLabel(marker.order)} TRAIL · ${marker.phase}`;
-  if (marker.kind === "stop") return `${marker.order.side} ${marker.order.leavesQty} ${marker.order.wholePositionProtection ? "lots · Whole-position stop" : "contract stop"} · ${marker.phase}`;
+  if (marker.kind === "stop") return `${marker.order.side} ${marker.order.leavesQty} ${marker.order.wholePositionProtection ? "lots · Whole-position stop" : "contract stop"} · ${wholePositionCloseStatus(marker.order) ?? marker.phase}`;
   const type = marker.order.type === "LIMIT_IF_TOUCHED" ? "LIT" : marker.kind === "limit" ? "LIMIT" : "STOP-LIMIT";
   return `${marker.order.side} ${marker.order.leavesQty.toLocaleString("en-US")} ${type}${marker.order.riskEntry ? ` · Risk Entry ${marker.phase}` : marker.order.riskEntryId ? ` · Linked Protection ${marker.phase}` : ""}`;
 }
@@ -182,7 +182,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const close = marker.order.wholePositionProtection
         ? `${marker.order.leavesQty} lots · mark price ${markerPriceText(marker, price)}\nWhole-position market close · Held by eTape`
         : `${marker.order.leavesQty} contracts · fair price ${markerPriceText(marker, price)}\nReduce-only market close`;
-      return `${marker.order.side} ${close} · ${marker.phase}${marker.order.held?.pausedReason ? ` · ${marker.order.held.pausedReason}` : ""}`;
+      return `${marker.order.side} ${close} · ${wholePositionCloseStatus(marker.order) ?? marker.phase}${marker.order.held?.pausedReason ? ` · ${marker.order.held.pausedReason}` : ""}`;
     }
     const quantity = marker.order.deferredPositionPct !== undefined && marker.kind !== "limit"
       ? `${marker.order.deferredPositionPct}% position · shares determined on trigger`
@@ -520,9 +520,10 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const paused = first.phase === "PAUSED";
       const opacity = paused || action?.kind === "cancel" ? 0.48 : 1;
       const phaseWarning = first.phase === "ACTIVATING" || first.phase === "UNKNOWN" || first.phase === "CANCEL_REQUESTED";
+      const closeStatus = wholePositionCloseStatus(first.order);
       const status = action ? action.outcome === "unknown" ? "UNKNOWN — verify Orders" : action.kind === "cancel" ? "CANCEL REQUESTED" : "MODIFY REQUESTED"
         : first.phase === "WAITING_QUOTE" && first.order.perpetualRisk ? "WAITING FOR QUOTE"
-          : phaseWarning || paused ? first.phase : riskProposal(first, first.price).aboveBudget ? "ABOVE ORIGINAL BUDGET" : "";
+          : closeStatus ?? (phaseWarning || paused ? first.phase : riskProposal(first, first.price).aboveBudget ? "ABOVE ORIGINAL BUDGET" : "");
       const ids = group.markers.map(markerId);
       const id = markerId(first);
       const plannedStop = first.kind === "pending-protection";
@@ -541,7 +542,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
           <button type="button" data-testid={`order-label-${id}`} data-order-price="true" onPointerDown={(e) => group.markers.length === 1 && startDrag(e, first)}
             onClick={() => { if (group.markers.length > 1) { setLineChooser(null); setChooser(chosen ? null : group.key); } }}
             onKeyDown={(e) => group.markers.length === 1 && adjustByKey(e, first)}
-            title={`${group.markers.map(marker => tooltip(marker, marker.price, !!group.pending)).join("\n\n")}${status ? `\n${status}` : ""}`}
+            title={`${group.markers.map(marker => tooltip(marker, marker.price, !!group.pending)).join("\n\n")}${status && status !== closeStatus ? `\n${status}` : ""}`}
             aria-label={group.markers.length > 1 ? `${group.markers.length} ${markerSide(first)} orders at ${markerPriceText(first, group.price)}; choose an order` : `${orderTitle(first)} at ${markerPriceText(first, group.price)}${first.draggable ? "; drag or use arrow keys to adjust" : ""}`}
             style={{ border:0, background:"transparent", color:"inherit", height:"100%", padding:"0 5px", cursor:first.draggable ? "ns-resize" : "pointer", font:"inherit" }}>
             {markerLabel(first, group.price)}{first.order.held?.trail && first.kind!=="limit"?` ${trailModeLabel(first.order)} ${first.phase}`:""}{group.markers.length > 1 ? ` (${group.markers.length})` : ""}

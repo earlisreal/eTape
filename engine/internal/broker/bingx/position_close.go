@@ -8,12 +8,17 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/instrument"
 )
 
-const closePositionPath = "/openApi/swap/v1/trade/closePosition"
+const (
+	closePositionPath = "/openApi/swap/v1/trade/closePosition"
+	// Allow two normal account polling intervals before requiring a fresh read.
+	positionCloseSnapshotMaxAge = 6 * time.Second
+)
 
 func (a *apiClient) PreparePositionClose(ctx context.Context, req exec.OrderRequest) (func(context.Context) (string, error), error) {
 	id, ok := instrument.ParsePerpetual(req.Symbol)
@@ -30,26 +35,8 @@ func (a *apiClient) PreparePositionClose(ctx context.Context, req exec.OrderRequ
 	if !ok || !validRules || item.Close != "true" || p.Multiplier != rules.ContractSize() {
 		return nil, errors.New("BingX full-position close terms are unavailable")
 	}
-	if err := a.checkOneWay(ctx); err != nil {
+	if err := a.verifyPositionClose(ctx, id.Native, p.PositionID, *item.QtyDigits, req.Side == exec.SideSell); err != nil {
 		return nil, err
-	}
-	var positions []position
-	if err := a.request(ctx, http.MethodGet, "/openApi/swap/v2/user/positions", url.Values{"symbol": {id.Native}}, true, &positions); err != nil {
-		return nil, err
-	}
-	matched := false
-	for _, row := range positions {
-		if row.Symbol != id.Native {
-			continue
-		}
-		qty, valid := positionLots(row, *item.QtyDigits)
-		if !valid || qty != 0 && (matched || !row.Isolated || positionID(row.ID) != p.PositionID || (qty > 0) != (req.Side == exec.SideSell)) {
-			return nil, errors.New("BingX original isolated position no longer matches its stop")
-		}
-		matched = matched || qty != 0
-	}
-	if !matched {
-		return nil, errors.New("BingX original position is no longer open")
 	}
 	return func(ctx context.Context) (string, error) {
 		var response struct {
@@ -64,6 +51,41 @@ func (a *apiClient) PreparePositionClose(ctx context.Context, req exec.OrderRequ
 		}
 		return response.OrderID.String(), nil
 	}, nil
+}
+
+func (a *apiClient) verifyPositionClose(ctx context.Context, native, originalID string, digits int, long bool) error {
+	if snapshot := a.riskAccount.Load(); snapshot != nil {
+		if age := a.clock.Now().Sub(snapshot.at); age >= 0 && age < positionCloseSnapshotMaxAge &&
+			matchPositionClose(snapshot.state.Positions, native, originalID, digits, long) == nil {
+			return nil
+		}
+	}
+	if err := a.checkOneWay(ctx); err != nil {
+		return err
+	}
+	var positions []position
+	if err := a.request(ctx, http.MethodGet, "/openApi/swap/v2/user/positions", url.Values{"symbol": {native}}, true, &positions); err != nil {
+		return err
+	}
+	return matchPositionClose(positions, native, originalID, digits, long)
+}
+
+func matchPositionClose(positions []position, native, originalID string, digits int, long bool) error {
+	matched := false
+	for _, row := range positions {
+		if row.Symbol != native {
+			continue
+		}
+		qty, valid := positionLots(row, digits)
+		if !valid || qty != 0 && (matched || !row.Isolated || positionID(row.ID) != originalID || (qty > 0) != long) {
+			return errors.New("BingX original isolated position no longer matches its stop")
+		}
+		matched = matched || qty != 0
+	}
+	if !matched {
+		return errors.New("BingX original position is no longer open")
+	}
+	return nil
 }
 
 func (a *apiClient) ObservePositionClose(ctx context.Context, req exec.OrderRequest, brokerID string) (exec.PerpetualObservation, error) {

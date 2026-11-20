@@ -406,7 +406,8 @@ func (c *Core) postHeldChild(ctx context.Context, b Broker, req OrderRequest) {
 	if b == nil {
 		return
 	}
-	if _, err := b.SubmitOrder(ctx, req); err != nil {
+	ack, err := b.SubmitOrder(ctx, req)
+	if err != nil {
 		if req.Perpetual != nil && req.Perpetual.PositionID != "" && req.Type == TypeMarket && errors.Is(err, ErrPerpetualContractBusy) {
 			select {
 			case c.bevents <- HeldActivationOutcome{V: req.Venue, OID: req.ClientOrderID, Reason: err.Error(), Deferred: true}:
@@ -424,6 +425,13 @@ func (c *Core) postHeldChild(ctx context.Context, b Broker, req OrderRequest) {
 		}
 		select {
 		case c.bevents <- HeldActivationOutcome{V: req.Venue, OID: req.ClientOrderID, Reason: err.Error()}:
+		case <-ctx.Done():
+		}
+		return
+	}
+	if req.Type == TypeMarket && req.Perpetual != nil && req.Perpetual.WholePosition && ack.Accepted && ack.BrokerOrderID != "" {
+		select {
+		case c.bevents <- OrderAccepted{V: req.Venue, OID: req.ClientOrderID, BrokerOrderID: ack.BrokerOrderID, Ts: c.now()}:
 		case <-ctx.Done():
 		}
 	}

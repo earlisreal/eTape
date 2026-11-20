@@ -51,11 +51,12 @@ type journal struct {
 }
 
 type Adapter struct {
-	venue exec.VenueID
-	clock clock.Clock
-	path  string
-	api   API
-	event chan exec.BrokerEvent
+	venue          exec.VenueID
+	clock          clock.Clock
+	path           string
+	api            API
+	event          chan exec.BrokerEvent
+	closeSubmitted chan string
 
 	mu      sync.Mutex
 	journal journal
@@ -66,7 +67,7 @@ func New(venue exec.VenueID, clk clock.Clock, path, identity string, api API) (*
 		return nil, errors.New("incomplete perpetual venue configuration")
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
-	a := &Adapter{venue: venue, clock: clk, path: path, api: api, event: make(chan exec.BrokerEvent, 32),
+	a := &Adapter{venue: venue, clock: clk, path: path, api: api, event: make(chan exec.BrokerEvent, 32), closeSubmitted: make(chan string, 32),
 		journal: journal{Identity: hash, Pending: make(map[string]pending)}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -193,9 +194,13 @@ func (a *Adapter) SubmitOrder(ctx context.Context, req exec.OrderRequest) (exec.
 		if err := a.save(); err != nil {
 			return exec.OrderAck{}, fmt.Errorf("persist whole-position close acknowledgement: %w", err)
 		}
+		select {
+		case a.closeSubmitted <- req.ClientOrderID:
+		default: // Periodic reconciliation will pick up any queued overflow.
+		}
 	}
 	// An acknowledgement can confirm receipt before the first order poll.
-	return exec.OrderAck{Accepted: true}, nil
+	return exec.OrderAck{Accepted: true, BrokerOrderID: brokerID}, nil
 }
 
 func (a *Adapter) prepare(ctx context.Context, p pending) (func(context.Context) (string, error), error) {

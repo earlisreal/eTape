@@ -86,10 +86,11 @@ type TrailBook struct {
 
 // Prints, books and candle evidence share one ordered, lossless execution lane.
 type executionInput struct {
-	Done   chan struct{}
-	Print  EligiblePrint
-	Book   *TrailBook
-	Candle *TrailCandle
+	Done          chan struct{}
+	Print         EligiblePrint
+	Book          *TrailBook
+	Candle        *TrailCandle
+	PerpetualMark string
 }
 
 func (c *Core) FeedTrailBook(ctx context.Context, book TrailBook) {

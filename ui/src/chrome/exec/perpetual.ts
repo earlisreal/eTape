@@ -8,6 +8,18 @@ export function pendingPerpetualStop(order: Order): { price: number; side: "SELL
   return { price, side: order.side === "SHORT" ? "COVER" : "SELL" };
 }
 
+export function wholePositionCloseStatus(order: Pick<Order, "wholePositionProtection" | "held">): string | undefined {
+  const held = order.held;
+  if (!order.wholePositionProtection || !held) return undefined;
+  switch (held.phase) {
+    case "ACTIVATING": return "Sending market close";
+    case "WORKING": return "Market close accepted";
+    case "UNKNOWN": return "Market close outcome unknown";
+    case "WAITING":
+    case "ARMED": return held.perpetualTriggered ? "Stop triggered" : undefined;
+  }
+}
+
 export function perpetualTick(price: number, contract: PerpetualContract, rounding = Math.round): number {
   const tick = Number(contract.priceTick);
   if (tick <= 0 || !Number.isFinite(price)) return 0;

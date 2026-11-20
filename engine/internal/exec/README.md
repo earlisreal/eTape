@@ -72,11 +72,15 @@ position's leverage and a separate budget.
 A signed fill and matching signed position identify the original Position
 Cycle. One engine-held mark-price stop covers that entire position. Same-side
 fills grow its displayed size, and partial reductions shrink it. A linked add
-persists its tighter stop price on the first confirmed fill. A crossing
+persists its tighter stop price on the first confirmed fill. Incoming BingX
+mark quotes prompt immediate evaluation, with a timer as backup. A crossing
 cancels unsubmitted adds and resting entry remainders, then waits for the
 managed orders to reconcile.
-The journal sends one market close by exact position ID, then reconciles the
-broker-generated order ID and fill size. A missing reply leaves the submitted
+The journal sends one market close by exact position ID. A recent signed
+one-way position snapshot supplies the close checks. Older data requires a
+fresh read. On acknowledgement, the adapter records the broker-generated
+order ID, and eTape publishes acceptance and starts fill reconciliation
+without waiting for the next account poll. A missing reply leaves the submitted
 close pending while that position remains open. A signed snapshot that proves
 the original position is gone can retire the close without attributing a fill.
 

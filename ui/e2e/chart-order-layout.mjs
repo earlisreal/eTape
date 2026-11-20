@@ -687,6 +687,12 @@ try {
     assert(add.stop >= initial.stop);
     await target.evaluate(() => window.chartPanelProbe.showBingXPosition(2));
     assert.match(await stop.getAttribute("title"), /SELL 2 lots.*Whole-position market close/s);
+    await target.evaluate(() => window.chartPanelProbe.showBingXPosition(2, "ACTIVATING"));
+    await target.locator('[data-status="Sending market close"]').waitFor({ state: "visible" });
+    await target.evaluate(() => window.chartPanelProbe.showBingXPosition(2, "WORKING"));
+    await target.locator('[data-status="Market close accepted"]').waitFor({ state: "visible" });
+    await target.evaluate(() => window.chartPanelProbe.showBingXPosition(0, "WORKING"));
+    await stop.waitFor({ state: "hidden" });
     assert.deepEqual(await target.evaluate(() => window.chartPanelProbe.errors), []);
     await target.close();
   }

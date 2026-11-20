@@ -34,11 +34,12 @@ type accountOrders struct {
 }
 
 type fillProgress struct {
-	hint       FillHint
-	filled     float64
-	retryAt    time.Time
-	retryDelay time.Duration
-	retryHint  bool
+	hint          FillHint
+	filled        float64
+	retryAt       time.Time
+	retryDelay    time.Duration
+	retryHint     bool
+	positionClose bool
 }
 
 const (
@@ -92,16 +93,15 @@ func (a *Adapter) runWithOrderStream(ctx context.Context, stream OrderStream) {
 			if ready {
 				r.recover(ctx, snapshot, true)
 			}
+		case id := <-a.closeSubmitted:
+			r.observe(ctx, id, false)
 		case <-poll.C:
 			if !ready {
 				r.recover(ctx, accountOrders{}, false)
 			}
 		case now := <-retry.C:
-			if !ready {
-				continue
-			}
 			for id, p := range r.progress {
-				if !p.retryAt.IsZero() && !now.Before(p.retryAt) {
+				if (ready || p.positionClose) && !p.retryAt.IsZero() && !now.Before(p.retryAt) {
 					r.observe(ctx, id, p.retryHint)
 				}
 			}
@@ -197,10 +197,11 @@ func (r *streamReconciler) observe(ctx context.Context, id string, useHint bool)
 		return
 	}
 	p := r.progress[id]
+	p.positionClose = pending.isPositionClose()
 	report := exec.PerpetualObservation{Rejection: pending.Rejection}
 	var err error
 	if pending.Rejection == "" {
-		if useHint && !pending.isPositionClose() {
+		if useHint && !p.positionClose {
 			report, err = r.stream.ObserveFill(ctx, pending.Request, pending.SubmittedMs, p.hint)
 		} else {
 			report, err = r.adapter.observe(ctx, pending)
@@ -213,6 +214,10 @@ func (r *streamReconciler) observe(ctx context.Context, id string, useHint bool)
 	}
 	if report.Terminal() {
 		delete(r.progress, id)
+		return
+	}
+	if p.positionClose {
+		r.retryLater(id, p, false)
 		return
 	}
 	var filled float64

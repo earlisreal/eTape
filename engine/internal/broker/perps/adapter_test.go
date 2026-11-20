@@ -193,6 +193,65 @@ type blockedSnapshotFixture struct {
 	fill            chan FillHint
 }
 
+type positionCloseFixture struct {
+	blockedSnapshotFixture
+	reads int
+}
+
+func (*positionCloseFixture) StreamOrders(ctx context.Context, _ func(bool), _ func(FillHint)) {
+	<-ctx.Done()
+}
+
+func (*positionCloseFixture) PreparePositionClose(context.Context, exec.OrderRequest) (func(context.Context) (string, error), error) {
+	return func(context.Context) (string, error) { return "123", nil }, nil
+}
+
+func (f *positionCloseFixture) ObservePositionClose(_ context.Context, _ exec.OrderRequest, brokerID string) (exec.PerpetualObservation, error) {
+	f.reads++
+	if f.reads == 1 {
+		return exec.PerpetualObservation{}, errors.New("close order is not yet visible")
+	}
+	return exec.PerpetualObservation{Status: exec.StatusFilled, BrokerOrderID: brokerID, PositionID: "456", OrderQty: 1,
+		Fills: []exec.PerpetualFill{{ID: "fill", Qty: 1, Price: 99, TsMs: 1000}}}, nil
+}
+
+func TestPositionCloseReconcilesBeforeAccountPoll(t *testing.T) {
+	const id, venue = "ETTEST", "test-live"
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	fixture := &positionCloseFixture{blockedSnapshotFixture: blockedSnapshotFixture{snapshotStarted: make(chan struct{})}}
+	a, err := New(venue, clock.System{}, filepath.Join(t.TempDir(), "journal"), "test-key", fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.Run(ctx)
+	}()
+	defer func() { cancel(); <-done }()
+	select {
+	case <-fixture.snapshotStarted:
+	case <-ctx.Done():
+		t.Fatal("account snapshot did not start")
+	}
+	req := exec.OrderRequest{Venue: venue, ClientOrderID: id, Symbol: "PERP.BINGX.BTC-USDT", Side: exec.SideSell,
+		Type: exec.TypeMarket, Qty: 1, Perpetual: &exec.PerpetualOrder{Multiplier: 0.0001, WholePosition: true, PositionID: "456"}}
+	if _, err := a.SubmitOrder(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-a.Events():
+		report, ok := event.(exec.PerpetualObservation)
+		if !ok || report.OrderID != id || report.BrokerOrderID != "123" || report.Status != exec.StatusFilled || len(report.Fills) != 1 {
+			t.Fatalf("unexpected close observation: %+v", event)
+		}
+		report.Persisted <- true
+	case <-ctx.Done():
+		t.Fatal("close stayed unreconciled while the account poll was in flight")
+	}
+}
+
 func (f *blockedSnapshotFixture) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
 	close(f.snapshotStarted)
 	<-ctx.Done()

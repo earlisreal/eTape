@@ -718,7 +718,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	// --- fan-in: md/exec Updates -> hub; mark bridge md -> exec ---
 	var forwardWG sync.WaitGroup
 	forwardWG.Add(1)
-	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, seeder, vbs) }()
+	go func() { defer forwardWG.Done(); forwardMD(ctx, core, execCore, hub, seeder, vbs) }()
 	go forwardExec(ctx, execCore, hub)
 
 	// Forward marks + books into every configured sim broker so submitted orders
@@ -1227,7 +1227,7 @@ func hz(rate float64) time.Duration {
 // the auto-config already ran this process) — see boot's own
 // venueseed.New call site for the exact gate; forwardMD only ever guards
 // against nil, it doesn't decide when a Seeder exists.
-func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, seeder *venueseed.Seeder, venues []venueBroker) {
+func forwardMD(ctx context.Context, core *md.Core, execCore *exec.Core, hub *uihub.Hub, seeder *venueseed.Seeder, venues []venueBroker) {
 	var perpetual []interface{ SetFairQuote(feed.Quote) }
 	var bingxVenues []*bingx.Adapter
 	for _, v := range venues {
@@ -1248,6 +1248,9 @@ func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, seeder *venue
 					sink.SetFairQuote(q.Quote)
 				}
 				if strings.HasPrefix(q.Quote.Symbol, "PERP.BINGX.") {
+					if len(bingxVenues) != 0 && q.Quote.Mark > 0 {
+						execCore.NotifyPerpetualMark(q.Quote.Symbol)
+					}
 					for _, venue := range bingxVenues {
 						if rules, ok := venue.ContractRules(q.Quote.Symbol); ok {
 							q.Quote.Contract = &rules

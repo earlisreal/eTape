@@ -20,6 +20,16 @@ type bingxRiskFixture struct {
 	readFinish  chan struct{}
 }
 
+type bingxCloseAckFixture struct{ *bingxRiskFixture }
+
+func (b *bingxCloseAckFixture) SubmitOrder(ctx context.Context, req OrderRequest) (OrderAck, error) {
+	ack, err := b.bingxRiskFixture.SubmitOrder(ctx, req)
+	if ack.Accepted && req.Type == TypeMarket && req.Perpetual.WholePosition {
+		ack.BrokerOrderID = req.ClientOrderID + "-broker"
+	}
+	return ack, err
+}
+
 func (b *bingxRiskFixture) ContractRules(symbol string) (instrument.ContractRules, bool) {
 	rules, _ := b.mexcRiskBroker.ContractRules("PERP.MEXC.BTC_USDT")
 	return rules, symbol == bingxTestSymbol
@@ -141,6 +151,39 @@ func TestRestingPerpetualEntryMustCancelBeforeProtectiveClose(t *testing.T) {
 	}
 }
 
+func TestBingXMarkDispatchesProtectiveCloseBeforeTimer(t *testing.T) {
+	const venue, positionID = VenueID("bingx-vst"), "position"
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	clk := clock.NewFake(time.Date(2026, 11, 20, 20, 0, 0, 0, time.UTC))
+	broker := &bingxRiskFixture{mexcRiskBroker: &mexcRiskBroker{heldTestBroker: newHeldTestBroker(), fair: 98_000}}
+	core := NewCore(CoreConfig{Venues: []VenueID{venue}, Clock: clk, Store: &heldTestStore{}, Brokers: map[VenueID]Broker{venue: broker}})
+	core.heldDemand = &heldDemandStub{}
+	core.state.SetPositionsReady(venue, true)
+	core.state.Venue(venue).Positions[bingxTestSymbol] = Position{Qty: 2, BrokerPositionID: positionID}
+	stop := Order{ID: "stop", Venue: venue, Symbol: bingxTestSymbol, Side: SideSell, Type: TypeStop, Qty: 2,
+		StopPrice: 99_000, Status: StatusSubmitted, Held: &HeldOrder{Phase: HeldWaiting},
+		Perpetual: &PerpetualOrder{Multiplier: .001, PositionID: positionID, AccountIdentity: broker.AccountIdentity(), WholePosition: true, LocalProtection: true}}
+	if err := core.appendAndFold(OrderSubmitted{Order: stop}, SrcLocal); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = core.Run(ctx)
+	}()
+	defer func() { cancel(); <-done }()
+	core.NotifyPerpetualMark(bingxTestSymbol)
+	select {
+	case req := <-broker.submits:
+		if req.ClientOrderID != stop.ID || req.Type != TypeMarket || req.Perpetual.PositionID != positionID {
+			t.Fatalf("unexpected market close: %+v", req)
+		}
+	case <-ctx.Done():
+		t.Fatal("mark crossing did not dispatch the close before the held-order timer")
+	}
+}
+
 func TestBingXChartRiskEntrySharesWholePosition(t *testing.T) {
 	for _, test := range []struct {
 		venue       VenueID
@@ -153,7 +196,7 @@ func TestBingXChartRiskEntrySharesWholePosition(t *testing.T) {
 		t.Run(string(test.venue), func(t *testing.T) {
 			ctx := t.Context()
 			clk := clock.NewFake(time.Date(2026, 11, 20, 20, 0, 0, 0, time.UTC))
-			broker := &bingxRiskFixture{mexcRiskBroker: &mexcRiskBroker{heldTestBroker: newHeldTestBroker(), fair: 100_000}}
+			broker := &bingxCloseAckFixture{&bingxRiskFixture{mexcRiskBroker: &mexcRiskBroker{heldTestBroker: newHeldTestBroker(), fair: 100_000}}}
 			identity := map[VenueID]string{}
 			if test.venue == "bingx-live" {
 				identity[test.venue] = "live-account"
@@ -307,11 +350,25 @@ func TestBingXChartRiskEntrySharesWholePosition(t *testing.T) {
 				close.ClientOrderID != stopID || !close.Perpetual.WholePosition || close.Perpetual.PositionID != position.BrokerPositionID {
 				t.Fatalf("wrong full-position close after the reduction: %+v", close)
 			}
+			var closeAck BrokerEvent
+			select {
+			case closeAck = <-core.bevents:
+				core.handleBrokerEvent(ctx, closeAck)
+			case <-time.After(time.Second):
+				t.Fatal("close stayed Activating after the venue acknowledged it")
+			}
+			if o := core.order(stopID); o.Held.Phase != HeldWorking || o.Status != StatusAccepted || o.ExecutedQty != 0 {
+				t.Fatalf("the acknowledged close did not transition while awaiting fills: %+v", o)
+			}
 			// A direct same-side fill can land before the exchange executes its ID close.
 			reconcile(core.order(stopID), StatusFilled, position.BrokerPositionID, 5,
 				PerpetualFill{ID: "close", Qty: 5, Price: 100_000, TsMs: core.now()})
 			if o := core.order(stopID); o.Status != StatusFilled || o.ExecutedQty != 5 {
 				t.Fatalf("position close did not use exchange size: %+v", o)
+			}
+			core.handleBrokerEvent(ctx, closeAck)
+			if o := core.order(stopID); o.Status != StatusFilled {
+				t.Fatalf("a late acknowledgement revived the filled stop: %+v", o)
 			}
 			position.BrokerPositionID = "90071992547409956"
 			snapshot(position)

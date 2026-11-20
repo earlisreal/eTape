@@ -458,9 +458,10 @@ type HeldShutdownSummary struct {
 }
 
 type OrderAck struct {
-	OrderID  string
-	Accepted bool
-	Message  string
+	OrderID       string
+	Accepted      bool
+	Message       string
+	BrokerOrderID string // venue-generated ID in a definitive submit acknowledgement
 }
 
 // EventEnvelope is the persisted form of an Event: the indexed columns plus the

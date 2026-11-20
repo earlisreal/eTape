@@ -258,13 +258,15 @@ function ConfigReadyProbe() {
           status: "ACCEPTED", qty: filled, leavesQty: filled, stopPrice: entry.pendingProtectionPrice, limitPrice: 0,
           pendingProtectionPrice: undefined, perpetualRisk: undefined, held: mexcLive ? { phase: "WAITING", deadlineMs: 0 } : undefined,
         } });
-      }, showBingXPosition(qty) {
+      }, showBingXPosition(qty, phase = "WAITING") {
         const entry = stores.exec.liveOrder("sim-risk");
         const stop = stores.exec.liveOrder("sim-protection");
         stores.exec.apply({ kind: "snapshot", topic: "exec.positions", payload: [{ venue: executionVenue, symbol: chartSymbol, qty, avgPrice: 4.51 }] });
         stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [{ ...(stop ?? entry), id: "sim-protection",
-          side: "SELL", type: "STOP", status: "SUBMITTED", qty, leavesQty: qty, stopPrice: stop?.stopPrice ?? entry.pendingProtectionPrice,
-          limitPrice: 0, pendingProtectionPrice: undefined, perpetualRisk: undefined, wholePositionProtection: true, held: { phase: "WAITING", deadlineMs: 0 },
+          side: "SELL", type: "STOP", status: qty === 0 ? "FILLED" : phase === "WORKING" ? "ACCEPTED" : "SUBMITTED",
+          qty, leavesQty: qty, stopPrice: stop?.stopPrice ?? entry.pendingProtectionPrice,
+          limitPrice: 0, pendingProtectionPrice: undefined, perpetualRisk: undefined, wholePositionProtection: true,
+          held: { phase, deadlineMs: 0, ...(phase === "WAITING" ? {} : { childClientId: "sim-protection", perpetualTriggered: true }) },
         }] });
       }, protectPosition(stopPrice) {
         const common = { venue: "sim", symbol: "US.AAPL", type: "STOP_LIMIT", tif: "DAY", session: "EXTENDED", rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, avgFillPrice: 0 };

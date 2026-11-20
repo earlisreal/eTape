@@ -350,10 +350,13 @@ the position's current leverage. Keep or tighten the shared stop. A tighter
 price takes effect on the first confirmed add fill. Use the Order Ticket to
 sell or cover part of the position. The stop tracks the remaining position and
 also includes same-side additions placed directly on BingX. The chart candles
-show trades. The protective stop watches BingX's mark price and a crossing
-sends a market close for that original position ID. Disarm leaves the
-stop active. eTape must be running with fresh data. After a restart or a
-disconnect that pauses protection, use **Account → Open Orders → Resume**.
+show trades. The protective stop checks incoming BingX marks and sends a
+market close for the original position ID once any resting entry remainder
+has reconciled. The chart and Account show **Sending market close**, then
+**Market close accepted** while fill confirmation is pending. A confirmed
+fill clears the stop marker. Disarm leaves the stop active. eTape must be
+running with fresh data. After a restart or a disconnect that pauses
+protection, use **Account → Open Orders → Resume**.
 [BingX Chart Risk Entry plan](docs/plans/2026-11-20-bingx-chart-risk-entry.md)
 
 Forced-liquidation modeling is pending for the local simulator.

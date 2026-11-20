@@ -295,14 +295,14 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 			}
 			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Gap: true})
 			broker.fair = amendedStop
-			core.checkPerpetualRiskStops(ctx)
+			core.checkPerpetualRiskStops(ctx, "")
 			if o := core.order(stopID); o.Held.Phase != HeldPaused || o.Held.ChildClientID != "" {
 				t.Fatalf("stop submitted after feed gap without resume: %+v", o)
 			}
 			if ack := core.handleResumeHeld(ctx, ResumeHeldOrder{Venue: venue, OrderID: stopID}); !ack.Accepted {
 				t.Fatalf("could not resume position protection while disarmed: %+v", ack)
 			}
-			core.checkPerpetualRiskStops(ctx)
+			core.checkPerpetualRiskStops(ctx, "")
 			select {
 			case req := <-broker.submits:
 				if req.Venue != venue || req.ClientOrderID != stopID || req.Type != TypeMarket || req.Qty != 1 ||

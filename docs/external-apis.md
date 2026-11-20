@@ -213,9 +213,12 @@ uses cached settings and posts a standard GTC limit at the buffered bid or ask.
 Virtual and Live BTC-USDT marks agreed within five basis points in the rollout
 check.
 
-Use `POST /openApi/swap/v1/trade/closePosition` for whole-position stops, after
-checking one-way mode and the signed position for that contract. Query its
-broker-generated `orderId` for fills. The adapter rejects sized
+Use `POST /openApi/swap/v1/trade/closePosition` for whole-position stops. eTape
+checks one-way mode, direction, isolated margin and the original position ID
+using a signed account snapshot less than six seconds old. If the snapshot
+cannot verify the position, eTape reads mode and the position before sending.
+The journal stores the acknowledged `orderId` and schedules a fill lookup
+immediately. The adapter rejects sized
 position-ID closes because a one-way Virtual test filled a regular reduce-only
 order with a mismatched ID. The dedicated route rejected a stale ID after a
 reopen in Virtual. Missing close acknowledgements remain unresolved while the
