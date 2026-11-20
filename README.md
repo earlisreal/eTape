@@ -333,14 +333,17 @@ preview shows lots, base quantity, risk, initial margin and leverage. From
 flat, Auto sizes to the risk budget and chooses the highest eligible leverage
 for that size within the preset cap and liquidation buffer. Enable
 **Use BingX exchange leverage ceiling** to use the verified exchange limit as
-the cap. eTape verifies the chosen setting on BingX when arming.
+the cap. The chart shows **Verifying** while eTape checks the opening terms
+and applies or confirms leverage. Once armed, a qualifying last trade triggers
+the price-capped IOC entry. eTape rechecks opening terms before sending it.
 
 Use Chart Risk Entry again on the same side to add with its own risk budget at
 the position's current leverage. Keep or tighten the shared stop. A tighter
 price takes effect on the first confirmed add fill. Use the Order Ticket to
 sell or cover part of the position. The stop tracks the remaining position and
-also includes same-side additions placed directly on BingX. A BingX mark-price
-crossing sends a market close for that original position ID. Disarm leaves the
+also includes same-side additions placed directly on BingX. The chart candles
+show trades. The protective stop watches BingX's mark price and a crossing
+sends a market close for that original position ID. Disarm leaves the
 stop active. eTape must be running with fresh data. After a restart or a
 disconnect that pauses protection, use **Account → Open Orders → Resume**.
 [BingX Chart Risk Entry plan](docs/plans/2026-11-20-bingx-chart-risk-entry.md)

@@ -94,11 +94,14 @@ function chipVariant(ds: DisplayStatus): ChipVariant | null {
   return null;
 }
 
-function orderCustodyLabel(order: Pick<Order, "type" | "held" | "action" | "symbol">, todayMs: number): string | null {
+function orderCustodyLabel(order: Pick<Order, "type" | "held" | "action" | "symbol" | "wholePositionProtection" | "perpetualRisk">, todayMs: number): string | null {
   if(order.held?.trail)return `eTape ${order.held.trail.config.mode} trail · ${order.held.phase}${order.held.pausedReason?` · ${order.held.pausedReason}`:""} · run-bound · expires ${formatEtDateTime(order.held.deadlineMs,todayMs)} ET`;
-  if (order.type === "STOP" && order.held && order.symbol.startsWith("PERP.MEXC.")) {
-    return `eTape-held fair-price stop · ${order.held.phase}${order.held.pausedReason ? ` · ${order.held.pausedReason}` : ""}`;
+  if (order.held?.perpetualArmPending) return "Verifying BingX opening terms";
+  if (order.held && (order.wholePositionProtection || order.type === "STOP" && order.symbol.startsWith("PERP.MEXC."))) {
+    const basis = order.wholePositionProtection ? "mark-price" : "fair-price";
+    return `eTape-held ${basis} stop · ${order.held.phase}${order.held.pausedReason ? ` · ${order.held.pausedReason}` : ""}`;
   }
+  if (order.held?.phase === "PAUSED" && order.perpetualRisk?.wholePosition) return order.held.pausedReason ?? "Paused";
   if (order.type !== "LIMIT_IF_TOUCHED" || !order.held) return null;
   const action = order.action ? `${order.action.kind} ${order.action.phase}` : "idle";
   const deadline = order.held.deadlineMs ? ` · expires ${formatEtDateTime(order.held.deadlineMs, todayMs)} ET` : "";

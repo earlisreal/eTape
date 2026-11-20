@@ -192,7 +192,10 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     const limit = risk.limit ?? (marker.kind === "limit" ? price : marker.order.limitPrice);
     const type = marker.kind === "limit" ? "LIMIT" : marker.kind === "limit-if-touched" ? "LIT" : "STOP-LIMIT";
     const add=marker.order.riskEntry?.sharedEntryId && !marker.order.riskEntry.stopApplied?`\nShared stop ${priceText(marker.order.riskEntry.addStopPrice??0)} or higher on first fill`:"";
-    return `${quantity}\n${marker.order.side} ${type} · limit ${markerPriceText(marker, limit)}\n${marker.order.held && marker.kind !== "limit" ? "Held by eTape · " : ""}${marker.order.riskEntry ? "Risk Entry · " : marker.order.riskEntryId ? "Linked Protection · " : ""}${marker.phase || marker.order.status}${marker.order.held?.pausedReason ? ` · ${marker.order.held.pausedReason}` : ""}${add}`;
+    const held = marker.order.held;
+    const phase = held?.perpetualArmPending ? "Verifying BingX opening terms" :
+      `${marker.phase || marker.order.status}${held?.pausedReason ? ` · ${held.pausedReason}` : ""}`;
+    return `${quantity}\n${marker.order.side} ${type} · limit ${markerPriceText(marker, limit)}\n${held && marker.kind !== "limit" ? "Held by eTape · " : ""}${marker.order.riskEntry ? "Risk Entry · " : marker.order.riskEntryId ? "Linked Protection · " : ""}${phase}${add}`;
   };
 
   const layout = () => {
@@ -515,10 +518,12 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const first = group.markers[0];
       const color = sideText(first) === "B" ? props.chrome.up : props.chrome.down;
       const action = group.pending ?? orderActionPending(first) ?? pending.get(markerId(first));
-      const opacity = first.phase === "PAUSED" || action?.kind === "cancel" ? 0.48 : 1;
+      const verifying = first.order.held?.perpetualArmPending;
+      const paused = first.phase === "PAUSED" && !verifying;
+      const opacity = paused || action?.kind === "cancel" ? 0.48 : 1;
       const phaseWarning = first.phase === "ACTIVATING" || first.phase === "UNKNOWN" || first.phase === "CANCEL_REQUESTED";
       const status = action ? action.outcome === "unknown" ? "UNKNOWN — verify Orders" : action.kind === "cancel" ? "CANCEL REQUESTED" : "MODIFY REQUESTED"
-        : phaseWarning || first.phase === "PAUSED" ? first.phase : riskProposal(first, first.price).aboveBudget ? "ABOVE ORIGINAL BUDGET" : "";
+        : verifying ? "VERIFYING" : phaseWarning || paused ? first.phase : riskProposal(first, first.price).aboveBudget ? "ABOVE ORIGINAL BUDGET" : "";
       const ids = group.markers.map(markerId);
       const id = markerId(first);
       const plannedStop = first.kind === "pending-protection";

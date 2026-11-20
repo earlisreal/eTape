@@ -22,6 +22,9 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 			const symbol, positionID, closeOrderID, entryOrderID = "PERP.BINGX.BTC-USDT", "90071992547409955", "90071992547409957", "90071992547409959"
 			const now = 1795041491205
 			var leverage, leverageWrites, positionState, closeWrites atomic.Int32
+			var dispatchCheck, closeCheck atomic.Bool
+			var riskReads atomic.Int32
+			allRiskReads := make(chan struct{})
 			leverage.Store(5)
 			journal := filepath.Join(t.TempDir(), "journal.json")
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +33,22 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 					t.Error("account check or trade request was unsigned")
 				}
 				var msg string
+				switch r.URL.Path {
+				case "/openApi/swap/v2/trade/marginType", leveragePath, "/openApi/swap/v1/maintMarginRatio":
+					if dispatchCheck.Load() && r.Method == http.MethodGet {
+						if riskReads.Add(1) == 3 {
+							close(allRiskReads)
+						}
+						select {
+						case <-allRiskReads:
+						case <-r.Context().Done():
+							return
+						}
+					}
+				}
+				if closeCheck.Load() && (r.URL.Path == "/openApi/swap/v3/user/balance" || r.URL.Path == "/openApi/swap/v2/trade/openOrders") {
+					t.Errorf("position-bound close unnecessarily waited for %s", r.URL.Path)
+				}
 				switch r.URL.Path {
 				case "/openApi/swap/v2/quote/contracts":
 					msg = `[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","quantityPrecision":4,"pricePrecision":1,"tradeMinQuantity":0.0001,"tradeMinUSDT":2,"takerFeeRate":0.0005,"status":1,"apiStateOpen":"true","apiStateClose":"true"}]`
@@ -128,12 +147,18 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 				t.Fatalf("add did not use the confirmed position leverage: %d, %v", limit, err)
 			}
 			entry.ClientOrderID = "held-entry"
+			dispatchCheck.Store(true)
+			if _, err := a.api.Prepare(ctx, entry); err != nil {
+				t.Fatalf("independent IOC risk checks could not run together: %v", err)
+			}
+			dispatchCheck.Store(false)
 			if report, err := a.api.Observe(ctx, entry); err != nil || report.PositionID != positionID || report.Status != exec.StatusFilled {
 				t.Fatalf("signed order history did not identify the IOC's position: %+v, %v", report, err)
 			}
 
 			close := exec.OrderRequest{Venue: "venue", Symbol: symbol, ClientOrderID: "held-stop", Side: exec.SideSell, Type: exec.TypeMarket, Qty: 2,
 				Perpetual: &exec.PerpetualOrder{Multiplier: 0.0001, PositionID: "90071992547409954", WholePosition: true, LocalProtection: true}}
+			closeCheck.Store(true)
 			if _, err := a.SubmitOrder(ctx, close); err == nil || closeWrites.Load() != 0 {
 				t.Fatal("attempted to close a different position")
 			}

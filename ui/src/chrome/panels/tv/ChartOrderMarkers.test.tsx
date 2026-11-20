@@ -46,6 +46,22 @@ beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("ChartOrderMarkers", () => {
+  it("shows BingX arming as verification and keeps the label for actual pauses", () => {
+    const venue = "bingx-vst";
+    const symbol = "PERP.BINGX.BTC-USDT";
+    const held = { phase: "PAUSED" as const, deadlineMs: 9999999999999 };
+    const entry = { ...base, venue, symbol, type: "STOP_LIMIT" as const, stopPrice: 100,
+      pendingProtectionPrice: 90, held: { ...held, perpetualArmPending: true, pausedReason: "verifying BingX opening terms" } };
+    const paused = { ...base, venue, symbol, id: "o2", type: "STOP" as const, stopPrice: 110,
+      wholePositionProtection: true, held: { ...held, pausedReason: "perpetual feed interrupted; resume manually" } };
+    const { changeContext } = mount([entry, paused]);
+    changeContext(symbol, venue);
+
+    expect(screen.getAllByText("VERIFYING")).toHaveLength(2);
+    expect(screen.getByText("PAUSED")).toBeTruthy();
+    expect(screen.getByTestId("order-label-o2").title).toContain("perpetual feed interrupted; resume manually");
+  });
+
   it("clears the risk-preview warning after five seconds without modifying the order", () => {
     vi.useFakeTimers();
     const {sendCommand} = mount([unavailableRiskEntry]);

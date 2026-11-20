@@ -207,12 +207,15 @@ notional maintenance tiers from each account's environment. Signed position
 rows supply the actual isolated `margin`, `liquidationPrice` and exact
 `positionId`. The side capacity applies at the configured leverage. eTape
 checks it again after changing leverage on a flat contract and before IOC
-submission. Both venues use the public BingX mark for the held stop. The
+submission. The margin-mode, leverage and maintenance-tier reads run in
+parallel with separate per-endpoint pacing. Both venues use the public BingX
+mark for the held stop. The
 Virtual and Live BTC-USDT marks agreed within five basis points in the rollout
 check.
 
-Use `POST /openApi/swap/v1/trade/closePosition` for whole-position stops and
-query its broker-generated `orderId` for fills. The adapter rejects sized
+Use `POST /openApi/swap/v1/trade/closePosition` for whole-position stops, after
+checking one-way mode and the signed position for that contract. Query its
+broker-generated `orderId` for fills. The adapter rejects sized
 position-ID closes because a one-way Virtual test filled a regular reduce-only
 order with a mismatched ID. The dedicated route rejected a stale ID after a
 reopen in Virtual. Missing close acknowledgements remain unresolved while the

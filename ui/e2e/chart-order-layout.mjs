@@ -667,7 +667,13 @@ try {
     assert.match(await readout.innerText(), new RegExp(`lots · Est\\. risk .* ${account} · 8× Auto`));
     await target.keyboard.press("Enter");
     await target.waitForFunction(() => window.chartPanelProbe.lastRiskSubmitted?.autoLeverage);
+    const verifying = target.getByText("VERIFYING", { exact: true });
+    await verifying.first().waitFor({ state: "visible" });
+    assert.equal(await verifying.count(), 2);
+    assert.equal(await target.getByText("PAUSED", { exact: true }).count(), 0);
+    await target.evaluate(() => window.chartPanelProbe.finishBingXArming());
     await target.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
+    assert.equal(await verifying.count(), 0);
     const initial = await target.evaluate(() => window.chartPanelProbe.lastRiskSubmitted);
     assert.equal(initial.venue, venue);
     assert.equal(initial.leverage, 8);
@@ -679,6 +685,8 @@ try {
     await target.waitForFunction(() => /4 existing \+ [\d,]+ added/.test(document.querySelector("[data-risk-readout]")?.textContent ?? ""));
     await target.keyboard.press("Enter");
     await target.waitForFunction(() => window.chartPanelProbe.lastRiskSubmitted?.sharedStopId === "sim-protection");
+    await target.evaluate(() => window.chartPanelProbe.finishBingXArming());
+    await target.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
     const add = await target.evaluate(() => window.chartPanelProbe.lastRiskSubmitted);
     assert.equal(add.leverage, 8);
     assert(add.stop >= initial.stop);

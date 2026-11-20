@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strconv"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/instrument"
 )
@@ -133,11 +135,25 @@ func (a *apiClient) riskOpening(ctx context.Context, symbol string, item contrac
 		terms.PositionID = id
 		held = instrument.RiskPosition{Qty: qty, AvgPrice: average, Margin: margin, LiquidationPrice: liq, Leverage: row.Leverage}
 	}
-	if err := a.checkIsolated(ctx, symbol); err != nil {
-		return terms, err
+	minimum, err := item.MinimumValue.Float64()
+	if err != nil || !(minimum >= 0 && minimum < math.Inf(1)) {
+		return terms, errors.New("BingX minimum order value is unavailable")
 	}
-	limits, err := a.openingLeverage(ctx, symbol)
-	if err != nil {
+	var limits leverageSettings
+	var tiers []instrument.NotionalTier
+	checks, checkCtx := errgroup.WithContext(ctx)
+	checks.Go(func() error { return a.checkIsolated(checkCtx, symbol) })
+	checks.Go(func() error {
+		var err error
+		limits, err = a.openingLeverage(checkCtx, symbol)
+		return err
+	})
+	checks.Go(func() error {
+		var err error
+		tiers, err = a.maintenanceTiers(checkCtx, symbol)
+		return err
+	})
+	if err := checks.Wait(); err != nil {
 		return terms, err
 	}
 	longQty, longOK := openingLots(limits.LongQty, *item.QtyDigits)
@@ -145,15 +161,8 @@ func (a *apiClient) riskOpening(ctx context.Context, symbol string, item contrac
 	if !longOK || !shortOK || limits.Long < 1 || limits.Short < 1 || limits.LongMax < 1 || limits.ShortMax < 1 {
 		return terms, errors.New("BingX leverage or opening capacity is unavailable")
 	}
+	// Read the dispatch mark after the other checks so it is current at submission.
 	mark, err := a.markPrice(ctx, symbol)
-	if err != nil {
-		return terms, err
-	}
-	minimum, err := item.MinimumValue.Float64()
-	if err != nil || !(minimum >= 0 && minimum < math.Inf(1)) {
-		return terms, errors.New("BingX minimum order value is unavailable")
-	}
-	tiers, err := a.maintenanceTiers(ctx, symbol)
 	if err != nil {
 		return terms, err
 	}

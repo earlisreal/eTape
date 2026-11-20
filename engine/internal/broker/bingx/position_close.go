@@ -30,12 +30,15 @@ func (a *apiClient) PreparePositionClose(ctx context.Context, req exec.OrderRequ
 	if !ok || !validRules || item.Close != "true" || p.Multiplier != rules.ContractSize() {
 		return nil, errors.New("BingX full-position close terms are unavailable")
 	}
-	state, err := a.account(ctx)
-	if err != nil {
+	if err := a.checkOneWay(ctx); err != nil {
+		return nil, err
+	}
+	var positions []position
+	if err := a.request(ctx, http.MethodGet, "/openApi/swap/v2/user/positions", url.Values{"symbol": {id.Native}}, true, &positions); err != nil {
 		return nil, err
 	}
 	matched := false
-	for _, row := range state.Positions {
+	for _, row := range positions {
 		if row.Symbol != id.Native {
 			continue
 		}

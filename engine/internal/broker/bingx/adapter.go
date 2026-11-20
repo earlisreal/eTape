@@ -42,17 +42,19 @@ type Adapter struct {
 }
 
 type apiClient struct {
-	env          environment
-	http         *http.Client
-	clock        clock.Clock
-	creds        creds.Pair
-	quotes       sync.Map
-	catalogMu    sync.RWMutex
-	catalog      map[string]contract
-	catalogUntil time.Time
-	orderReads   *netx.TokenBucket
-	fillReads    *netx.TokenBucket
-	riskReads    *netx.TokenBucket
+	env           environment
+	http          *http.Client
+	clock         clock.Clock
+	creds         creds.Pair
+	quotes        sync.Map
+	catalogMu     sync.RWMutex
+	catalog       map[string]contract
+	catalogUntil  time.Time
+	orderReads    *netx.TokenBucket
+	fillReads     *netx.TokenBucket
+	marginReads   *netx.TokenBucket
+	leverageReads *netx.TokenBucket
+	tierReads     *netx.TokenBucket
 }
 
 type contract struct {
@@ -91,9 +93,11 @@ func newAdapter(env environment, venue exec.VenueID, cr creds.Pair, clk clock.Cl
 
 func newAPI(env environment, cr creds.Pair, clk clock.Clock) *apiClient {
 	return &apiClient{env: env, clock: clk, creds: cr,
-		orderReads: netx.NewTokenBucket(clock.System{}, 30, 1),
-		fillReads:  netx.NewTokenBucket(clock.System{}, 5, 1),
-		riskReads:  netx.NewTokenBucket(clock.System{}, 2, 1),
+		orderReads:    netx.NewTokenBucket(clock.System{}, 30, 1),
+		fillReads:     netx.NewTokenBucket(clock.System{}, 5, 1),
+		marginReads:   netx.NewTokenBucket(clock.System{}, 2, 1),
+		leverageReads: netx.NewTokenBucket(clock.System{}, 5, 1),
+		tierReads:     netx.NewTokenBucket(clock.System{}, 5, 1),
 		http: &http.Client{
 			Timeout:       5 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -167,8 +171,12 @@ func (a *apiClient) request(ctx context.Context, method, path string, params url
 			budget = a.orderReads
 		case "/openApi/swap/v2/trade/allFillOrders", "/openApi/swap/v2/trade/allOrders":
 			budget = a.fillReads
-		case "/openApi/swap/v2/trade/leverage", "/openApi/swap/v2/trade/marginType", "/openApi/swap/v1/maintMarginRatio":
-			budget = a.riskReads
+		case leveragePath:
+			budget = a.leverageReads
+		case "/openApi/swap/v2/trade/marginType":
+			budget = a.marginReads
+		case "/openApi/swap/v1/maintMarginRatio":
+			budget = a.tierReads
 		}
 	}
 	if budget != nil {

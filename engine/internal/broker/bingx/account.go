@@ -124,19 +124,26 @@ func (m PositionMode) OneWay() (bool, error) {
 	}
 }
 
-func (a *apiClient) account(ctx context.Context) (accountState, error) {
-	const read = http.MethodGet
-	var state accountState
+func (a *apiClient) checkOneWay(ctx context.Context) error {
 	var mode PositionMode
-	if err := a.request(ctx, read, "/openApi/swap/v1/positionSide/dual", nil, true, &mode); err != nil {
-		return state, err
+	if err := a.request(ctx, http.MethodGet, "/openApi/swap/v1/positionSide/dual", nil, true, &mode); err != nil {
+		return err
 	}
 	oneWay, err := mode.OneWay()
 	if err != nil {
-		return state, err
+		return err
 	}
 	if !oneWay {
-		return state, fmt.Errorf("set %s to one-way position mode", a.env.label)
+		return fmt.Errorf("set %s to one-way position mode", a.env.label)
+	}
+	return nil
+}
+
+func (a *apiClient) account(ctx context.Context) (accountState, error) {
+	const read = http.MethodGet
+	var state accountState
+	if err := a.checkOneWay(ctx); err != nil {
+		return state, err
 	}
 	var balances []struct {
 		Asset     string      `json:"asset"`

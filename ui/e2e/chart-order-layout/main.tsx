@@ -56,6 +56,7 @@ const config = { activeVenue: executionVenue, templates: [{ kind: "place", id: "
 let serial = 0;
 let nextCancelBehavior = "accepted";
 let pendingCancelResolve = null;
+let finishBingXArming = null;
 const sendCommand = async (name, args) => {
   if (name === "GetConfig") return { kind: "ack", corrId: "config", status: "accepted", value: config };
   if (name === "SetConfig") return { kind: "ack", corrId: "config", status: "accepted" };
@@ -68,14 +69,22 @@ const sendCommand = async (name, args) => {
   if (name === "SubmitRiskEntry" || name === "SubmitPerpetualRiskEntry") {
     window.chartPanelProbe.lastRiskSubmitted = args;
     if (name === "SubmitPerpetualRiskEntry") {
-      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
+      const entry = {
         id: "sim-risk", venue: executionVenue, symbol: args.symbol, side: args.side, type: "STOP_LIMIT", tif: "IOC", session: "AUTO",
         qty: args.maxQty, limitPrice: args.trigger, stopPrice: args.trigger, pendingProtectionPrice: args.stop,
         perpetualRisk: { budget: args.budget, leverage: args.leverage, autoLeverage: args.autoLeverage, entryCushion: args.cushion,
           ...(bingxVenue ? { wholePosition: true, sharedStopId: args.sharedStopId } : {}) },
         status: "SUBMITTED", executedQty: 0, leavesQty: args.maxQty, avgFillPrice: 0, rejectReason: "", replacesId: "",
         createdMs: Date.now(), updatedMs: Date.now(), held: { phase: "WAITING", deadlineMs: Date.now() + 3600000 },
-      } });
+      };
+      if (bingxVenue) {
+        stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
+          ...entry, held: { ...entry.held, phase: "PAUSED", perpetualArmPending: true, pausedReason: "verifying BingX opening terms" },
+        } });
+        await new Promise(resolve => { finishBingXArming = resolve; });
+        finishBingXArming = null;
+      }
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: entry });
     }
     return { kind: "ack", corrId: "risk", status: "accepted", orderId: "sim-risk" };
   }
@@ -247,6 +256,8 @@ function ConfigReadyProbe() {
       }, startRisk() {
         stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { ...stores.exec.accounts()[0], tsMs: Date.now() } });
         return initiateChartRiskEntry(riskTemplate);
+      }, finishBingXArming() {
+        finishBingXArming?.();
       }, settleMexcEntry(filled) {
         const entry = stores.exec.liveOrder("sim-risk");
         stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
