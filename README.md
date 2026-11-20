@@ -305,9 +305,11 @@ MEXC chart, select that live venue and use an Auto, Perpetual long or Perpetual
 short preset from a flat position with no working orders. The reviewed leverage
 must match the effective isolated leverage on MEXC. The chart preview shows
 **LIVE · eTape-held fair-price stop**. The last-trade trigger sends an IOC
-limit entry. After the entry settles, eTape sizes the stop from confirmed fills
-and binds it to the MEXC position. A fair-price crossing sends a reduce-only
-market close. eTape needs to stay running and receive fresh market and account
+limit entry. A breakout long can have its stop between the current fair price
+and the entry trigger. At activation, the entry pauses if fair price is already
+at or through the stop. After the entry settles, eTape sizes the stop from
+confirmed fills and binds it to the MEXC position. A fair-price crossing sends
+a reduce-only market close. eTape needs to stay running and receive fresh market and account
 data. Use **Account → Open Orders → Resume** after restarting or after a feed
 or broker disconnect pauses the stop. Review Account for pending, paused or
 uncovered protection. Disarming preserves working protection. Canceling the

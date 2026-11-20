@@ -57,8 +57,9 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 	if err != nil {
 		return err
 	}
-	if req.Perpetual == nil || !rules.ValidQuantity(req.Qty) ||
-		(req.Type != TypeMarket && (req.Type != TypeLimit || !rules.ValidPrice(req.LimitPrice))) {
+	heldEntry := req.Type == TypeStopLimit && req.Perpetual != nil && req.Perpetual.isRiskEntry()
+	validOrder := req.Type == TypeMarket || (req.Type == TypeLimit || heldEntry) && rules.ValidPrice(req.LimitPrice)
+	if req.Perpetual == nil || !rules.ValidQuantity(req.Qty) || !validOrder {
 		return errors.New("use a valid contract count and market or tick-aligned limit price")
 	}
 	o := req.Perpetual
@@ -112,9 +113,13 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 			return errors.New("waiting for a fresh fair price")
 		}
 		if o.ProtectionPrice != 0 {
+			if !rules.ValidPrice(o.ProtectionPrice) || position != 0 {
+				return errors.New("protection requires a flat symbol and a tick-aligned stop")
+			}
 			validSide := req.Side == SideBuy && price > o.ProtectionPrice || req.Side == SideShort && price < o.ProtectionPrice
-			if !rules.ValidPrice(o.ProtectionPrice) || !validSide || position != 0 {
-				return errors.New("protection requires a flat symbol and a stop on the loss side of fair price")
+			// A pending breakout can leave the stop between fair price and the entry trigger.
+			if !heldEntry && !validSide {
+				return errors.New("protective stop is already crossed by the current fair price")
 			}
 			req.TIF = TIFIOC
 		}
@@ -176,8 +181,8 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 		options.LocalProtection = true
 		options.AccountIdentity = c.heldLiveIdentity[cm.Venue]
 	}
-	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeLimit, TIF: TIFIOC, Session: SessionAuto,
-		Qty: size, LimitPrice: limit, ClientOrderID: c.idgen.Next(), Perpetual: options}
+	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeStopLimit, TIF: TIFIOC, Session: SessionAuto,
+		Qty: size, StopPrice: cm.Trigger, LimitPrice: limit, ClientOrderID: c.idgen.Next(), Perpetual: options}
 	if err = c.validatePerpetual(&req, ""); err != nil {
 		return deny(err.Error())
 	}
@@ -191,7 +196,6 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 		return deny(err.Error())
 	}
 	order := newOrderFromRequest(req, c.now())
-	order.Type, order.StopPrice = TypeStopLimit, cm.Trigger
 	order.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: c.clk.Now().Add(24 * time.Hour).UnixMilli()}
 	if err = c.appendAndFold(OrderSubmitted{Order: order}, SrcLocal); err != nil {
 		c.releaseHeld(order.ID)

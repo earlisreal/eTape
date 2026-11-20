@@ -47,9 +47,9 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 			core.state.SetMasterArmed(true)
 			core.state.SetPositionsReady(venue, true)
 			core.state.ReconcileAccount(AccountSnapshot{Venue: venue, AvailableCash: 500, TsMs: clk.Now().UnixMilli()})
-			trigger, stop, crossed := 101_000.0, 99_000.0, 101_001.0
+			trigger, stop, crossed := 101_000.0, 100_500.0, 101_001.0
 			if side == SideShort {
-				trigger, stop, crossed = 99_000, 101_000, 98_999
+				trigger, stop, crossed = 99_000, 99_500, 98_999
 			}
 			cmd := SubmitPerpetualRiskEntry{Venue: venue, Symbol: symbol, Side: side, Trigger: trigger, Stop: stop,
 				Leverage: 5, Cushion: LimitCushion{Value: 1, Unit: "$"}, Budget: 10, MaxQty: 3}
@@ -62,7 +62,24 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 				t.Fatalf("live risk entry not held: %+v", ack)
 			}
 			clk.Advance(time.Millisecond)
-			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: crossed, Seq: 1, TsMs: core.now(), RecvTsMs: core.now()})
+			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: 100_000, Seq: 1, TsMs: core.now(), RecvTsMs: core.now()})
+			if o := core.order(ack.OrderID); o.Held.Phase != HeldArmed || o.Held.ChildClientID != "" {
+				t.Fatalf("entry must wait for the trade trigger: %+v", o)
+			}
+			if side == SideShort {
+				clk.Advance(time.Millisecond)
+				core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: crossed, Seq: 2, TsMs: core.now(), RecvTsMs: core.now()})
+				if o := core.order(ack.OrderID); o.Held.Phase != HeldPaused || o.Held.ChildClientID != "" ||
+					!strings.Contains(o.Held.PausedReason, "protective stop is already crossed") {
+					t.Fatalf("entry must pause if the trade crosses while fair price is still past the stop: %+v", o)
+				}
+				if resumed := core.handleResumeHeld(ctx, ResumeHeldOrder{Venue: venue, OrderID: ack.OrderID}); !resumed.Accepted {
+					t.Fatalf("resume risk entry: %+v", resumed)
+				}
+			}
+			broker.fair = trigger
+			clk.Advance(time.Millisecond)
+			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: crossed, Seq: 3, TsMs: core.now(), RecvTsMs: core.now()})
 			select {
 			case req := <-broker.submits:
 				if req.Venue != venue || req.ClientOrderID != ack.OrderID || req.Type != TypeLimit || req.TIF != TIFIOC ||
@@ -105,7 +122,7 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 			position.Qty /= 2
 			core.handleBrokerEvent(ctx, BrokerSnapshot{V: venue, Positions: []Position{position}})
 			clk.Advance(time.Millisecond)
-			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: stop, Seq: 2, TsMs: core.now(), RecvTsMs: core.now()})
+			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: stop, Seq: 4, TsMs: core.now(), RecvTsMs: core.now()})
 			if o := core.order(stopID); !o.Working() || o.Qty != 1 || o.Held.ChildClientID != "" {
 				t.Fatalf("disarm, reduction or a last trade incorrectly changed the fair-price stop: %+v", o)
 			}

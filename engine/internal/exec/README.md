@@ -24,7 +24,9 @@ or unsupported tier data blocks Auto sizing.
 
 ## MEXC Live Chart Risk Entry
 
-The held entry uses an eligible MEXC trade and submits an IOC limit order. After
+The held entry uses an eligible MEXC trade and submits an IOC limit order.
+Before the trigger, the stop is checked against the planned entry trigger.
+When the entry triggers, eTape pauses it if fair price has crossed the stop. After
 the adapter reconciles the IOC and the open position, eTape creates a separate
 fair-price stop for the confirmed quantity. Its venue, account identity and
 MEXC position ID bind the stop to that position cycle. Price checks run from
