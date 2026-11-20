@@ -233,6 +233,7 @@ export interface Order {
   action?: OrderAction;
   riskEntry?: RiskEntry;
   riskEntryId?: string;
+  pendingProtectionPrice?: number /* float64 */;
 }
 export interface LimitCushion {
   value: number /* float64 */;

@@ -94,6 +94,33 @@ describe("AccountPanel", () => {
     expect(screen.queryByTestId("venue-environment-badge")).toBeNull();
   });
 
+  it.each([["BUY", "Sell"], ["SHORT", "Cover"]] as const)(
+    "shows the pending %s entry's protective stop beside its trigger",
+    (side, label) => {
+      const { props, stores, linkGroups } = mkProps();
+      const venue = "mexc-live";
+      const symbol = "PERP.MEXC.BTC_USDT";
+      const st = status(true, venue);
+      st.venues[0].broker = "mexc";
+      st.venues[0].env = "live";
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: st });
+      linkGroups.hydrate({ green: symbol });
+      linkGroups.focusVenue("green", venue);
+      const entry: Order = { venue, symbol, id: "waiting-risk", side, type: "STOP_LIMIT", tif: "IOC", session: "AUTO",
+        qty: 6, limitPrice: 62882, stopPrice: 62259.7, pendingProtectionPrice: side === "BUY" ? 62136.5 : 62300,
+        status: "SUBMITTED", executedQty: 0, leavesQty: 6, avgFillPrice: 0, rejectReason: "", replacesId: "",
+        createdMs: 1, updatedMs: 1, held: { phase: "WAITING", deadlineMs: 2 } };
+      stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [entry] });
+      wrap(props);
+      const stopCell = screen.getByTestId("open-orders-table").querySelector('tbody [data-column="stopPrice"]');
+      expect(stopCell?.textContent).toContain(String(entry.pendingProtectionPrice));
+      expect(stopCell?.textContent).toContain(`${label} pending`);
+      expect(screen.getByText("Open Orders (1)")).toBeTruthy();
+      act(() => stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...entry, status: "CANCELED" } }));
+      expect(screen.queryByText(`${label} pending`, { exact: false })).toBeNull();
+    },
+  );
+
   it("formats sub-dollar position and fill prices while keeping account and position P&L at two decimals", () => {
     const { props, stores } = mkProps();
     stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status(true) });

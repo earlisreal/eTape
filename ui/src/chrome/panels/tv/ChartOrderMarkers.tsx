@@ -8,6 +8,7 @@ import type { OrderConfig, PlaceOrderTemplate } from "../../exec/actionTemplate"
 import { chartBindingForModifiers, chartConditionalTemplate } from "../../exec/resolveChartConditionalOrder";
 import type { Tool } from "../../../render/chart/drawings/interaction";
 import {riskEntrySize} from "../../exec/riskEntry";
+import { pendingPerpetualStop } from "../../exec/perpetual";
 import {resolveLimitCushionPrice} from "../../exec/priceSource";
 import type { TvChrome } from "../../../render/chart/tvTheme";
 import { Dialog } from "../../controls/Dialog";
@@ -57,6 +58,11 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     return () => { owner.dispose(); pillLayer.current = null; };
   }, [props.hostRef]);
   const orders=useMemo(()=>Array.from(props.orders),[props.orders]);
+  const pendingStops = useMemo(() => props.pinned ? [] : orders.flatMap(order => {
+    if (order.symbol !== props.symbol || order.venue !== props.venue) return [];
+    const stop = pendingPerpetualStop(order);
+    return stop ? [{ ...stop, entryId: order.id }] : [];
+  }), [orders, props.symbol, props.venue, props.pinned]);
   const markers = useMemo(() => chartOrderMarkers(orders, props.venue, props.symbol, props.pinned),
     [orders, props.venue, props.symbol, props.pinned]);
   const [pending, setPending] = useState<Map<string, Pending>>(() => new Map());
@@ -449,6 +455,21 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
   const sorted = [...groups].sort((a, b) => a.price - b.price || a.kind.localeCompare(b.kind));
   const stack = new Map<string, number>();
   return <div ref={rootRef} data-testid="chart-order-markers" data-drawing-ui="true" style={{ position:"absolute", inset:0, zIndex:8, pointerEvents:"none", overflow:"hidden" }}>
+    {pendingStops.map(stop => {
+      const color = stop.side === "SELL" ? props.chrome.down : props.chrome.up;
+      const label = `${stop.side} stop ${stop.price} pending. Activates after the entry fills reconcile.`;
+      return <div key={`pending-${stop.entryId}`} data-order-group="true" data-kind="pending-protection" data-price={stop.price}
+        data-testid={`pending-protection-${stop.entryId}`}
+        style={{ position:"absolute", left:0, right:0, top:0, height:0 }}>
+        <div data-order-line aria-hidden="true" style={{ position:"absolute", left:0, right:props.rightAxisWidth, top:0,
+          borderTop:`1px dashed ${color}`, opacity:.7 }} />
+        <div data-order-chip title={label} style={{ position:"absolute", right:0, top:-10, opacity:0,
+          display:"flex", alignItems:"center", height:20, boxSizing:"border-box", padding:"0 5px", border:`1px dashed ${color}`,
+          borderRadius:3, color, background:"rgba(12,16,23,.96)", font:"600 10px ui-monospace,monospace", whiteSpace:"nowrap", pointerEvents:"auto" }}>
+          {stop.price} · {stop.side} PENDING
+        </div>
+      </div>;
+    })}
     {sorted.map((group) => {
       const stackKey = group.price.toFixed(4);
       const stackIndex = stack.get(stackKey) ?? 0; stack.set(stackKey, stackIndex + 1);

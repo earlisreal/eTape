@@ -1,5 +1,12 @@
-import type { PerpetualContract } from "../../gen/wsmsg";
+import type { Order, PerpetualContract } from "../../gen/wsmsg";
+import { isWorking } from "../../wire/orderStatus";
 import { defaultLeverageCap, type RiskEntryTemplate } from "./actionTemplate";
+
+export function pendingPerpetualStop(order: Order): { price: number; side: "SELL" | "COVER" } | undefined {
+  const price = order.pendingProtectionPrice;
+  if (!price || !isWorking(order.status)) return undefined;
+  return { price, side: order.side === "SHORT" ? "COVER" : "SELL" };
+}
 
 export function perpetualTick(price: number, contract: PerpetualContract, rounding = Math.round): number {
   const tick = Number(contract.priceTick);

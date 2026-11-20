@@ -137,6 +137,8 @@ type Order struct {
 	Action              *OrderAction `json:"action,omitempty"`
 	RiskEntry           *RiskEntry   `json:"riskEntry,omitempty"`
 	RiskEntryID         string       `json:"riskEntryId,omitempty"`
+
+	PendingProtectionPrice float64 `json:"pendingProtectionPrice,omitempty"`
 }
 
 type LimitCushion struct {

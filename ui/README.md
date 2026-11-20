@@ -34,9 +34,10 @@ without a trading account from the market picker or a standalone Crypto Scanner.
 Explicitly switching from paper to live or returning from paper to a saved live
 perpetual account requires confirmation.
 For MEXC Live Chart Risk Entry, review and enable Stop-Limit for the account in
-Orders & hotkeys. The chart identifies the live venue and eTape-held stop before
-submission. Account shows pending or paused protection and lets you resume
-paused MEXC orders.
+Orders & hotkeys. The linked chart and Account show the planned sell or cover
+stop as pending while the entry is working. After the IOC and position
+reconcile, the engine-held stop appears for the filled quantity. Account lets
+you resume paused MEXC orders.
 
 The Windows title-bar favicon stays transparent and uses the original small-icon
 grid so all five bar rows stay separate at 16–40 px. The engine gives its owned

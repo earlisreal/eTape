@@ -15,6 +15,7 @@ import { VenueEnvironmentBadge, venueEnvironment } from "../exec/VenueEnvironmen
 import { useAccountDemand } from "../exec/useAccountDemand";
 import { useOrderConfig } from "../exec/useOrderConfig";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
+import { pendingPerpetualStop } from "../exec/perpetual";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
 import { formatClock, formatEtDateTime, formatPrice, formatSize, quoteDecimals } from "../../render/format";
 import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, abbrevType, isTerminal, isWorking, type DisplayStatus } from "../exec/orderStatus";
@@ -179,11 +180,20 @@ function readClosedSort(s: Record<string, unknown>): SortState {
   return CLOSED_DEFAULT_SORT;
 }
 
-function OrderPriceCells({ order }: { order: Pick<Order, "type" | "limitPrice" | "stopPrice"> }): JSX.Element {
+function OrderPriceCells({ order, pendingStop }: {
+  order: Pick<Order, "type" | "limitPrice" | "stopPrice">;
+  pendingStop?: ReturnType<typeof pendingPerpetualStop>;
+}): JSX.Element {
   return <>{ORDER_PRICE_COLUMNS.map((column) => {
     const value = ORDER_PRICE_ACCESSORS[column.col](order);
     const text = value === null ? "—" : typeof value === "number" ? formatPrice(value, quoteDecimals(value)) : value;
-    return <td key={column.col} data-column={column.col} title={text} style={{ padding: "2px 8px", overflow: "hidden", textOverflow: "ellipsis" }}>{text}</td>;
+    return <td key={column.col} data-column={column.col} title={text} style={{ padding: "2px 8px", overflow: "hidden", textOverflow: "ellipsis" }}>
+      {text}
+      {column.col === "stopPrice" && pendingStop && <div style={{ color: "var(--text-muted)", fontSize: 10 }}
+        title="Fair-price stop activates after the entry fills reconcile">
+        {pendingStop.price}<br />{pendingStop.side === "SELL" ? "Sell" : "Cover"} pending
+      </div>}
+    </td>;
   })}</>;
 }
 
@@ -289,6 +299,7 @@ function OrdersTable({
             const ds = displayStatus(order, optimistic);
             const variant = chipVariant(ds);
             const working = !optimistic && isWorking(order.status);
+            const pendingStop = pendingPerpetualStop(order);
             const custody = orderCustodyLabel(order, todayMs) ??
               (order.deferredPositionPct !== undefined && !order.held?.resolvedQty && order.held?.deadlineMs
                 ? `eTape-held · expires ${formatEtDateTime(order.held.deadlineMs, todayMs)} ET` : null);
@@ -298,7 +309,7 @@ function OrdersTable({
               <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
               <td data-column="qty">{order.deferredPositionPct !== undefined && !order.held?.resolvedQty
                 ? `${order.deferredPositionPct}% position` : formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)}</td>
-              <OrderPriceCells order={order} />
+              <OrderPriceCells order={order} pendingStop={pendingStop} />
               <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}
                 {custody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{custody}</div>}</td>

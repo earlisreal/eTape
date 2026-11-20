@@ -42,6 +42,25 @@ func TestMapRiskAddOwnershipAndFirstFillStop(t *testing.T) {
 	}
 }
 
+func TestMapPendingPerpetualProtection(t *testing.T) {
+	entry := exec.Order{Venue: "mexc-live", Symbol: "PERP.MEXC.BTC_USDT", Side: exec.SideBuy,
+		Type: exec.TypeStopLimit, StopPrice: 62259.7, Status: exec.StatusSubmitted,
+		Held:      &exec.HeldOrder{Phase: exec.HeldArmed},
+		Perpetual: &exec.PerpetualOrder{LocalProtection: true, ProtectionPrice: 62136.5}}
+	got := mapOrder(entry)
+	if got.StopPrice != 62259.7 || got.PendingProtectionPrice != 62136.5 {
+		t.Fatalf("entry trigger and pending stop must be distinct: %+v", got)
+	}
+	entry.Status = exec.StatusCanceled
+	if got := mapOrder(entry).PendingProtectionPrice; got != 0 {
+		t.Fatalf("terminal entry shows pending protection: %g", got)
+	}
+	entry.Status, entry.Perpetual.LocalProtection = exec.StatusSubmitted, false
+	if got := mapOrder(entry).PendingProtectionPrice; got != 0 {
+		t.Fatalf("paper order shows live pending protection: %g", got)
+	}
+}
+
 func TestMapLimitIfTouchedOrderType(t *testing.T) {
 	o := exec.Order{Venue: "sim", ID: "ET-LIT", Symbol: "US.AAPL", Side: exec.SideBuy,
 		Type: exec.TypeLimitIfTouched, TIF: exec.TIFDay, Qty: 2, LimitPrice: 99,

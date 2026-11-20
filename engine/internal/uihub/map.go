@@ -165,12 +165,17 @@ func mapOrder(o exec.Order) wsmsg.Order {
 			SellCushion: wsmsg.LimitCushion{Value: r.SellCushion.Value, Unit: r.SellCushion.Unit},
 			Closing:     r.Closing, ProtectionCanceled: r.ProtectionCanceled, Failure: r.Failure, Protection: mapTrailConfig(r.Protection)}
 	}
+	var pendingProtectionPrice float64
+	if o.Type == exec.TypeStopLimit && o.Held != nil && o.Working() && o.Perpetual != nil && o.Perpetual.LocalProtection {
+		pendingProtectionPrice = o.Perpetual.ProtectionPrice
+	}
 	return wsmsg.Order{
 		Venue: string(o.Venue), ID: o.ID, Symbol: o.Symbol,
 		Side: sideToWire(o.Side), Type: orderTypeToWire(o.Type), TIF: tifToWire(o.TIF),
 		Session: sessionToWire(o.Session),
 		Qty:     o.Qty, DeferredPositionPct: o.DeferredPositionPct, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
-		Status: statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
+		PendingProtectionPrice: pendingProtectionPrice,
+		Status:                 statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
 		AvgFillPrice: o.AvgFillPrice, RejectReason: o.RejectReason, ReplacesID: o.ReplacesID,
 		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs, Held: held, Action: action,
 		RiskEntry: risk, RiskEntryID: o.RiskEntryID,

@@ -307,7 +307,8 @@ must match the effective isolated leverage on MEXC. The chart preview shows
 **LIVE · eTape-held fair-price stop**. The last-trade trigger sends an IOC
 limit entry. A breakout long can have its stop between the current fair price
 and the entry trigger. At activation, the entry pauses if fair price is already
-at or through the stop. After the entry settles, eTape sizes the stop from
+at or through the stop. The chart and Account show the planned stop as pending
+while the entry is working. After the entry settles, eTape sizes the stop from
 confirmed fills and binds it to the MEXC position. A fair-price crossing sends
 a reduce-only market close. eTape needs to stay running and receive fresh market and account
 data. Use **Account → Open Orders → Resume** after restarting or after a feed

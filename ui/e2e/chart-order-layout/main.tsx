@@ -64,6 +64,14 @@ const sendCommand = async (name, args) => {
   if (args.venue !== executionVenue) throw new Error("Unexpected fixture order venue");
   if (name === "SubmitRiskEntry" || name === "SubmitPerpetualRiskEntry") {
     window.chartPanelProbe.lastRiskSubmitted = args;
+    if (mexcLive && name === "SubmitPerpetualRiskEntry") {
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
+        id: "sim-risk", venue: executionVenue, symbol: args.symbol, side: args.side, type: "STOP_LIMIT", tif: "IOC", session: "AUTO",
+        qty: args.maxQty, limitPrice: args.trigger, stopPrice: args.trigger, pendingProtectionPrice: args.stop,
+        status: "SUBMITTED", executedQty: 0, leavesQty: args.maxQty, avgFillPrice: 0, rejectReason: "", replacesId: "",
+        createdMs: Date.now(), updatedMs: Date.now(), held: { phase: "WAITING", deadlineMs: Date.now() + 3600000 },
+      } });
+    }
     return { kind: "ack", corrId: "risk", status: "accepted", orderId: "sim-risk" };
   }
   if (name === "SubmitOrder") {
@@ -218,6 +226,16 @@ function ConfigReadyProbe() {
       }, startRisk() {
         stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { ...stores.exec.accounts()[0], tsMs: Date.now() } });
         return initiateChartRiskEntry(riskTemplate);
+      }, settleMexcEntry(filled) {
+        const entry = stores.exec.liveOrder("sim-risk");
+        stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
+          ...entry, status: "CANCELED", executedQty: filled, leavesQty: entry.qty - filled, pendingProtectionPrice: undefined,
+        } });
+        stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
+          ...entry, id: "sim-protection", side: entry.side === "BUY" ? "SELL" : "COVER", type: "STOP",
+          qty: filled, leavesQty: filled, stopPrice: entry.pendingProtectionPrice, limitPrice: 0, pendingProtectionPrice: undefined,
+          held: { phase: "WAITING", deadlineMs: 0 },
+        } });
       }, protectPosition(stopPrice) {
         const common = { venue: "sim", symbol: "US.AAPL", type: "STOP_LIMIT", tif: "DAY", session: "EXTENDED", rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, avgFillPrice: 0 };
         stores.exec.apply({ kind: "snapshot", topic: "exec.positions", payload: [{ venue: "sim", symbol: "US.AAPL", qty: 100, avgPrice: stopPrice + .1 }] });

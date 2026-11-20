@@ -609,6 +609,17 @@ try {
     assert.equal(automatic.venue, scenario === "mexc-live" ? "mexc-live" : "sim");
     assert.equal(automatic.maxQty, Number(review[1].replaceAll(",", "")));
     assert.equal(automatic.leverage, Number(review[2]));
+    if (scenario === "mexc-live") {
+      const pending = perpetualPage.getByTestId("pending-protection-sim-risk");
+      await perpetualPage.locator("[data-order-pill-visual]").filter({ hasText: "SELL PENDING" }).waitFor({ state: "visible" });
+      assert.equal(Number(await pending.getAttribute("data-price")), automatic.stop);
+      assert.equal(await pending.getByRole("button").count(), 0, "the planned stop must have no order actions");
+      await perpetualPage.evaluate(() => window.chartPanelProbe.settleMexcEntry(2));
+      await pending.waitFor({ state: "detached" });
+      const stop = perpetualPage.getByTestId("order-label-sim-protection");
+      await stop.waitFor({ state: "visible" });
+      assert.match(await stop.getAttribute("title"), /SELL 2 contracts.*Reduce-only market close/s);
+    }
     await perpetualPage.close();
   }
   assert.equal(productionErrors.length, 0, productionErrors.join("\n"));
