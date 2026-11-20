@@ -22,6 +22,21 @@ uses the previewed quantity and leverage as ceilings. It revalidates the armed
 terms on activation and the simulator checks the resulting fill price. Missing
 or unsupported tier data blocks Auto sizing.
 
+## MEXC Live Chart Risk Entry
+
+The held entry uses an eligible MEXC trade and submits an IOC limit order. After
+the adapter reconciles the IOC and the open position, eTape creates a separate
+fair-price stop for the confirmed quantity. Its venue, account identity and
+MEXC position ID bind the stop to that position cycle. Price checks run from
+the engine's timer and after broker reconciliation.
+
+The stop starts one journaled reduce-only market close at the trigger. It can
+close while the engine is disarmed. A restart or disconnect that pauses the
+order requires Resume in Account. An ambiguous exchange response stays pending
+until reconciliation. A terminal close with remaining exposure produces an
+Account warning. Manual reductions shrink the remaining stop quantity and a
+flat or changed position retires the untriggered stop.
+
 ## Trailing stops
 
 `SubmitTrail` admits one reducing SELL/COVER strategy per venue and symbol.

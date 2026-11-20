@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -169,7 +170,7 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
 		if o.Symbol != p.Symbol || o.Held == nil || (o.Held.Phase != HeldWaiting && o.Held.Phase != HeldArmed) ||
-			p.RecvTsMs <= o.CreatedMs || p.RecvTsMs <= o.Held.ResumeAfterMs {
+			o.isPerpetualRiskStop() || p.RecvTsMs <= o.CreatedMs || p.RecvTsMs <= o.Held.ResumeAfterMs {
 			continue
 		}
 		if o.Held.DeadlineMs <= c.now() {
@@ -325,6 +326,9 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 			c.changeHeld(o, HeldPaused, err.Error(), false)
 			return
 		}
+		if p.LocalProtection {
+			child.Perpetual = &PerpetualOrder{Leverage: p.Leverage, Multiplier: p.Multiplier}
+		}
 	}
 	if o.DeferredPositionPct > 0 && (o.Held.Trail == nil || o.Held.ResolvedQty == 0) {
 		if !c.state.PositionsReady(o.Venue) {
@@ -389,6 +393,14 @@ func (c *Core) postHeldChild(ctx context.Context, b Broker, req OrderRequest) {
 		return
 	}
 	if _, err := b.SubmitOrder(ctx, req); err != nil {
+		var declined PerpetualSubmitDeclined
+		if errors.As(err, &declined) {
+			select {
+			case c.bevents <- OrderRejected{V: req.Venue, OID: req.ClientOrderID, Reason: declined.Error(), Ts: c.now()}:
+			case <-ctx.Done():
+			}
+			return
+		}
 		select {
 		case c.bevents <- HeldActivationOutcome{V: req.Venue, OID: req.ClientOrderID, Reason: err.Error()}:
 		case <-ctx.Done():
@@ -396,10 +408,31 @@ func (c *Core) postHeldChild(ctx context.Context, b Broker, req OrderRequest) {
 	}
 }
 
+func (c *Core) recordHeldAcceptance(ctx context.Context, o Order, brokerID string) error {
+	h := *o.Held
+	cancelRequested := h.CancelRequested || h.Phase == HeldCancelRequested
+	cancelUnknown := o.Action != nil && o.Action.Kind == ActionCancel && o.Action.Phase == ActionUnknown
+	sendCancel := cancelRequested && (!h.CancelSent || cancelUnknown)
+	h.Phase, h.PausedReason, h.ChildBrokerID = HeldWorking, "", brokerID
+	if c.trailPositionChecks[o.Venue] != nil {
+		h.PausedReason = trailAttributionPending
+	}
+	if cancelRequested {
+		h.Phase, h.PausedReason, h.CancelRequested, h.CancelSent = HeldCancelRequested, "cancel requested", true, true
+	}
+	if err := c.appendAndFold(HeldOrderChanged{V: o.Venue, OID: o.ID, Held: h, Ts: c.now()}, SrcLocal); err != nil {
+		return err
+	}
+	if b := c.brokers[o.Venue]; sendCancel && b != nil {
+		c.startVenueAction(ctx, b, o.Venue, o.ID, ActionCancel, ReplaceRequest{})
+	}
+	return nil
+}
+
 func (c *Core) expireHeldOrders(ctx context.Context) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
-		if o.Held == nil || o.Held.DeadlineMs > c.now() {
+		if o.Held == nil || o.isPerpetualRiskStop() || o.Held.DeadlineMs > c.now() {
 			continue
 		}
 		if o.Held.Trail != nil {
@@ -497,7 +530,7 @@ func (c *Core) pauseHeldReducingVenue(venue VenueID, reason string) {
 func (c *Core) disarmHeld(ctx context.Context, venue VenueID, cancelPretrigger bool) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
-		if !cancelPretrigger && o.Perpetual == nil && (o.RiskEntryID != "" || o.RiskEntry != nil || o.Held != nil && o.Held.Trail != nil) {
+		if !cancelPretrigger && (o.isPerpetualRiskStop() || o.Perpetual == nil && (o.RiskEntryID != "" || o.RiskEntry != nil || o.Held != nil && o.Held.Trail != nil)) {
 			continue
 		}
 		if venue != "" && o.Venue != venue {
@@ -535,6 +568,9 @@ func (c *Core) handleResumeHeld(ctx context.Context, cm ResumeHeldOrder) CmdAck 
 	}
 	if o.Held.Phase != HeldPaused {
 		return CmdAck{Accepted: false, Reason: "held order is not paused", OrderID: o.ID}
+	}
+	if o.isPerpetualRiskStop() {
+		return c.resumePerpetualRiskStop(ctx, o)
 	}
 	if !c.state.MasterArmed && o.RiskEntryID == "" && o.Held.Trail == nil {
 		return CmdAck{Accepted: false, Reason: "master disarmed", OrderID: o.ID}

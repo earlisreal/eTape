@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -93,29 +94,33 @@ func (c *Core) protectionProblems(v VenueID) map[string]string {
 
 func (c *Core) refreshProtectionWarnings(ctx context.Context) {
 	for _, v := range c.venues {
-		problems := c.protectionProblems(v)
 		check := c.protectionChecks[v]
 		if check == nil {
 			check = &protectionCheck{}
 			c.protectionChecks[v] = check
 		}
-		if len(problems) > 0 && !check.inFlight && c.now() >= check.nextMs {
-			c.startProtectionCheck(ctx, v, check)
-		}
-		warnings := make([]ProtectionWarning, 0, len(problems))
-		for symbol, reason := range problems {
-			warning := ProtectionWarning{Symbol: symbol, Reason: reason, State: "checking"}
-			if check.failed || !c.state.PositionsReady(v) {
-				warning.State = "unverified"
+		var warnings []ProtectionWarning
+		if b, ok := c.brokers[v].(PerpetualBroker); ok && b.Capabilities().EngineHeldPerpetualRiskEntry {
+			warnings = c.perpetualProtectionWarnings(v, b)
+		} else {
+			problems := c.protectionProblems(v)
+			if len(problems) > 0 && !check.inFlight && c.now() >= check.nextMs {
+				c.startProtectionCheck(ctx, v, check)
 			}
-			if check.verified && check.revision == c.protectionRevision[v] && c.state.PositionsReady(v) {
-				warning.Qty = c.state.Venue(v).Positions[symbol].Qty
-				if warning.Qty <= 0 {
-					continue
+			for symbol, reason := range problems {
+				warning := ProtectionWarning{Symbol: symbol, Reason: reason, State: "checking"}
+				if check.failed || !c.state.PositionsReady(v) {
+					warning.State = "unverified"
 				}
-				warning.State = "open"
+				if check.verified && check.revision == c.protectionRevision[v] && c.state.PositionsReady(v) {
+					warning.Qty = c.state.Venue(v).Positions[symbol].Qty
+					if warning.Qty <= 0 {
+						continue
+					}
+					warning.State = "open"
+				}
+				warnings = append(warnings, warning)
 			}
-			warnings = append(warnings, warning)
 		}
 		sort.Slice(warnings, func(i, j int) bool { return warnings[i].Symbol < warnings[j].Symbol })
 		if !slices.Equal(check.warnings, warnings) {
@@ -123,6 +128,51 @@ func (c *Core) refreshProtectionWarnings(ctx context.Context) {
 			c.emit(ProtectionWarningsUpdate{Venue: v, Warnings: warnings})
 		}
 	}
+}
+
+func (c *Core) perpetualProtectionWarnings(v VenueID, b PerpetualBroker) []ProtectionWarning {
+	vs := c.state.Venue(v)
+	bySymbol := make(map[string]ProtectionWarning)
+	for _, entry := range vs.Orders {
+		o := entry.Perpetual
+		if o == nil || !o.LocalProtection || !o.isRiskEntry() || entry.ExecutedQty <= 0 {
+			continue
+		}
+		p := vs.Positions[entry.Symbol]
+		if id := entry.perpetualPositionID(); p.Qty == 0 || id != "" && p.BrokerPositionID != id {
+			continue
+		}
+		w := ProtectionWarning{Symbol: entry.Symbol, Qty: math.Abs(p.Qty), State: "open"}
+		stop := vs.Orders[o.ProtectionID]
+		_, fresh := b.FairPrice(entry.Symbol)
+		switch {
+		case !c.state.PositionsReady(v):
+			w.State, w.Reason = "unverified", "Engine-held stop waiting for MEXC position data"
+		case !c.ownsPerpetualPosition(entry, p):
+			w.Reason = "Engine-held stop could not verify the original position"
+		case stop.ID == "" && entry.Working():
+			w.Reason = "Engine-held stop waiting for entry reconciliation"
+		case !stop.Working():
+			w.Reason = "Engine-held stop unavailable; review Orders and Positions"
+		case stop.Held.Phase == HeldPaused:
+			w.Reason = "Engine-held stop paused; resume in Orders"
+		case stop.Held.ChildClientID != "" || stop.Held.PerpetualTriggered:
+			w.Reason = "Engine-held close awaiting MEXC execution or reconciliation"
+		case !fresh:
+			w.Reason = "Engine-held stop waiting for fresh MEXC fair price"
+		case stop.LeavesQty < w.Qty:
+			w.Qty -= stop.LeavesQty
+			w.Reason = "Contracts above the engine-held stop size"
+		}
+		if w.Reason != "" {
+			bySymbol[w.Symbol] = w
+		}
+	}
+	warnings := make([]ProtectionWarning, 0, len(bySymbol))
+	for _, w := range bySymbol {
+		warnings = append(warnings, w)
+	}
+	return warnings
 }
 
 func (c *Core) startProtectionCheck(ctx context.Context, v VenueID, check *protectionCheck) {

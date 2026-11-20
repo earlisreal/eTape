@@ -13,13 +13,16 @@ import type { AckMsg, Order, StopLimitRoutePreview } from "../../../wire/contrac
 const template: RiskEntryTemplate = { kind: "risk", id: "r", label: "Risk", mode: "Dollar", value: 100, buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
 const mexcSymbol = "PERP.MEXC.BTC_USDT";
 const autoPreset: RiskEntryTemplate = { ...template, auto: { leverage: 5 }, value: 1 };
-function mount(auto = false, preset = template, chartSymbol = preset.perpetual ? mexcSymbol : "AAPL") {
+function mount(auto = false, preset = template, chartSymbol = preset.perpetual ? mexcSymbol : "AAPL", live = false) {
     const stores = makeStores();
-    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, venues: [{ venue: "sim", broker: chartSymbol === mexcSymbol ? "mexc-sim" : "sim", connected: true, positionDataReady: true }] } });
-    stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { venue: "sim", buyingPower: 100000, availableCash: 100000, tsMs: Date.now() } });
+    const venue = live ? "mexc-live" : "sim";
+    const broker = chartSymbol === mexcSymbol ? live ? "mexc" : "mexc-sim" : "sim";
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, global: { maxDayLoss: 0 },
+        venues: [{ venue, broker, env: live ? "live" : "paper", heldStopLimitAcknowledged: live, connected: true, positionDataReady: true }] } });
+    stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { venue, buyingPower: 100000, availableCash: 100000, tsMs: Date.now() } });
     const linkGroups = new LinkGroups({ post: () => { }, onMessage: () => () => { }, close: () => { } }, () => { });
     linkGroups.focus("green", chartSymbol);
-    linkGroups.focusVenue("green", "sim");
+    linkGroups.focusVenue("green", venue);
     const host = document.createElement("div");
     document.body.append(host);
     host.getBoundingClientRect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 500, bottom: 400, width: 500, height: 400, toJSON: () => ({}) });
@@ -27,7 +30,7 @@ function mount(auto = false, preset = template, chartSymbol = preset.perpetual ?
     const sendCommand = vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { void name; void args; return { kind: "ack", corrId: "1", status: "accepted", orderId: "E1" }; });
     const sendQuery = vi.fn(async (): Promise<StopLimitRoutePreview> => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "RTH", deadlineMs: Date.now() + 100000, hasTrustedEligiblePrint: true, lastEligiblePrice: 9, lastEligibleTsMs: Date.now() }));
     const layoutRef = { current: () => {} };
-    const element = (symbol = chartSymbol) => <ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol={symbol} contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [preset], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} layoutRef={layoutRef} sendCommand={sendCommand} sendQuery={sendQuery}/>;
+    const element = (symbol = chartSymbol) => <ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol={symbol} contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: venue, templates: [preset], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} layoutRef={layoutRef} sendCommand={sendCommand} sendQuery={sendQuery}/>;
     const result = render(element(), { container: host, wrapper: ({ children }) => <ThemeProvider><ToastProvider>{children}</ToastProvider></ThemeProvider> });
     sendCommand.mockClear();
     return { ...result, host, sendCommand, sendQuery, facadeRef, layoutRef, stores, changeSymbol: (symbol: string) => {
@@ -42,18 +45,20 @@ function seedMexcContract(stores: ReturnType<typeof makeStores>) {
         riskTiers: [{ maxContracts: 1000, maxLeverage: 10, maintenance: 0.005, liquidationFee: 0.001 }],
     } } });
 }
-it.each(["BUY", "SHORT"] as const)("submits a %s perpetual chart preset with contracts and leverage", async side => {
+it.each([["sim", "BUY"], ["sim", "SHORT"], ["mexc-live", "BUY"], ["mexc-live", "SHORT"]] as const)(
+  "%s submits a %s perpetual chart preset with contracts and leverage", async (venue, side) => {
     const preset: RiskEntryTemplate = { ...template, perpetual: { side, leverage: 5 }, value: 1 };
-    const { host, sendCommand, sendQuery, stores } = mount(false, preset);
+    const { host, sendCommand, sendQuery, stores } = mount(false, preset, mexcSymbol, venue === "mexc-live");
     seedMexcContract(stores);
     initiateChartRiskEntry(preset);
     fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 100, clientY: side === "BUY" ? 220 : 180 });
     fireEvent.pointerUp(window, { pointerId: 1 });
     expect(host.querySelector("[data-risk-readout]")?.textContent).toContain("contracts");
+    if (venue === "mexc-live") expect(host.querySelector("[data-risk-status]")?.textContent).toContain("mexc-live LIVE · eTape-held fair-price stop");
     fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.objectContaining({
-        symbol: mexcSymbol, side, trigger: 10, stop: side === "BUY" ? 9.8 : 10.2, leverage: 5, maxQty: 45,
+        venue, symbol: mexcSymbol, side, trigger: 10, stop: side === "BUY" ? 9.8 : 10.2, leverage: 5, maxQty: 45,
     })));
     expect(sendQuery).not.toHaveBeenCalled();
 });
@@ -145,7 +150,7 @@ it("keeps an Auto stock entry long and blocks a stop above it", async () => {
 it("blocks an Auto entry on a perpetual chart outside MEXC", () => {
     const { sendQuery } = mount(false, autoPreset, "PERP.BINANCE.BTCUSDT");
     act(() => { initiateChartRiskEntry(autoPreset); });
-    expect(screen.getByRole("alert").textContent).toContain("available for MEXC paper perpetuals");
+    expect(screen.getByRole("alert").textContent).toContain("available on MEXC Live and MEXC paper");
     expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
     expect(sendQuery).not.toHaveBeenCalled();
 });

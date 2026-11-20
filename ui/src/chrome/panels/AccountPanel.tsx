@@ -93,8 +93,11 @@ function chipVariant(ds: DisplayStatus): ChipVariant | null {
   return null;
 }
 
-function litCustodyLabel(order: Pick<Order, "type" | "held" | "action">, todayMs: number): string | null {
+function orderCustodyLabel(order: Pick<Order, "type" | "held" | "action" | "symbol">, todayMs: number): string | null {
   if(order.held?.trail)return `eTape ${order.held.trail.config.mode} trail · ${order.held.phase}${order.held.pausedReason?` · ${order.held.pausedReason}`:""} · run-bound · expires ${formatEtDateTime(order.held.deadlineMs,todayMs)} ET`;
+  if (order.type === "STOP" && order.held && order.symbol.startsWith("PERP.MEXC.")) {
+    return `eTape-held fair-price stop · ${order.held.phase}${order.held.pausedReason ? ` · ${order.held.pausedReason}` : ""}`;
+  }
   if (order.type !== "LIMIT_IF_TOUCHED" || !order.held) return null;
   const action = order.action ? `${order.action.kind} ${order.action.phase}` : "idle";
   const deadline = order.held.deadlineMs ? ` · expires ${formatEtDateTime(order.held.deadlineMs, todayMs)} ET` : "";
@@ -286,7 +289,7 @@ function OrdersTable({
             const ds = displayStatus(order, optimistic);
             const variant = chipVariant(ds);
             const working = !optimistic && isWorking(order.status);
-            const custody = litCustodyLabel(order, todayMs) ??
+            const custody = orderCustodyLabel(order, todayMs) ??
               (order.deferredPositionPct !== undefined && !order.held?.resolvedQty && order.held?.deadlineMs
                 ? `eTape-held · expires ${formatEtDateTime(order.held.deadlineMs, todayMs)} ET` : null);
             return <tr key={order.id} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
@@ -299,7 +302,10 @@ function OrdersTable({
               <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}
                 {custody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{custody}</div>}</td>
-              <td data-column="actions">{order.held?.trail && !order.held.trail.retired && !order.held.trail.triggered && ["WAITING","ARMED"].includes(order.held.phase) && <button type="button" aria-label="Edit trail" onClick={()=>{const current=stores.exec.liveOrder(order.id)??order;setTrailEdit({order:current,config:current.held!.trail!.config});}}>Edit</button>}{order.held?.trail && !order.held.trail.retired && order.held.phase==="PAUSED" && <button type="button" aria-label="Resume trail" onClick={()=>void oc.resumeHeld(order.venue,order.id)}>Resume</button>}{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
+              <td data-column="actions">{order.held?.trail && !order.held.trail.retired && !order.held.trail.triggered && ["WAITING","ARMED"].includes(order.held.phase) && <button type="button" aria-label="Edit trail" onClick={()=>{const current=stores.exec.liveOrder(order.id)??order;setTrailEdit({order:current,config:current.held!.trail!.config});}}>Edit</button>}{order.held?.trail && !order.held.trail.retired && order.held.phase==="PAUSED" && <button type="button" aria-label="Resume trail" onClick={()=>void oc.resumeHeld(order.venue,order.id)}>Resume</button>}
+                {order.symbol.startsWith("PERP.MEXC.") && order.held?.phase === "PAUSED" &&
+                  <button type="button" aria-label="Resume held MEXC order" onClick={() => void oc.resumeHeld(order.venue, order.id)}>Resume</button>}
+                {(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
                 style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton> : null}</td>
             </tr>;
           })}</tbody>
@@ -320,7 +326,7 @@ function OrdersTable({
             const danger = order.status === "REJECTED" || order.status === "BLOCKED";
             const muted = order.status === "CANCELED" || order.status === "EXPIRED" || order.status === "REPLACED";
             const reason = order.rejectReason || "—";
-            const custody = litCustodyLabel(order, todayMs);
+            const custody = orderCustodyLabel(order, todayMs);
             return <tr key={order.id} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
               <td data-column="updatedMs" style={{ padding: "2px 8px" }} title={formatEtDateTime(order.updatedMs)}>{formatEtDateTime(order.updatedMs, todayMs)}</td>
               <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
@@ -696,7 +702,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
       {(venueStatus?.protectionWarnings ?? []).map((warning) => <div key={warning.symbol} role="alert" data-testid="account-protection-warning"
         style={{ padding:"4px 8px", fontSize:11, color:palette.warn, borderBottom:`1px solid ${palette.border}` }}>
         {bareSymbol(warning.symbol)} · {warning.state === "open" && venueStatus?.positionDataReady
-          ? `${formatSize(warning.qty)} shares open`
+          ? `${formatSize(warning.qty)} ${warning.symbol.startsWith("PERP.MEXC.") ? "contracts open" : "shares open"}`
           : warning.state === "unverified" ? "Position unverified; retrying automatically" : "Checking broker positions"} · {warning.reason}
       </div>)}
       <OrdersTable stores={stores} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} height={ordersHeight} availableWidth={width} />

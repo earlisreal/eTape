@@ -156,8 +156,11 @@ ID and reduce-only flag. It reads executions by exchange order ID and verifies
 their total against the order queried by external ID. The Settings check reads
 positions, working orders and active TP/SL. MEXC Live openings are blocked when
 the USD daily-loss cap is active, pending transfer-aware USD account valuation.
-Attached protection stays on the local MEXC simulator until the native
-first-partial stop lifecycle can be verified. [MEXC signing](https://www.mexc.com/api-docs/futures/integration-guide)
+Chart Risk Entry sends a price-capped IOC entry and holds the fair-price stop in
+eTape. The durable order journal reconciles fills by external ID after a lost
+response or restart. After the entry settles, the engine binds protection to the
+confirmed position ID and size. The reduce-only market close rechecks that ID
+against the live position before submission. [MEXC signing](https://www.mexc.com/api-docs/futures/integration-guide)
 · [Order placement](https://www.mexc.com/api-docs/futures/account-and-trading-endpoints/place-order)
 · [Active TP/SL records](https://www.mexc.com/api-docs/futures/account-and-trading-endpoints/get-current-take-profitstop-loss-order-list)
 

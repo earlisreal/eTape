@@ -17,6 +17,13 @@ type PerpetualOrder struct {
 	ProtectionID    string  `json:"protectionId,omitempty"`
 	RiskBudget      float64 `json:"riskBudget,omitempty"`
 	AutoLeverage    bool    `json:"autoLeverage,omitempty"`
+	LocalProtection bool    `json:"localProtection,omitempty"`
+	PositionID      string  `json:"positionId,omitempty"`
+	AccountIdentity string  `json:"accountIdentity,omitempty"`
+}
+
+func (o PerpetualOrder) isRiskEntry() bool {
+	return o.ProtectionID != "" && finitePositive(o.ProtectionPrice) && finitePositive(o.RiskBudget)
 }
 
 type SubmitPerpetualRiskEntry struct {
@@ -55,8 +62,15 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 		return errors.New("use a valid contract count and market or tick-aligned limit price")
 	}
 	o := req.Perpetual
-	if broker.Capabilities().ReconciledPerpetual && (o.ProtectionPrice != 0 || o.RiskBudget != 0 || o.ProtectionID != "" || o.AutoLeverage) {
-		return errors.New("attached protection and Chart Risk Entry are unavailable on this perpetual venue")
+	caps := broker.Capabilities()
+	if caps.ReconciledPerpetual && (o.ProtectionPrice != 0 || o.RiskBudget != 0 || o.ProtectionID != "" || o.AutoLeverage) {
+		if !caps.EngineHeldPerpetualRiskEntry || !o.LocalProtection || !o.isRiskEntry() {
+			return errors.New("attached protection on a live perpetual requires a supported Chart Risk Entry")
+		}
+		identity := c.heldLiveIdentity[req.Venue]
+		if identity == "" || o.AccountIdentity != identity || c.heldLiveAck[req.Venue] != identity {
+			return errors.New("enable Stop-Limit for this live account in Orders & hotkeys")
+		}
 	}
 	if o.Multiplier != 0 && o.Multiplier != rules.ContractSize() {
 		return errors.New("the contract multiplier changed; review the order")
@@ -81,8 +95,16 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 			return errors.New("close the existing position before reversing")
 		}
 		for _, order := range c.state.Venue(req.Venue).Orders {
-			if order.ID != ownOrder && order.Symbol == req.Symbol && order.Working() && (order.Side == SideBuy || order.Side == SideShort) {
+			if order.ID != ownOrder && order.Symbol == req.Symbol && order.Working() &&
+				(o.isRiskEntry() || order.Side == SideBuy || order.Side == SideShort) {
 				return errors.New("resolve the working perpetual entry first")
+			}
+		}
+		if caps.EngineHeldPerpetualRiskEntry && o.isRiskEntry() {
+			for _, order := range c.state.Venue(req.Venue).ExternalOrders {
+				if order.Symbol == req.Symbol && order.Working() {
+					return errors.New("resolve the working MEXC Futures order first")
+				}
 			}
 		}
 		price, ok := broker.FairPrice(req.Symbol)
@@ -116,8 +138,9 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 	if err != nil {
 		return deny(err.Error())
 	}
-	if broker.Capabilities().ReconciledPerpetual {
-		return deny("Chart Risk Entry requires the MEXC Perpetual Simulator")
+	caps := broker.Capabilities()
+	if caps.ReconciledPerpetual && !caps.EngineHeldPerpetualRiskEntry {
+		return deny("perpetual Chart Risk Entry requires MEXC Live or the MEXC Perpetual Simulator")
 	}
 	long := cm.Side == SideBuy
 	if (!long && cm.Side != SideShort) || (long && cm.Stop >= cm.Trigger) || (!long && cm.Stop <= cm.Trigger) {
@@ -149,6 +172,10 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 		size = min(cm.MaxQty, float64(rules.SizeRisk(budget, collateral, limit, cm.Stop, leverage)))
 	}
 	options := &PerpetualOrder{Leverage: leverage, Multiplier: rules.ContractSize(), ProtectionPrice: cm.Stop, ProtectionID: c.idgen.Next(), RiskBudget: budget, AutoLeverage: cm.AutoLeverage}
+	if caps.EngineHeldPerpetualRiskEntry {
+		options.LocalProtection = true
+		options.AccountIdentity = c.heldLiveIdentity[cm.Venue]
+	}
 	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeLimit, TIF: TIFIOC, Session: SessionAuto,
 		Qty: size, LimitPrice: limit, ClientOrderID: c.idgen.Next(), Perpetual: options}
 	if err = c.validatePerpetual(&req, ""); err != nil {

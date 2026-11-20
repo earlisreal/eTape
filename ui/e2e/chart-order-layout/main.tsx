@@ -19,19 +19,22 @@ import { browserRaf } from "../../src/render/surface";
 import "../../src/global.css";
 
 // This harness never creates a socket, broker adapter, or engine connection.
-const autoLeverage = location.search === "?auto-leverage";
+const mexcLive = location.search === "?mexc-live";
+const autoLeverage = mexcLive || location.search === "?auto-leverage";
+const executionVenue = mexcLive ? "mexc-live" : "sim";
 const chartSymbol = autoLeverage ? "PERP.MEXC.BTC_USDT" : "US.AAPL";
 const stores = makeStores();
-const linkGroups = new LinkGroups({ post() {}, onMessage() { return () => {}; }, close() {} }, () => {});
-linkGroups.focusVenue("green", "sim");
+const linkGroups = new LinkGroups({ post() {}, onMessage() { return () => {}; }, close() {} }, () => {}, () => stores.exec.status());
 stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: {
   masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
-  venues: [{ venue: "sim", broker: autoLeverage ? "mexc-sim" : "sim", env: "paper", connected: true, reconcilePending: false, note: "",
+  venues: [{ venue: executionVenue, broker: mexcLive ? "mexc" : autoLeverage ? "mexc-sim" : "sim", env: mexcLive ? "live" : "paper", connected: true, reconcilePending: false, note: "",
     lastReconcileMs: null, heldStopLimitAcknowledged: true, positionDataReady: true,
     gate: { maxOrderValue: 10000, maxPositionValue: 10000, maxPositionShares: 100, maxOpenOrders: 10 } }],
 } });
-stores.exec.apply({ kind: "snapshot", topic: "exec.account", key: "sim", payload: {
-  venue: "sim", equity: 10000, buyingPower: 10000, availableCash: autoLeverage ? 300 : 10000, sodEquity: 10000,
+linkGroups.focus("green", chartSymbol);
+linkGroups.focusVenue("green", executionVenue);
+stores.exec.apply({ kind: "snapshot", topic: "exec.account", key: executionVenue, payload: {
+  venue: executionVenue, equity: 10000, buyingPower: 10000, availableCash: autoLeverage ? 300 : 10000, sodEquity: 10000,
   realized: 0, dayPnl: 0, leverage: 1, tsMs: Date.now(), cycleStartMs: 0, cycleRealized: 0,
 } });
 if (autoLeverage) stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: {
@@ -44,7 +47,7 @@ if (autoLeverage) stores.quote.apply({ kind: "snapshot", topic: "md.quote", payl
 } });
 const riskTemplate = { kind: "risk", id: "risk", label: "Chart Risk Entry", mode: "Dollar", value: 100, auto: { leverageCap: 10 },
   buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
-const config = { activeVenue: "sim", templates: [{ kind: "place", id: "stop", label: "Stop", side: "BUY", type: "STOP_LIMIT",
+const config = { activeVenue: executionVenue, templates: [{ kind: "place", id: "stop", label: "Stop", side: "BUY", type: "STOP_LIMIT",
   tif: "DAY", session: "EXTENDED", priceSource: "Last", priceOffset: 0, limitCushion: 0.05, limitCushionUnit: "$",
   chartBinding: "Shift", sizing: { mode: "Shares", shares: 1 } }, riskTemplate] };
 let serial = 0;
@@ -55,10 +58,10 @@ const sendCommand = async (name, args) => {
   if (name === "SetConfig") return { kind: "ack", corrId: "config", status: "accepted" };
   if (name === "SubscribeIndicator" || name === "UnsubscribeIndicator") return { kind: "ack", corrId: "indicator", status: "accepted" };
   if (name === "SetAccountDemand") {
-    if (args.venue && args.venue !== "sim") throw new Error("Only simulated account demand is accepted");
+    if (args.venue && args.venue !== executionVenue) throw new Error("Unexpected fixture account demand");
     return { kind: "ack", corrId: "demand", status: "accepted" };
   }
-  if (args.venue !== "sim") throw new Error("Only simulated orders are accepted");
+  if (args.venue !== executionVenue) throw new Error("Unexpected fixture order venue");
   if (name === "SubmitRiskEntry" || name === "SubmitPerpetualRiskEntry") {
     window.chartPanelProbe.lastRiskSubmitted = args;
     return { kind: "ack", corrId: "risk", status: "accepted", orderId: "sim-risk" };

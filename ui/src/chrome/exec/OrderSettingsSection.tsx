@@ -627,7 +627,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
   const savePendingAcknowledgements = (pending: Set<string>) => {
     if (exec) publishPendingAcknowledgements(exec, pending);
   };
-  const [chartDisclosure, setChartDisclosure] = useState<{ templateId: string; binding: ChartBinding | null } | null>(null);
+  const [chartDisclosure, setChartDisclosure] = useState<{ templateId: string | null; binding: ChartBinding | null } | null>(null);
   const disclosureCancelRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -734,12 +734,12 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
     returnFocusRef.current = trigger;
     setChartDisclosure({ templateId, binding });
   };
-  const reviewChartBinding = (templateId: string, trigger: HTMLElement) => {
+  const reviewChartBinding = (templateId: string | null, trigger: HTMLElement) => {
     returnFocusRef.current = trigger;
     setChartDisclosure({ templateId, binding: null });
   };
   const closeChartDisclosure = (continueSetup: boolean) => {
-    if (continueSetup && chartDisclosure?.binding) patch(chartDisclosure.templateId, { chartBinding: chartDisclosure.binding });
+    if (continueSetup && chartDisclosure?.templateId && chartDisclosure.binding) patch(chartDisclosure.templateId, { chartBinding: chartDisclosure.binding });
     setChartDisclosure(null);
   };
   const acknowledgeVenue = async (venue: string, kind: HeldAckKind) => {
@@ -894,6 +894,8 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
       </div>
 
       <label style={{display:"block",marginTop:12}}><input type="checkbox" checked={riskAutoSend} onChange={(e) => setRiskAutoSend(e.target.checked)} /> Auto-send Chart Risk Entry on release / second click without preview confirmation</label>
+      {liveVenues.some(v => v.broker === "mexc") && <Button type="button" style={{ marginTop: 8 }}
+        onClick={e => reviewChartBinding(null, e.currentTarget)}>Review MEXC Live Chart Risk Entry</Button>}
       <SettingsActions>
         <Button
           variant="primary" size="md" data-testid="save" disabled={hasConflict}
@@ -906,25 +908,32 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
           Save
         </Button>
       </SettingsActions>
-      {chartDisclosure && <Dialog title="Chart Order Gesture disclosure" onClose={() => closeChartDisclosure(false)} width={540}>
+      {chartDisclosure && <Dialog title={chartDisclosure.templateId ? "Chart Order Gesture disclosure" : "MEXC Live Chart Risk Entry"}
+        onClose={() => closeChartDisclosure(false)} width={540}>
+          {chartDisclosure.templateId && (
           <p style={{ fontSize: 12, lineHeight: 1.5, color: palette.textMuted }}>
             The selected modifier + click places this STOP_LIMIT or LIT Action Template at the clicked chart price using the chart&apos;s Link Group Execution Venue.
             When a live order is held by eTape, there is no broker order or protection before the trigger. eTape watches primary moomoo OpenD
             Last-Eligible Prints; if the engine or feed disconnects, trigger evaluation pauses and requires manual Resume.
           </p>
+          )}
           <p style={{ fontSize: 12, lineHeight: 1.5, color: palette.textMuted }}>
             Settings acknowledges each named live account separately. Enablement applies to every order-entry method for that account and does not place an order.
             Paper/sim accounts do not require an acknowledgement. Stop-Limit and LIT each require a separate account acknowledgement. Enabling is immediate and remains enabled after closing
             Settings without saving template edits; template changes still require Save.
           </p>
+          {liveVenues.some(v => v.broker === "mexc") && <p style={{ fontSize: 12, lineHeight: 1.5, color: palette.textMuted }}>
+            On MEXC Live, Stop-Limit enables Chart Risk Entry. eTape holds the entry and protective stop. The stop needs a running engine, a fresh MEXC fair price and reconciled positions.
+            After restarting or reconnecting following a feed gap, resume the stop in Account → Open Orders.
+          </p>}
           <div role="group" aria-label="Live accounts" style={{ display: "flex", flexDirection: "column", gap: 6, margin: "12px 0" }}>
             {!venueStatuses ? <p role="status">Live account status unavailable. Reconnect to view accounts.</p>
               : liveVenues.length === 0 ? <p>No configured live accounts. Chart gestures can still be saved.</p>
-                : liveVenues.map((v) => <div key={v.venue} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
+                : liveVenues.filter(v => chartDisclosure.templateId || v.broker === "mexc").map((v) => <div key={v.venue} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
                     padding: 8, border: `1px solid ${palette.border}`, borderRadius: 4 }}>
                   <span>{v.broker} live · {v.venue}</span>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {(["STOP_LIMIT", "LIMIT_IF_TOUCHED"] as const).map((kind) => {
+                    {(["STOP_LIMIT", "LIMIT_IF_TOUCHED"] as const).filter(kind => chartDisclosure.templateId || kind === "STOP_LIMIT").map((kind) => {
                       const key = ackKey(v.venue, kind);
                       const enabled = kind === "STOP_LIMIT" ? v.heldStopLimitAcknowledged : v.heldLimitIfTouchedAcknowledged;
                       return enabled

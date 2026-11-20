@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -350,7 +351,23 @@ func (c *Core) Recover(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, env := range envs {
+	if history, ok := c.store.(perpetualRiskHistoryStore); ok {
+		for v, b := range c.brokers {
+			if !b.Capabilities().EngineHeldPerpetualRiskEntry {
+				continue
+			}
+			riskEvents, err := history.ReadExecPerpetualRiskOrderHistories(v)
+			if err != nil {
+				return err
+			}
+			envs = append(envs, riskEvents...)
+		}
+		sort.Slice(envs, func(i, j int) bool { return envs[i].Seq < envs[j].Seq })
+	}
+	for i, env := range envs {
+		if i > 0 && env.Seq == envs[i-1].Seq {
+			continue
+		}
 		ev, err := DecodeEvent(env.Kind, env.Payload)
 		if err != nil {
 			return err
@@ -490,6 +507,24 @@ func (c *Core) Recover(ctx context.Context) error {
 		if h.Trail != nil {
 			c.recoverTrail(ctx, o, foundBrokerOrders[id])
 			continue
+		}
+		if o.Perpetual != nil && h.ChildClientID != "" {
+			if journal, ok := c.brokers[o.Venue].(perpetualOrderJournal); ok && !slices.Contains(journal.PendingOrderIDs(), id) {
+				// The adapter records the child before its first exchange write.
+				// An unjournaled activation cannot have reached the venue.
+				if o.isPerpetualRiskStop() && !h.CancelRequested {
+					h.Phase, h.PausedReason = HeldPaused, "engine stopped before protective close; resume manually"
+					h.ChildClientID, h.ChildBrokerID = "", ""
+					if err := c.appendAndFold(HeldOrderChanged{V: o.Venue, OID: id, Held: h, Ts: c.now()}, SrcReconcile); err != nil {
+						return err
+					}
+					continue
+				}
+				if err := c.appendAndFold(OrderRejected{V: o.Venue, OID: id, Ts: c.now(), Reason: "engine stopped before perpetual order submission"}, SrcReconcile); err != nil {
+					return err
+				}
+				continue
+			}
 		}
 		switch h.Phase {
 		case HeldWaiting, HeldArmed:
@@ -727,6 +762,7 @@ func (c *Core) Run(ctx context.Context) error {
 			req.reply <- preview
 		case <-heldTimer.C():
 			c.expireHeldOrders(ctx)
+			c.checkPerpetualRiskStops(ctx)
 			c.refreshProtectionWarnings(ctx)
 		case <-priceTimer:
 			priceDeadline = 0
@@ -953,6 +989,9 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 		return c.handleSetActiveVenue(cm)
 	case ConfigureHeldDemand:
 		c.heldDemand = cm.Demand
+		for _, v := range c.venues {
+			c.syncPerpetualProtection(ctx, v)
+		}
 		return CmdAck{Accepted: true}
 	case ResumeHeldOrder:
 		return c.handleResumeHeld(ctx, cm)
@@ -1544,6 +1583,16 @@ func (c *Core) emitStatus() {
 func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 	if observed, ok := be.(PerpetualObservation); ok {
 		err := c.foldPerpetualObservation(observed)
+		if err == nil {
+			o := c.order(observed.OrderID)
+			if o.Held != nil {
+				if !o.Working() {
+					c.releaseHeld(o.ID)
+				} else if o.Held.ChildClientID != "" && o.Held.ChildBrokerID == "" {
+					err = c.recordHeldAcceptance(ctx, o, observed.BrokerOrderID)
+				}
+			}
+		}
 		if err != nil {
 			c.syslog("exec.perpetual", err.Error())
 		}
@@ -1633,24 +1682,8 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		}
 		if accepted, ok := e.(OrderAccepted); ok && before.Held != nil && before.Held.ChildClientID != "" &&
 			(before.Held.Phase == HeldActivating || before.Held.Phase == HeldCancelRequested || before.Held.CancelRequested) {
-			h := *before.Held
-			wasCancelRequested := before.Held.CancelRequested || before.Held.Phase == HeldCancelRequested
-			cancelUnknown := before.Action != nil && before.Action.Kind == ActionCancel && before.Action.Phase == ActionUnknown
-			sendCancel := wasCancelRequested && (!before.Held.CancelSent || cancelUnknown)
-			h.Phase, h.PausedReason, h.ChildBrokerID = HeldWorking, "", accepted.BrokerOrderID
-			if c.trailPositionChecks[before.Venue] != nil {
-				h.PausedReason = trailAttributionPending
-			}
-			if wasCancelRequested {
-				h.Phase, h.PausedReason, h.CancelRequested, h.CancelSent = HeldCancelRequested, "cancel requested", true, true
-			}
-			if err := c.appendAndFold(HeldOrderChanged{V: before.Venue, OID: before.ID, Held: h, Ts: c.now()}, SrcLocal); err != nil {
+			if err := c.recordHeldAcceptance(ctx, before, accepted.BrokerOrderID); err != nil {
 				c.syslog("exec.held", "persist child acceptance "+before.ID+": "+err.Error())
-			}
-			if sendCancel {
-				if b := c.brokers[before.Venue]; b != nil {
-					c.startVenueAction(ctx, b, before.Venue, before.ID, ActionCancel, ReplaceRequest{})
-				}
 			}
 		}
 		if id := e.OrderID(); id != "" {
@@ -1813,6 +1846,8 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		c.emitProjectedAccount(v)
 		if !e.observational {
 			c.setPositionsReady(v, true)
+			c.syncPerpetualProtection(ctx, v)
+			c.checkPerpetualRiskStops(ctx)
 			if err := c.confirmFlatRiskEntries(v, ""); err != nil {
 				c.syslog("exec.protection", err.Error())
 			}

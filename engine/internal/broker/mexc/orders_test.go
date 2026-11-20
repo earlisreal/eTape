@@ -166,6 +166,22 @@ func TestPlaceOrderBlocksUnsupportedAccountBeforePOST(t *testing.T) {
 	}
 }
 
+func TestPositionBoundCloseRejectsDifferentMEXCPositionBeforePOST(t *testing.T) {
+	p := `[{"symbol":"BTC_USDT","positionId":` + fixturePositionID + `,"positionType":1,"openType":1,"holdVol":4,"frozenVol":0}]`
+	c := fixture(t, func(w http.ResponseWriter, r *http.Request, _ []byte) {
+		if !snapshotFixture(w, r, p, oneWay) {
+			t.Errorf("unexpected request for stale position: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	})
+	req := exec.OrderRequest{Symbol: "PERP.MEXC.BTC_USDT", ClientOrderID: "ETclose", Side: exec.SideSell,
+		Type: exec.TypeMarket, TIF: exec.TIFIOC, Qty: 2,
+		Perpetual: &exec.PerpetualOrder{Multiplier: .0001, PositionID: "99"}}
+	if _, err := c.placeOrder(t.Context(), req, tradingRules(), 100_000); err == nil || !strings.Contains(err.Error(), "position changed") {
+		t.Fatalf("expected a position-cycle rejection, got %v", err)
+	}
+}
+
 func TestAmbiguousMEXCSubmitReconcilesPartialIOCWithProtection(t *testing.T) {
 	var posts atomic.Int32
 	var confirmed atomic.Bool

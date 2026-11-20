@@ -197,6 +197,9 @@ func (c client) prepareOrder(ctx context.Context, req exec.OrderRequest, rules i
 		if stop != 0 || current == nil || current.Side != direction || current.MarginMode != isolated || !validExchangeID(current.ID) {
 			return orderSubmission{}, errors.New("MEXC close requires a matching isolated position")
 		}
+		if expected := req.Perpetual.PositionID; expected != "" && expected != current.ID.String() {
+			return orderSubmission{}, errors.New("the protected MEXC position changed before close")
+		}
 		held, _ := quantity(current.Volume)
 		frozen, valid := quantity(current.Frozen)
 		if !valid || req.Qty > held-frozen {

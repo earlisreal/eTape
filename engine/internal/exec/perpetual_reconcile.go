@@ -3,6 +3,7 @@ package exec
 import (
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // PerpetualSubmitDeclined identifies a request that definitely did not create
@@ -19,12 +20,21 @@ type PerpetualFill struct {
 	TsMs  int64
 }
 
+type perpetualOrderJournal interface {
+	PendingOrderIDs() []string
+}
+
+type perpetualRiskHistoryStore interface {
+	ReadExecPerpetualRiskOrderHistories(VenueID) ([]EventEnvelope, error)
+}
+
 // PerpetualObservation contains all fills accounted for by the exchange's
 // order status. The adapter retains its journal entry until Persisted is true.
 type PerpetualObservation struct {
 	Venue         VenueID
 	OrderID       string
 	BrokerOrderID string
+	PositionID    string
 	Status        OrderStatus
 	Fills         []PerpetualFill
 	Rejection     string
@@ -40,11 +50,15 @@ func (o PerpetualObservation) Terminal() bool {
 
 func (c *Core) recoverPerpetualOrders() error {
 	for venue, broker := range c.brokers {
-		pending, ok := broker.(interface{ PendingOrderIDs() []string })
+		pending, ok := broker.(perpetualOrderJournal)
 		if !ok {
 			continue
 		}
 		ids := pending.PendingOrderIDs()
+		ids = slices.DeleteFunc(ids, func(id string) bool {
+			o := c.order(id)
+			return o.Venue == venue && o.Perpetual != nil && o.Perpetual.LocalProtection
+		})
 		if len(ids) == 0 {
 			continue
 		}
@@ -96,6 +110,18 @@ func (c *Core) foldPerpetualObservation(report PerpetualObservation) error {
 	}
 	if report.BrokerOrderID == "" {
 		return errors.New("perpetual observation is missing the exchange order ID")
+	}
+	if o.Perpetual.LocalProtection && o.Perpetual.isRiskEntry() && o.Held != nil && len(report.Fills) != 0 && report.PositionID != "" {
+		h := *o.Held
+		if h.PerpetualPositionID != "" && h.PerpetualPositionID != report.PositionID {
+			return errors.New("MEXC entry reported a different position ID during reconciliation")
+		}
+		if h.PerpetualPositionID == "" {
+			h.PerpetualPositionID = report.PositionID
+			if err := c.appendAndFold(HeldOrderChanged{V: o.Venue, OID: o.ID, Held: h, Ts: c.now()}, SrcReconcile); err != nil {
+				return err
+			}
+		}
 	}
 	if o.Status == StatusSubmitted {
 		if err := c.appendAndFold(OrderAccepted{V: o.Venue, OID: o.ID, Ts: c.now(), BrokerOrderID: report.BrokerOrderID}, SrcReconcile); err != nil {

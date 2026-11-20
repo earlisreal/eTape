@@ -28,6 +28,12 @@ type liveAPI struct {
 	quotes sync.Map
 }
 
+func (a *Live) Capabilities() exec.Capabilities {
+	caps := a.Adapter.Capabilities()
+	caps.EngineHeldPerpetualRiskEntry = true
+	return caps
+}
+
 func NewLive(venue exec.VenueID, cr creds.Pair, clk clock.Clock, path string, data *market.Client) (*Live, error) {
 	if cr.KeyID == "" || cr.SecretKey == "" || data == nil {
 		return nil, errors.New("MEXC Live requires Futures credentials and market data")
@@ -109,6 +115,9 @@ func (a *liveAPI) Observe(ctx context.Context, req exec.OrderRequest) (exec.Perp
 	}
 	status := [...]exec.OrderStatus{1: exec.StatusAccepted, 2: exec.StatusAccepted, 3: exec.StatusFilled, 4: exec.StatusCanceled, 5: exec.StatusRejected}
 	report := exec.PerpetualObservation{BrokerOrderID: order.ID.String(), Status: status[order.State]}
+	if validExchangeID(order.PositionID) {
+		report.PositionID = order.PositionID.String()
+	}
 	for _, raw := range state.Fills {
 		qty, _ := quantity(raw.Volume)
 		price, _ := raw.Price.Float64()
@@ -175,7 +184,7 @@ func (a *liveAPI) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Po
 		used, _ := p.InitialMargin.Float64()
 		seen[p.Symbol] = true
 		positions = append(positions, exec.Position{Symbol: symbol, Qty: qty, AvgPrice: avg, OpenedMs: p.OpenedMs,
-			Multiplier: rules.ContractSize(), Leverage: p.Leverage, MarginUsed: used})
+			Multiplier: rules.ContractSize(), Leverage: p.Leverage, MarginUsed: used, BrokerPositionID: p.ID.String()})
 	}
 	var orders []exec.Order
 	for _, raw := range state.Orders {

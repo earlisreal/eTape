@@ -111,6 +111,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (rootRef.current)
             rootRef.current.style.display = "none"; pillLayer.current?.clear(); pillLayer.current?.sync(); };
         const editable = () => !!document.activeElement?.closest("input,textarea,select,[contenteditable='true']");
+        const livePerpetual = () => !!draft?.template.perpetual && latest.current.stores.exec.status()?.venues
+            .some(v => v.venue === venue && v.broker === "mexc" && v.env === "live");
         const contract = () => latest.current.stores.quote.get(latest.current.symbol)?.contract;
         const snap = (value: number) => {
             const rules = draft?.template.perpetual ? contract() : undefined;
@@ -175,12 +177,16 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (!v?.connected || v.reconcilePending || v.flattenPending || !v.positionDataReady)
                 return "Venue or position data unavailable; reconcile first.";
             if (v.env === "live" && !v.heldStopLimitAcknowledged)
-                return "Review / enable live accounts in Settings → Orders & hotkeys.";
+                return draft?.template.perpetual
+                    ? "Enable Stop-Limit in Settings → Orders & hotkeys → Review MEXC Live Chart Risk Entry."
+                    : "Review / enable live accounts in Settings → Orders & hotkeys.";
+            if (draft?.template.perpetual && v.env === "live" && status.global.maxDayLoss > 0)
+                return "The global USD Max Day Loss limit blocks live perpetual openings.";
             const sizing = sizingError();
             if (sizing) return sizing;
             if (context.error) return context.error;
             if (draft?.template.perpetual) {
-                if (v.broker !== "mexc-sim") return "Select the MEXC paper Execution Venue.";
+                if (v.broker !== "mexc-sim" && v.broker !== "mexc") return "Select a MEXC Execution Venue.";
                 if (!contract()?.tradingEnabled) return "Waiting for tradable contract rules.";
                 const quote = p.stores.quote.get(p.symbol);
                 if (!quote || !(quote.bid > 0 && quote.ask > 0)) return "Waiting for MEXC order book.";
@@ -207,6 +213,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 bar.style.right = `${(facade?.priceScaleWidth() ?? 60) + 8}px`;
             }
             const s = size(), error = invalid();
+            const isLivePerpetual = livePerpetual();
             const { up, down } = latest.current.chrome;
             const isShort = short();
             const qty = s ? draft.complete ? Math.min(draft.maxQty, s.qty) : s.qty : 0;
@@ -283,7 +290,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                         button.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${side === "buy" ? "BUY" : "SELL"} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
                         if (draft.template.perpetual)
                             button.title = side === "buy" ? `${leg(side)} entry · IOC limit ${limit ?? "pending"} · Last trade · 24 hours` :
-                                `${leg(side)} protective stop · Fair price · Confirmed fills`;
+                                `${leg(side)} protective stop · Fair price · Confirmed fills${isLivePerpetual ? " · Held by eTape" : ""}`;
                         button.setAttribute("aria-label", `${draft.template.perpetual ? leg(side) : side === "buy" ? "Buy" : "Sell"} trigger ${pxText(price)}; drag or use arrow keys to adjust`);
                         button.disabled = draft.busy || draft.unknown;
                     }
@@ -322,7 +329,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 const route = draft.route, age = route?.lastEligibleTsMs ? Date.now() - route.lastEligibleTsMs : Infinity;
                 const willTrigger = route?.hasTrustedEligiblePrint && age >= 0 && age <= 2000 && draft.buy !== undefined && (route.lastEligiblePrice ?? 0) >= draft.buy;
                 status.textContent = draft.unknown ? "Submit outcome unknown. Verify Orders; this setup cannot be resent." : draft.busy ? "Submitting linked pair…" :
-                    [error, draft.error !== error ? draft.error : "", willTrigger ? "BUY WILL TRIGGER NOW" : ""].filter(Boolean).join(" · ");
+                    [error, draft.error !== error ? draft.error : "", willTrigger ? "BUY WILL TRIGGER NOW" : "",
+                        isLivePerpetual ? `${venue} LIVE · eTape-held fair-price stop` : ""].filter(Boolean).join(" · ");
                 status.style.display = status.textContent ? "block" : "none";
                 status.style.color = draft.busy ? latest.current.chrome.text : latest.current.chrome.down;
             }
@@ -428,7 +436,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return;
             }
             if (isPerpetual && !p.symbol.startsWith("PERP.MEXC.")) {
-                push({ level: "warn", text: "Chart Risk Entry is available for MEXC paper perpetuals." });
+                push({ level: "warn", text: "Perpetual Chart Risk Entry is available on MEXC Live and MEXC paper." });
                 return;
             }
             if (template.auto) {

@@ -99,6 +99,30 @@ func TestReadExecOrderHistoriesForRestoresOnlyRequestedLiveOrders(t *testing.T) 
 	}
 }
 
+func TestReadExecPerpetualRiskOrderHistoriesRestoresLinkedStop(t *testing.T) {
+	const venue = "mexc-live"
+	s := openTestStore(t)
+	entry := exec.OrderSubmitted{Order: exec.Order{Venue: venue, ID: "entry", UpdatedMs: 1,
+		Perpetual: &exec.PerpetualOrder{ProtectionID: "stop", LocalProtection: true}}}
+	stop := exec.OrderSubmitted{Order: exec.Order{Venue: venue, ID: "stop", UpdatedMs: 2}}
+	paper := exec.OrderSubmitted{Order: exec.Order{Venue: "paper", ID: "paper", UpdatedMs: 3,
+		Perpetual: &exec.PerpetualOrder{ProtectionID: "paper-stop"}}}
+	for _, ev := range []exec.Event{entry, stop, paper, exec.OrderCanceled{V: venue, OID: "stop", Ts: 4}} {
+		kind, payload, err := exec.EncodeEvent(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AppendExecEvent(exec.EventEnvelope{Venue: string(ev.Venue()), OrderID: ev.OrderID(),
+			TsMs: ev.TsMs(), Source: "local", Kind: kind, Payload: payload}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.ReadExecPerpetualRiskOrderHistories(venue)
+	if err != nil || len(got) != 3 || got[0].OrderID != "entry" || got[1].OrderID != "stop" || got[2].Kind != "order_canceled" {
+		t.Fatalf("risk entry and stop history not restored: %+v, %v", got, err)
+	}
+}
+
 func TestAppendExecEventFillProjection(t *testing.T) {
 	s := openTestStore(t)
 	env := exec.EventEnvelope{TsMs: 2000, Source: "ws", Venue: "sim-1", OrderID: "ETc", Kind: "order_filled", Payload: []byte(`{}`)}

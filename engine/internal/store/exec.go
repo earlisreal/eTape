@@ -215,6 +215,38 @@ func (s *Store) ReadExecOrderHistoriesFor(orderIDs []string) ([]exec.EventEnvelo
 	return out, rows.Err()
 }
 
+// ReadExecPerpetualRiskOrderHistories restores the opening and linked protective
+// orders across day boundaries. Terminal stop rows prevent duplicate protection.
+func (s *Store) ReadExecPerpetualRiskOrderHistories(venue exec.VenueID) ([]exec.EventEnvelope, error) {
+	rows, err := s.db.Query(`WITH plans AS (
+		SELECT order_id, json_extract(payload, '$.Order.Perpetual.protectionId') AS stop_id
+		FROM exec_events
+		WHERE venue = ? AND type = 'order_submitted'
+			AND json_extract(payload, '$.Order.Perpetual.localProtection') = 1
+	), linked AS (
+		SELECT order_id FROM plans WHERE stop_id IS NOT NULL
+		UNION
+		SELECT stop_id FROM plans WHERE stop_id IS NOT NULL
+	)
+	SELECT e.seq, e.ts, e.source, e.venue, e.type, e.order_id, e.payload
+	FROM linked JOIN exec_events e ON e.order_id = linked.order_id
+	WHERE e.venue = ?
+	ORDER BY e.seq`, venue, venue)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []exec.EventEnvelope
+	for rows.Next() {
+		var e exec.EventEnvelope
+		if err := rows.Scan(&e.Seq, &e.TsMs, &e.Source, &e.Venue, &e.Kind, &e.OrderID, &e.Payload); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // QueryFills returns fills for a symbol in [fromMs, toMs), ascending — the chart-
 // annotation backfill query (Plan 6 exposes it on exec.fills).
 func (s *Store) QueryFills(symbol string, fromMs, toMs int64) ([]exec.FillRow, error) {

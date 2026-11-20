@@ -211,16 +211,18 @@ const (
 // HeldOrder is durable engine-side trigger state attached to the visible
 // parent order. ChildClientID is persisted before the first venue POST.
 type HeldOrder struct {
-	Trail           *TrailState `json:"trail,omitempty"`
-	Phase           HeldPhase   `json:"phase"`
-	DeadlineMs      int64       `json:"deadlineMs"`
-	ResumeAfterMs   int64       `json:"resumeAfterMs,omitempty"`
-	ChildClientID   string      `json:"childClientId,omitempty"`
-	ChildBrokerID   string      `json:"childBrokerId,omitempty"`
-	PausedReason    string      `json:"pausedReason,omitempty"`
-	CancelRequested bool        `json:"cancelRequested,omitempty"`
-	CancelSent      bool        `json:"cancelSent,omitempty"`
-	ResolvedQty     float64     `json:"resolvedQty,omitempty"`
+	Trail               *TrailState `json:"trail,omitempty"`
+	Phase               HeldPhase   `json:"phase"`
+	DeadlineMs          int64       `json:"deadlineMs"`
+	ResumeAfterMs       int64       `json:"resumeAfterMs,omitempty"`
+	ChildClientID       string      `json:"childClientId,omitempty"`
+	ChildBrokerID       string      `json:"childBrokerId,omitempty"`
+	PausedReason        string      `json:"pausedReason,omitempty"`
+	CancelRequested     bool        `json:"cancelRequested,omitempty"`
+	CancelSent          bool        `json:"cancelSent,omitempty"`
+	ResolvedQty         float64     `json:"resolvedQty,omitempty"`
+	PerpetualTriggered  bool        `json:"perpetualTriggered,omitempty"`
+	PerpetualPositionID string      `json:"perpetualPositionId,omitempty"`
 }
 
 type OrderActionKind string
@@ -297,16 +299,17 @@ type Fill struct {
 // (positive long, negative short). OpenedMs is the exact opening fill time when
 // known; zero means the position predates observed fills or its history is unavailable.
 type Position struct {
-	Venue           VenueID
-	Symbol          string
-	Qty             float64
-	AvgPrice        float64
-	DayBasis        float64
-	OpenedMs        int64
-	Multiplier      float64
-	Leverage        int
-	MarginUsed      float64
-	ProtectionPrice float64
+	Venue            VenueID
+	Symbol           string
+	Qty              float64
+	AvgPrice         float64
+	DayBasis         float64
+	OpenedMs         int64
+	Multiplier       float64
+	Leverage         int
+	MarginUsed       float64
+	ProtectionPrice  float64
+	BrokerPositionID string
 }
 
 type AccountSnapshot struct {

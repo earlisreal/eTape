@@ -42,6 +42,7 @@ interface Group { key: string; price: number; kind: ChartOrderMarker["kind"]; ma
 function priceText(price: number): string { return price < 1 ? price.toFixed(4) : price.toFixed(2); }
 function orderTitle(marker: ChartOrderMarker): string {
   if(marker.order.held?.trail && marker.kind!=="limit")return `${marker.order.side} ${trailModeLabel(marker.order)} TRAIL · ${marker.phase}`;
+  if (marker.kind === "stop") return `${marker.order.side} ${marker.order.leavesQty} contract stop · ${marker.phase}`;
   const type = marker.order.type === "LIMIT_IF_TOUCHED" ? "LIT" : marker.kind === "limit" ? "LIMIT" : "STOP-LIMIT";
   return `${marker.order.side} ${marker.order.leavesQty.toLocaleString("en-US")} ${type}${marker.order.riskEntry ? ` · Risk Entry ${marker.phase}` : marker.order.riskEntryId ? ` · Linked Protection ${marker.phase}` : ""}`;
 }
@@ -134,12 +135,13 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
   const sideText = (marker: ChartOrderMarker) => marker.order.side === "BUY" || marker.order.side === "COVER" ? "B" : "S";
   const tooltip = (marker: ChartOrderMarker, price = marker.price, proposed = false) => {
     if(marker.order.held?.trail && marker.kind!=="limit")return trailDetails(marker.order);
+    if (marker.kind === "stop") return `${marker.order.side} ${marker.order.leavesQty} contracts · fair price ${priceText(price)}\nHeld by eTape · Reduce-only market close · ${marker.phase}${marker.order.held?.pausedReason ? ` · ${marker.order.held.pausedReason}` : ""}`;
     const risk = riskProposal(marker, price);
     const quantity = marker.order.deferredPositionPct !== undefined && marker.kind !== "limit"
       ? `${marker.order.deferredPositionPct}% position · shares determined on trigger`
       : (proposed && risk.detail) || (marker.order.riskEntryId && !marker.order.leavesQty)
         ? `${(proposed ? risk.qty : risk.plannedQty ?? 0).toLocaleString("en-US")} planned shares`
-        : `${marker.order.leavesQty.toLocaleString("en-US")} shares`;
+        : `${marker.order.leavesQty.toLocaleString("en-US")} ${marker.order.symbol.startsWith("PERP.") ? "contracts" : "shares"}`;
     const limit = risk.limit ?? (marker.kind === "limit" ? price : marker.order.limitPrice);
     const type = marker.kind === "limit" ? "LIMIT" : marker.kind === "limit-if-touched" ? "LIT" : "STOP-LIMIT";
     const add=marker.order.riskEntry?.sharedEntryId && !marker.order.riskEntry.stopApplied?`\nShared stop ${priceText(marker.order.riskEntry.addStopPrice??0)} or higher on first fill`:"";

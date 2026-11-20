@@ -4,7 +4,7 @@ import { isWorking } from "../../wire/orderStatus";
 export interface ChartOrderMarker {
   order: Order;
   price: number;
-  kind: "limit" | "stop-limit" | "limit-if-touched";
+  kind: "limit" | "stop" | "stop-limit" | "limit-if-touched";
   draggable: boolean;
   phase: string;
 }
@@ -37,6 +37,10 @@ export function chartOrderMarkers(orders: Iterable<Order>, venue: string, symbol
     if (order.type === "LIMIT") {
       const actionPending = order.action?.phase === "REQUESTED" || order.action?.phase === "UNKNOWN";
       out.push({ order, price: order.limitPrice, kind: "limit", draggable: !order.held?.cancelRequested && !actionPending, phase: order.held?.phase ?? "" });
+      continue;
+    }
+    if (order.type === "STOP" && order.held && order.symbol.startsWith("PERP.MEXC.")) {
+      out.push({ order, price: order.stopPrice, kind: "stop", draggable: false, phase: order.held.phase });
       continue;
     }
     if (order.type !== "STOP_LIMIT" && order.type !== "LIMIT_IF_TOUCHED" && order.type!=="TRAILING_STOP") continue;
