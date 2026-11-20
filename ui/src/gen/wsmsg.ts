@@ -235,6 +235,7 @@ export interface Order {
   riskEntryId?: string;
   pendingProtectionPrice?: number /* float64 */;
   perpetualRisk?: PerpetualRiskTerms;
+  wholePositionProtection?: boolean;
 }
 export interface PerpetualRiskTerms {
   budget: number /* float64 */;
@@ -242,6 +243,8 @@ export interface PerpetualRiskTerms {
   autoLeverage?: boolean;
   openingMaxQty?: number /* int64 */;
   entryCushion: LimitCushion;
+  sharedStopId?: string;
+  wholePosition?: boolean;
 }
 export interface LimitCushion {
   value: number /* float64 */;
@@ -301,11 +304,32 @@ export interface QueryPerpetualOpeningArgs {
 export interface PerpetualOpeningLimit {
   leverage: number /* int */;
   maxContracts: number /* int64 */;
+  maxLeverage?: number /* int */;
+}
+export interface PerpetualNotionalTier {
+  maximum: number /* float64 */;
+  rate: number /* float64 */;
+  deduction: number /* float64 */;
+}
+export interface PerpetualRiskPosition {
+  qty: number /* float64 */;
+  avgPrice: number /* float64 */;
+  margin: number /* float64 */;
+  liquidationPrice: number /* float64 */;
+  leverage: number /* int */;
+}
+export interface PerpetualNotionalRisk {
+  mark: number /* float64 */;
+  minimumValue: number /* float64 */;
+  tiers: PerpetualNotionalTier[];
+  position: PerpetualRiskPosition;
 }
 export interface PerpetualOpeningPreview {
   long: PerpetualOpeningLimit;
   short: PerpetualOpeningLimit;
   reason?: string;
+  notional?: PerpetualNotionalRisk;
+  collateral?: number /* float64 */;
 }
 export interface SubmitPerpetualRiskEntryArgs {
   venue: string;
@@ -319,9 +343,11 @@ export interface SubmitPerpetualRiskEntryArgs {
   budget: number /* float64 */;
   maxQty: number /* float64 */;
   collateralPct: boolean;
+  sharedStopId?: string;
 }
 export interface HeldOrder {
   perpetualTriggered?: boolean;
+  perpetualArmPending?: boolean;
   trail?: TrailState;
   phase: string;
   deadlineMs: number /* int64 */;

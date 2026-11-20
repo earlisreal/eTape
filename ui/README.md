@@ -153,19 +153,21 @@ normal. Blockers and uncertain outcomes remain visible.
 
 Settings → Orders & hotkeys → Add → Chart Risk Entry creates a risk preset and
 hotkey. Choose **Auto (chart and gesture)** under Instrument and direction to
-use one preset on stock charts and MEXC perpetual charts. Focus a grouped
+use one preset on stock charts and MEXC or BingX perpetual charts. Focus a grouped
 chart, press the hotkey, then click the entry trigger and protective stop or
 drag between them. A lower stop gives a long. A higher stop gives a short on
-MEXC paper and live perpetuals. The preview shows the side, which locks on release or
-the second click. Auto uses a fixed risk amount in USD or USDT or a percentage
+supported perpetual venues. The preview shows the side, which locks on release or
+the second click. Auto uses a fixed risk amount in USD, USDT or VST or a percentage
 of cash or collateral. New perpetual presets default to **Auto** under
 **Perpetual leverage**. Choose a cap, or select **Fixed** to enter the isolated
 leverage yourself. Existing fixed-leverage presets retain their values. The
-preview includes estimated USDT loss, leverage and initial margin.
+preview includes estimated loss, leverage and initial margin. BingX Auto can
+use the exchange leverage ceiling. The preview shows any planned change to
+the contract's setting before arming.
 The selected Protection Mode applies to stocks. Only brief setup instructions and actionable
 warnings float over the bottom Volume area. The two axis chips expose planned
 shares, execution limits, custody, expiry and Enter/Escape shortcuts on hover.
-On MEXC, drag either pending line or use Up/Down on its price pill to resize the
+On MEXC or BingX, drag either pending line or use Up/Down on its price pill to resize the
 entry. BUY pairs with a lower SELL stop and SHORT pairs with a higher COVER stop.
 Either pending cancel button cancels the setup before the IOC is sent. Once the
 venue confirms a fill, the separate protective stop can be moved on its own.
@@ -177,6 +179,11 @@ Existing Protection Mode, Sell Limit Cushion and trailing progress are retained;
 one pending BUY (including a partial/cancel-pending remainder) blocks another add.
 Canceling an add leaves filled shares protected. Pending BUY hover details show
 the proposed shared stop; a stale protection owner requires a new chart draft.
+On BingX Virtual and Live, use the same chart gesture to add to a long or short
+with a healthy shared stop. The preview shows existing, added and total lots.
+The stop may stay at its current price or tighten on the first add fill. A
+partial sell or cover from the Order Ticket reduces the size shown on the
+whole-position stop. Use **Resume** in Account when the held stop is paused.
 A green BUY or red SELL Order Preview Line follows the proposed risk trigger,
 with a read-only Preview Price Label and no × action. Selected draft endpoints
 retain their Order Price Pills, including while another price is being selected

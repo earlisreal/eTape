@@ -15,17 +15,20 @@ var errPerpetualFairPrice = errors.New("waiting for a fresh fair price")
 // PerpetualOrder carries the admitted terms and optional closing instruction.
 // The core derives the multiplier from the selected adapter's catalog.
 type PerpetualOrder struct {
-	Leverage        int           `json:"leverage"`
-	Multiplier      float64       `json:"multiplier"`
-	ProtectionPrice float64       `json:"protectionPrice,omitempty"`
-	ProtectionID    string        `json:"protectionId,omitempty"`
-	RiskBudget      float64       `json:"riskBudget,omitempty"`
-	AutoLeverage    bool          `json:"autoLeverage,omitempty"`
-	OpeningMaxQty   int64         `json:"openingMaxQty,omitempty"`
-	LocalProtection bool          `json:"localProtection,omitempty"`
-	PositionID      string        `json:"positionId,omitempty"`
-	AccountIdentity string        `json:"accountIdentity,omitempty"`
-	EntryCushion    *LimitCushion `json:"entryCushion,omitempty"`
+	Leverage        int                      `json:"leverage"`
+	Multiplier      float64                  `json:"multiplier"`
+	ProtectionPrice float64                  `json:"protectionPrice,omitempty"`
+	ProtectionID    string                   `json:"protectionId,omitempty"`
+	RiskBudget      float64                  `json:"riskBudget,omitempty"`
+	AutoLeverage    bool                     `json:"autoLeverage,omitempty"`
+	OpeningMaxQty   int64                    `json:"openingMaxQty,omitempty"`
+	LocalProtection bool                     `json:"localProtection,omitempty"`
+	WholePosition   bool                     `json:"wholePosition,omitempty"`
+	LateAddClose    bool                     `json:"lateAddClose,omitempty"`
+	Notional        *instrument.NotionalRisk `json:"notional,omitempty"`
+	PositionID      string                   `json:"positionId,omitempty"`
+	AccountIdentity string                   `json:"accountIdentity,omitempty"`
+	EntryCushion    *LimitCushion            `json:"entryCushion,omitempty"`
 }
 
 func (o *PerpetualOrder) IsRiskEntry() bool {
@@ -51,7 +54,9 @@ type SubmitPerpetualRiskEntry struct {
 	Cushion        LimitCushion
 	Budget, MaxQty float64
 	CollateralPct  bool
+	SharedStopID   string
 	openingLimit   PerpetualOpeningLimit
+	openingTerms   PerpetualOpeningTerms
 }
 
 func (SubmitPerpetualRiskEntry) isCommand() {}
@@ -88,7 +93,11 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 	}
 	heldEntry := req.Type == TypeStopLimit && req.Perpetual != nil && req.Perpetual.IsRiskEntry()
 	validOrder := req.Type == TypeMarket || (req.Type == TypeLimit || heldEntry) && rules.ValidPrice(req.LimitPrice)
-	if req.Perpetual == nil || !rules.ValidQuantity(req.Qty) || !validOrder {
+	qtyRules := rules
+	if p := req.Perpetual; p != nil && p.WholePosition && p.LocalProtection && !p.IsRiskEntry() && req.Type == TypeMarket {
+		qtyRules.Minimum = qtyRules.QuantityStep
+	}
+	if req.Perpetual == nil || !qtyRules.ValidQuantity(req.Qty) || !validOrder {
 		return errors.New("use a valid contract count and market or tick-aligned limit price")
 	}
 	o := req.Perpetual
@@ -97,8 +106,8 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 		if !caps.EngineHeldPerpetualRiskEntry || !o.LocalProtection || !o.IsRiskEntry() {
 			return errors.New("attached protection on a live perpetual requires a supported Chart Risk Entry")
 		}
-		identity := c.heldLiveIdentity[req.Venue]
-		if identity == "" || o.AccountIdentity != identity || c.heldLiveAck[req.Venue] != identity {
+		identity := c.perpetualRiskIdentity(req.Venue)
+		if identity == "" || o.AccountIdentity != identity || !c.perpetualRiskAcknowledged(req.Venue) {
 			return errors.New("enable Stop-Limit for this live account in Orders & hotkeys")
 		}
 	}
@@ -125,15 +134,19 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 			return errors.New("close the existing position before reversing")
 		}
 		for _, order := range c.state.Venue(req.Venue).Orders {
+			if o.WholePosition && order.ID == o.ProtectionID && o.PositionID != "" {
+				continue // a linked add shares this stop
+			}
 			if order.ID != ownOrder && order.Symbol == req.Symbol && order.Working() &&
-				(o.IsRiskEntry() || order.Side == SideBuy || order.Side == SideShort) {
+				(o.IsRiskEntry() || order.Side == SideBuy || order.Side == SideShort ||
+					order.isPerpetualRiskStop() && order.Perpetual.WholePosition && order.Held.PerpetualTriggered) {
 				return errors.New("resolve the working perpetual entry first")
 			}
 		}
 		if caps.EngineHeldPerpetualRiskEntry && o.IsRiskEntry() {
 			for _, order := range c.state.Venue(req.Venue).ExternalOrders {
 				if order.Symbol == req.Symbol && order.Working() {
-					return errors.New("resolve the working MEXC Futures order first")
+					return errors.New("resolve the working exchange order first")
 				}
 			}
 		}
@@ -146,7 +159,7 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 			}
 		}
 		if o.ProtectionPrice != 0 {
-			if !rules.ValidPrice(o.ProtectionPrice) || position != 0 {
+			if !rules.ValidPrice(o.ProtectionPrice) || position != 0 && !o.WholePosition {
 				return errors.New("protection requires a flat symbol and a tick-aligned stop")
 			}
 			validSide := req.Side == SideBuy && price > o.ProtectionPrice || req.Side == SideShort && price < o.ProtectionPrice
@@ -155,6 +168,9 @@ func (c *Core) validatePerpetual(req *OrderRequest, ownOrder string) error {
 				return errors.New("protective stop is already crossed by the current fair price")
 			}
 			req.TIF = TIFIOC
+		}
+		if o.WholePosition {
+			return c.validateWholePositionEntry(*req, rules)
 		}
 		if o.RiskBudget > 0 {
 			if req.Qty > float64(rules.SizeRisk(o.RiskBudget, c.state.Venue(req.Venue).Account.AvailableCash, req.LimitPrice, o.ProtectionPrice, o.Leverage)) {
@@ -178,7 +194,7 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 	}
 	caps := broker.Capabilities()
 	if caps.ReconciledPerpetual && !caps.EngineHeldPerpetualRiskEntry {
-		return deny("perpetual Chart Risk Entry requires MEXC Live or the MEXC Perpetual Simulator")
+		return deny("this perpetual execution venue does not support Chart Risk Entry")
 	}
 	if !c.perpetualRiskAccountFresh(cm.Venue) {
 		return deny("fresh account data required")
@@ -192,14 +208,21 @@ func (c *Core) handlePerpetualRiskEntry(ctx context.Context, cm SubmitPerpetualR
 		return deny("review a tick-aligned price and contract quantity")
 	}
 	budget := cm.Budget
+	collateral := c.state.Venue(cm.Venue).Account.AvailableCash
+	_, whole := broker.(wholePositionRiskBroker)
+	if whole {
+		collateral = min(collateral, cm.openingTerms.Collateral)
+	}
 	if cm.CollateralPct {
 		if cm.Budget <= 0 || cm.Budget > 100 {
 			return deny("enter a collateral percentage from 0 to 100")
 		}
-		budget = c.state.Venue(cm.Venue).Account.AvailableCash * cm.Budget / 100
+		budget = collateral * cm.Budget / 100
 	}
-	collateral := c.state.Venue(cm.Venue).Account.AvailableCash
 	leverage := cm.Leverage
+	if whole {
+		return c.handleWholePositionRiskEntry(ctx, cm, rules, limit, budget, collateral)
+	}
 	if caps.EngineHeldPerpetualRiskEntry {
 		switch {
 		case cm.openingLimit.Leverage <= 0:

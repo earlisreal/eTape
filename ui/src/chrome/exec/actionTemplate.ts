@@ -38,6 +38,7 @@ export const defaultLeverageCap = 10;
 export interface PerpetualRiskLeverage {
   leverage?: number;
   leverageCap?: number;
+  bingxExchangeLeverage?: boolean;
 }
 export interface RiskEntryTemplate {
   auto?: PerpetualRiskLeverage | undefined;

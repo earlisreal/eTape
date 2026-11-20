@@ -186,10 +186,10 @@ it("keeps an Auto stock entry long and blocks a stop above it", async () => {
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.anything());
 });
 
-it("blocks an Auto entry on a perpetual chart outside MEXC", () => {
+it("blocks an Auto entry on an unsupported perpetual chart", () => {
     const { sendQuery } = mount(false, autoPreset, "PERP.BINANCE.BTCUSDT");
     act(() => { initiateChartRiskEntry(autoPreset); });
-    expect(screen.getByRole("alert").textContent).toContain("available on MEXC Live and MEXC paper");
+    expect(screen.getByRole("alert").textContent).toContain("Select a MEXC or BingX Chart Risk Entry venue");
     expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
     expect(sendQuery).not.toHaveBeenCalled();
 });

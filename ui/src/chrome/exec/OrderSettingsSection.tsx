@@ -304,6 +304,8 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
   const perpetualLeverage = t.kind === "risk" ? t.auto ?? t.perpetual : undefined;
   const autoLeverage = perpetualLeverage?.leverageCap !== undefined || perpetualLeverage?.leverage === undefined;
   const leverageValue = autoLeverage ? perpetualLeverage?.leverageCap ?? defaultLeverageCap : perpetualLeverage?.leverage ?? 1;
+  const autoSettings = (cap: number, exchange = perpetualLeverage?.bingxExchangeLeverage): PerpetualRiskLeverage =>
+    exchange ? { leverageCap: cap, bingxExchangeLeverage: true } : { leverageCap: cap };
   const patchLeverage = (settings: PerpetualRiskLeverage) => {
     if (t.kind !== "risk") return;
     if (t.auto) patch(t.id, { auto: settings });
@@ -371,7 +373,7 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
           <label style={fieldGroup}>Instrument and direction
             <select className="field" value={t.auto ? "auto" : t.perpetual?.side ?? "stock"} onChange={e => {
               const side = e.target.value;
-              const leverage = autoLeverage ? { leverageCap: leverageValue } : { leverage: leverageValue };
+              const leverage = autoLeverage ? autoSettings(leverageValue) : { leverage: leverageValue };
               const mode = side !== "stock" && t.mode === "BuyingPowerPct" ? "CashPct" : t.mode;
               if (side === "auto") patch(t.id, { auto: leverage, perpetual: undefined, mode });
               else if (side === "BUY" || side === "SHORT") patch(t.id, { auto: undefined, perpetual: { side, ...leverage }, protection: undefined, mode });
@@ -391,9 +393,13 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
             <label style={fieldGroup}>{autoLeverage ? "Leverage cap (×)" : "Isolated leverage (×)"}
               <input className="field" type="number" min={1} step={1} value={leverageValue} onChange={e => {
                 const value = Math.max(1, Math.trunc(Number(e.target.value)));
-                patchLeverage(autoLeverage ? { leverageCap: value } : { leverage: value });
+                patchLeverage(autoLeverage ? autoSettings(value) : { leverage: value });
               }} />
             </label>
+            {autoLeverage && <label style={fieldGroup}>
+              <span><input type="checkbox" checked={perpetualLeverage.bingxExchangeLeverage === true} onChange={e =>
+                patchLeverage(autoSettings(leverageValue, e.target.checked))} /> Use BingX exchange leverage ceiling</span>
+            </label>}
           </>}
           {!t.perpetual && <label style={fieldGroup}>Protection mode <select aria-label="Protection mode" className="field" value={t.protection?.mode??"FIXED"} onChange={e=>patch(t.id,{protection:e.target.value==="FIXED"?undefined:{...(t.protection??newTrailConfig()),mode:e.target.value,pricing:"CUSHION",cushion:t.sellCushion}})}>
             <option value="FIXED">Fixed</option><option value="PRICE">Trail Price</option><option value="PERCENT">Trail Percent</option><option value="CANDLE">Candle Trail</option></select></label>}
@@ -420,8 +426,8 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
               <option value="$">{t.auto && key === "buyCushion" ? "USD / USDT" : t.perpetual ? "USDT" : "$"}</option><option>%</option>
             </select>
           </label>)}
-          <small>{t.auto ? "Stocks use long entries and the selected Protection Mode. MEXC perpetuals use the gesture to choose long or short with a fixed fair-price stop." :
-            t.perpetual ? "24-hour entry. A fair-price stop covers the confirmed filled contracts on MEXC paper and live." : "Loss budget, excluding fees and execution risk. Whole shares; DAY until market data close. Both triggers are held by eTape."}</small>
+          <small>{t.auto ? "Stocks use long entries and the selected Protection Mode. MEXC and BingX perpetuals use the gesture to choose long or short with a fixed mark-price stop." :
+            t.perpetual ? "24-hour entry. A mark-price stop covers confirmed fills on MEXC and the entire protected position on BingX." : "Loss budget, excluding fees and execution risk. Whole shares; DAY until market data close. Both triggers are held by eTape."}</small>
         </div>
       ) : t.kind === "place" && t.type==="TRAILING_STOP" ? (
         <div style={fieldRow}>
@@ -896,6 +902,8 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
       <label style={{display:"block",marginTop:12}}><input type="checkbox" checked={riskAutoSend} onChange={(e) => setRiskAutoSend(e.target.checked)} /> Auto-send Chart Risk Entry on release / second click without preview confirmation</label>
       {liveVenues.some(v => v.broker === "mexc") && <Button type="button" style={{ marginTop: 8 }}
         onClick={e => reviewChartBinding(null, e.currentTarget)}>Review MEXC Live Chart Risk Entry</Button>}
+      {liveVenues.some(v => v.broker === "bingx-live") && <Button type="button" style={{ marginTop: 8 }}
+        onClick={e => reviewChartBinding(null, e.currentTarget)}>Review BingX Live Chart Risk Entry</Button>}
       <SettingsActions>
         <Button
           variant="primary" size="md" data-testid="save" disabled={hasConflict}
@@ -908,7 +916,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
           Save
         </Button>
       </SettingsActions>
-      {chartDisclosure && <Dialog title={chartDisclosure.templateId ? "Chart Order Gesture disclosure" : "MEXC Live Chart Risk Entry"}
+      {chartDisclosure && <Dialog title={chartDisclosure.templateId ? "Chart Order Gesture disclosure" : liveVenues.some(v => v.broker === "bingx-live") ? "Live Perpetual Chart Risk Entry" : "MEXC Live Chart Risk Entry"}
         onClose={() => closeChartDisclosure(false)} width={540}>
           {chartDisclosure.templateId && (
           <p style={{ fontSize: 12, lineHeight: 1.5, color: palette.textMuted }}>
@@ -926,10 +934,13 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
             On MEXC Live, Stop-Limit enables Chart Risk Entry. eTape holds the entry and protective stop. The stop needs a running engine, a fresh MEXC fair price and reconciled positions.
             After restarting or reconnecting following a feed gap, resume the stop in Account → Open Orders.
           </p>}
+          {liveVenues.some(v => v.broker === "bingx-live") && <p style={{ fontSize: 12, lineHeight: 1.5, color: palette.textMuted }}>
+            On BingX Live, Stop-Limit enables Chart Risk Entry. eTape holds the stop and needs a running engine, fresh BingX mark price and reconciled position data. When triggered it sends a market close for the entire position, including same-side fills placed directly on BingX. Auto can change isolated leverage when arming a flat entry. Resume paused stops in Account → Open Orders.
+          </p>}
           <div role="group" aria-label="Live accounts" style={{ display: "flex", flexDirection: "column", gap: 6, margin: "12px 0" }}>
             {!venueStatuses ? <p role="status">Live account status unavailable. Reconnect to view accounts.</p>
               : liveVenues.length === 0 ? <p>No configured live accounts. Chart gestures can still be saved.</p>
-                : liveVenues.filter(v => chartDisclosure.templateId || v.broker === "mexc").map((v) => <div key={v.venue} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
+                : liveVenues.filter(v => chartDisclosure.templateId || v.broker === "mexc" || v.broker === "bingx-live").map((v) => <div key={v.venue} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
                     padding: 8, border: `1px solid ${palette.border}`, borderRadius: 4 }}>
                   <span>{v.broker} live · {v.venue}</span>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

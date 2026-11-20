@@ -172,16 +172,20 @@ func mapOrder(o exec.Order) wsmsg.Order {
 		cushion := o.RiskEntryCushion()
 		perpetualRisk = &wsmsg.PerpetualRiskTerms{Budget: o.Perpetual.RiskBudget, Leverage: o.Perpetual.Leverage,
 			AutoLeverage: o.Perpetual.AutoLeverage, OpeningMaxQty: o.Perpetual.OpeningMaxQty,
-			EntryCushion: wsmsg.LimitCushion{Value: cushion.Value, Unit: cushion.Unit}}
+			EntryCushion: wsmsg.LimitCushion{Value: cushion.Value, Unit: cushion.Unit}, WholePosition: o.Perpetual.WholePosition}
+		if o.Perpetual.WholePosition && o.Perpetual.PositionID != "" {
+			perpetualRisk.SharedStopID = o.Perpetual.ProtectionID
+		}
 	}
 	return wsmsg.Order{
 		Venue: string(o.Venue), ID: o.ID, Symbol: o.Symbol,
 		Side: sideToWire(o.Side), Type: orderTypeToWire(o.Type), TIF: tifToWire(o.TIF),
 		Session: sessionToWire(o.Session),
 		Qty:     o.Qty, DeferredPositionPct: o.DeferredPositionPct, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
-		PendingProtectionPrice: pendingProtectionPrice,
-		PerpetualRisk:          perpetualRisk,
-		Status:                 statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
+		PendingProtectionPrice:  pendingProtectionPrice,
+		PerpetualRisk:           perpetualRisk,
+		WholePositionProtection: o.Type == exec.TypeStop && o.Perpetual != nil && o.Perpetual.WholePosition,
+		Status:                  statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
 		AvgFillPrice: o.AvgFillPrice, RejectReason: o.RejectReason, ReplacesID: o.ReplacesID,
 		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs, Held: held, Action: action,
 		RiskEntry: risk, RiskEntryID: o.RiskEntryID,
@@ -196,8 +200,8 @@ func mapOrderAction(a exec.OrderAction) *wsmsg.OrderAction {
 
 func mapHeldOrder(h exec.HeldOrder) *wsmsg.HeldOrder {
 	return &wsmsg.HeldOrder{Phase: string(h.Phase), DeadlineMs: h.DeadlineMs, ChildClientID: h.ChildClientID,
-		PerpetualTriggered: h.PerpetualTriggered,
-		ChildBrokerID:      h.ChildBrokerID, PausedReason: h.PausedReason, CancelRequested: h.CancelRequested, ResolvedQty: h.ResolvedQty, Trail: mapTrail(h.Trail)}
+		PerpetualTriggered: h.PerpetualTriggered, PerpetualArmPending: h.PerpetualArmPending,
+		ChildBrokerID: h.ChildBrokerID, PausedReason: h.PausedReason, CancelRequested: h.CancelRequested, ResolvedQty: h.ResolvedQty, Trail: mapTrail(h.Trail)}
 }
 
 func mapClosedOrder(row exec.ClosedOrder) wsmsg.ClosedOrder {

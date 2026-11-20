@@ -221,8 +221,13 @@ func (s *Store) ReadExecPerpetualRiskOrderHistories(venue exec.VenueID) ([]exec.
 	rows, err := s.db.Query(`WITH plans AS (
 		SELECT order_id, json_extract(payload, '$.Order.Perpetual.protectionId') AS stop_id
 		FROM exec_events
-		WHERE venue = ? AND type = 'order_submitted'
+		WHERE venue = ?1 AND type = 'order_submitted'
 			AND json_extract(payload, '$.Order.Perpetual.localProtection') = 1
+		UNION ALL
+		SELECT order_id, json_extract(payload, '$.Entry.Perpetual.protectionId')
+		FROM exec_events
+		WHERE venue = ?1 AND type = 'risk_entry_changed'
+			AND json_extract(payload, '$.Entry.Perpetual.lateAddClose') = 1
 	), linked AS (
 		SELECT order_id FROM plans WHERE stop_id IS NOT NULL
 		UNION
@@ -230,8 +235,8 @@ func (s *Store) ReadExecPerpetualRiskOrderHistories(venue exec.VenueID) ([]exec.
 	)
 	SELECT e.seq, e.ts, e.source, e.venue, e.type, e.order_id, e.payload
 	FROM linked JOIN exec_events e ON e.order_id = linked.order_id
-	WHERE e.venue = ?
-	ORDER BY e.seq`, venue, venue)
+	WHERE e.venue = ?1
+	ORDER BY e.seq`, venue)
 	if err != nil {
 		return nil, err
 	}

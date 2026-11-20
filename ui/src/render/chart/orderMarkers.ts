@@ -56,7 +56,7 @@ export function chartOrderMarkers(orders: Iterable<Order>, venue: string, symbol
       out.push({ order, price: order.limitPrice, kind: "limit", draggable: !perpetual && !held?.cancelRequested && !actionPending, phase: held?.phase ?? "" });
       continue;
     }
-    if (order.type === "STOP" && order.symbol.startsWith("PERP.MEXC.")) {
+    if (order.type === "STOP" && (order.symbol.startsWith("PERP.MEXC.") || order.wholePositionProtection)) {
       out.push({ order, price: order.stopPrice, kind: "stop", draggable: (!held || pretrigger) && !actionPending, phase: held?.phase ?? order.status });
       continue;
     }

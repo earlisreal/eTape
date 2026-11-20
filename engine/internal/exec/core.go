@@ -98,9 +98,10 @@ func (SetActiveVenue) isCommand()                {}
 // CmdAck is the synchronous accepted|blocked ack; order outcomes arrive later as
 // Updates.
 type CmdAck struct {
-	Accepted bool
-	Reason   string
-	OrderID  string
+	Accepted     bool
+	Reason       string
+	OrderID      string
+	perpetualArm *OrderRequest
 }
 
 type cmdReq struct {
@@ -166,6 +167,7 @@ type Core struct {
 	protectionChecks    map[VenueID]*protectionCheck
 	protectionRevision  map[VenueID]uint64
 	trailPositionChecks map[VenueID]*trailPositionCheck
+	recoveredWholeRisk  map[string]bool
 }
 
 // CoreConfig configures NewCore.
@@ -229,6 +231,7 @@ func NewCore(cfg CoreConfig) *Core {
 		protectionChecks:       make(map[VenueID]*protectionCheck),
 		protectionRevision:     make(map[VenueID]uint64),
 		trailPositionChecks:    make(map[VenueID]*trailPositionCheck),
+		recoveredWholeRisk:     make(map[string]bool),
 		heldLiveIdentity:       cloneVenueStrings(cfg.HeldStopLimitLiveIdentity),
 		heldLiveAck:            cloneVenueStrings(cfg.HeldStopLimitAcknowledged),
 		heldLiveLITAck:         cloneVenueStrings(cfg.HeldLimitIfTouchedAcknowledged),
@@ -279,6 +282,7 @@ func (c *Core) DoContext(ctx context.Context, cmd Command) CmdAck {
 			if entry.Side == SideShort {
 				entry.openingLimit = terms.Short
 			}
+			entry.openingTerms = terms
 			cmd = entry
 		}
 	}
@@ -400,6 +404,10 @@ func (c *Core) Recover(ctx context.Context) error {
 	}
 	for v, vs := range c.state.Venues {
 		for id, o := range vs.Orders {
+			if p := o.Perpetual; p != nil && p.WholePosition && p.IsRiskEntry() && vs.Orders[p.ProtectionID].ID == "" &&
+				(o.ExecutedQty > 0 || o.Working() && o.Held != nil && o.Held.ChildClientID != "") {
+				c.recoveredWholeRisk[id] = true
+			}
 			if !o.Working() || o.Action == nil || o.Action.Phase != ActionRequested {
 				continue
 			}
@@ -528,6 +536,12 @@ func (c *Core) Recover(ctx context.Context) error {
 			continue
 		}
 		h := *o.Held
+		if h.PerpetualArmPending {
+			if err := c.appendAndFold(OrderRejected{V: o.Venue, OID: id, Ts: c.now(), Reason: "engine stopped before arming was verified; review a new entry"}, SrcReconcile); err != nil {
+				return err
+			}
+			continue
+		}
 		if h.Trail != nil {
 			c.recoverTrail(ctx, o, foundBrokerOrders[id])
 			continue
@@ -755,7 +769,12 @@ func (c *Core) Run(ctx context.Context) error {
 			c.shutdownHeldOrders()
 			return ctx.Err()
 		case req := <-c.cmds:
-			req.reply <- c.handleCmd(ctx, req.cmd)
+			ack := c.handleCmd(ctx, req.cmd)
+			if ack.perpetualArm != nil {
+				go c.armWholePositionEntry(ctx, *ack.perpetualArm, req.reply)
+			} else {
+				req.reply <- ack
+			}
 			c.refreshProtectionWarnings(ctx)
 		case be := <-c.bevents:
 			c.handleBrokerEvent(ctx, be)
@@ -999,6 +1018,8 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 		return c.handleRiskEntry(ctx, cm)
 	case SubmitPerpetualRiskEntry:
 		return c.handlePerpetualRiskEntry(ctx, cm)
+	case finishPerpetualArm:
+		return c.finishWholePositionArm(ctx, cm)
 	case SubmitOrder:
 		return c.handleSubmit(ctx, cm)
 	case CancelOrder:
@@ -1611,6 +1632,9 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 	if observed, ok := be.(PerpetualObservation); ok {
 		err := c.foldPerpetualObservation(observed)
 		if err == nil {
+			err = c.applyPerpetualAddFill(c.order(observed.OrderID))
+		}
+		if err == nil {
 			o := c.order(observed.OrderID)
 			if o.Held != nil {
 				if !o.Working() {
@@ -1659,6 +1683,18 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 			return
 		}
 		h := *before.Held
+		if e.Deferred && before.isPerpetualRiskStop() && before.Perpetual.WholePosition {
+			if h.CancelRequested {
+				_ = c.appendAndFold(OrderCanceled{V: e.V, OID: e.OID, Ts: c.now()}, SrcLocal)
+				c.releaseHeld(e.OID)
+				return
+			}
+			h.Phase, h.ChildClientID, h.PausedReason = HeldWaiting, "", e.Reason
+			if err := c.appendAndFold(HeldOrderChanged{V: e.V, OID: e.OID, Held: h, Ts: c.now()}, SrcLocal); err != nil {
+				c.syslog("exec.held", "persist deferred BingX close: "+err.Error())
+			}
+			return
+		}
 		h.Phase, h.PausedReason = HeldUnknown, "activation outcome unknown: "+e.Reason
 		cancelNow := h.CancelRequested && !h.CancelSent
 		if cancelNow {

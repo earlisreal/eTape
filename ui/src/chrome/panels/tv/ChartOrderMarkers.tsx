@@ -53,7 +53,7 @@ function markerLabel(marker: ChartOrderMarker, price: number): string {
 function orderTitle(marker: ChartOrderMarker): string {
   if (marker.kind === "pending-protection") return `${markerSide(marker)} pending protective stop`;
   if(marker.order.held?.trail && marker.kind!=="limit")return `${marker.order.side} ${trailModeLabel(marker.order)} TRAIL · ${marker.phase}`;
-  if (marker.kind === "stop") return `${marker.order.side} ${marker.order.leavesQty} contract stop · ${marker.phase}`;
+  if (marker.kind === "stop") return `${marker.order.side} ${marker.order.leavesQty} ${marker.order.wholePositionProtection ? "lots · Whole-position stop" : "contract stop"} · ${marker.phase}`;
   const type = marker.order.type === "LIMIT_IF_TOUCHED" ? "LIT" : marker.kind === "limit" ? "LIMIT" : "STOP-LIMIT";
   return `${marker.order.side} ${marker.order.leavesQty.toLocaleString("en-US")} ${type}${marker.order.riskEntry ? ` · Risk Entry ${marker.phase}` : marker.order.riskEntryId ? ` · Linked Protection ${marker.phase}` : ""}`;
 }
@@ -138,12 +138,13 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const estimate = perpetualRiskSize({
         mode: "Dollar", value: terms.budget, buyCushion: terms.entryCushion,
         perpetual: { side: order.side === "SHORT" ? "SHORT" : "BUY", leverage: terms.leverage,
-          ...(terms.autoLeverage ? { leverageCap: terms.leverage } : {}) },
-      }, contract && terms.autoLeverage ? { ...contract, minLeverage: Math.max(contract.minLeverage, terms.leverage) } : contract,
+          ...(terms.autoLeverage && !terms.wholePosition ? { leverageCap: terms.leverage } : {}) },
+      }, contract && terms.autoLeverage && !terms.wholePosition ? { ...contract, minLeverage: Math.max(contract.minLeverage, terms.leverage) } : contract,
       protection ? order.stopPrice : price, protection ? price : order.pendingProtectionPrice, latest.current.availableCash ?? 0,
       terms.openingMaxQty);
+      const currency = latest.current.execStore?.accounts().find(a => a.venue === order.venue)?.currency ?? "USDT";
       return estimate?.qty ? {
-        detail: `${estimate.qty} planned contracts · Est. risk ${estimate.risk.toFixed(2)} USDT`,
+        detail: `${estimate.qty} planned ${terms.wholePosition ? "lots" : "contracts"} · Est. risk ${estimate.risk.toFixed(2)} ${currency}`,
         qty: estimate.qty, limit: estimate.buyLimit,
       } : { detail: "Choose a loss-side stop and a price that supports the minimum size.", qty: 0 };
     }
@@ -171,14 +172,23 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
   const tooltip = (marker: ChartOrderMarker, price = marker.price, proposed = false) => {
     if(marker.order.held?.trail && marker.kind!=="limit")return trailDetails(marker.order);
     const risk = riskProposal(marker, price);
-    if (marker.kind === "pending-protection")
-      return `${orderTitle(marker)} at ${markerPriceText(marker, price)}\n${proposed ? risk.detail : `${marker.order.qty} planned contracts`}\nFair price · Activates for confirmed fills`;
-    if (marker.kind === "stop") return `${marker.order.side} ${marker.order.leavesQty} contracts · fair price ${markerPriceText(marker, price)}\nReduce-only market close · ${marker.phase}${marker.order.held?.pausedReason ? ` · ${marker.order.held.pausedReason}` : ""}`;
+    if (marker.kind === "pending-protection") {
+      const terms = marker.order.perpetualRisk;
+      const behavior = terms?.sharedStopId ? "Updates shared stop on first confirmed fill" :
+        terms?.wholePosition ? "Whole-position stop · Held by eTape" : "Fair price · Activates for confirmed fills";
+      return `${orderTitle(marker)} at ${markerPriceText(marker, price)}\n${proposed ? risk.detail : `${marker.order.qty} planned ${terms?.wholePosition ? "lots" : "contracts"}`}\n${behavior}`;
+    }
+    if (marker.kind === "stop") {
+      const close = marker.order.wholePositionProtection
+        ? `${marker.order.leavesQty} lots · mark price ${markerPriceText(marker, price)}\nWhole-position market close · Held by eTape`
+        : `${marker.order.leavesQty} contracts · fair price ${markerPriceText(marker, price)}\nReduce-only market close`;
+      return `${marker.order.side} ${close} · ${marker.phase}${marker.order.held?.pausedReason ? ` · ${marker.order.held.pausedReason}` : ""}`;
+    }
     const quantity = marker.order.deferredPositionPct !== undefined && marker.kind !== "limit"
       ? `${marker.order.deferredPositionPct}% position · shares determined on trigger`
       : (proposed && risk.detail) || (marker.order.riskEntryId && !marker.order.leavesQty)
         ? `${(proposed ? risk.qty : risk.plannedQty ?? 0).toLocaleString("en-US")} planned shares`
-        : `${marker.order.leavesQty.toLocaleString("en-US")} ${marker.order.symbol.startsWith("PERP.") ? "contracts" : "shares"}`;
+        : `${marker.order.leavesQty.toLocaleString("en-US")} ${marker.order.perpetualRisk?.wholePosition ? "lots" : marker.order.symbol.startsWith("PERP.") ? "contracts" : "shares"}`;
     const limit = risk.limit ?? (marker.kind === "limit" ? price : marker.order.limitPrice);
     const type = marker.kind === "limit" ? "LIMIT" : marker.kind === "limit-if-touched" ? "LIT" : "STOP-LIMIT";
     const add=marker.order.riskEntry?.sharedEntryId && !marker.order.riskEntry.stopApplied?`\nShared stop ${priceText(marker.order.riskEntry.addStopPrice??0)} or higher on first fill`:"";

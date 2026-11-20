@@ -84,6 +84,9 @@ func heldStopLimitIdentities(cfg config.Config, credentialFile creds.File) map[e
 			continue
 		}
 		fields := []string{venue.ID, venue.Broker, venue.Env, venue.AccountID, cfg.OpenD.Addr(), venue.Credentials}
+		if venue.Broker == "bingx-live" {
+			fields = append(fields, "whole-position chart risk entry")
+		}
 		if pair, err := credentialFile.Get(venue.Credentials); err == nil {
 			fields = append(fields, pair.KeyID, pair.SecretKey)
 		}

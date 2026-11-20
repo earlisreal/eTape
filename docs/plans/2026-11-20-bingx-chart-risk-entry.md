@@ -1,141 +1,158 @@
 # BingX Chart Risk Entry
 
-Approved on 2026-11-20.
-
-## Exchange verification
-
-BingX Virtual accepted a sized reduce-only market close with the wrong
-position ID on a one-way, isolated BTC-USDT position. The opening IOC's
-position ID matched the signed position snapshot, and the simulated position
-was closed after the test. The documented position-ID close acts on the whole
-position. Enabling Chart Risk Entry on either venue requires an exchange route
-that enforces both position ID and quantity.
-[BingX adapter notes](../external-apis.md#usdt-perpetual-exchanges)
+Approved for BingX Virtual and BingX Live.
 
 ## Goal
 
-Use Chart Risk Entry on a BingX perpetual chart with either BingX Virtual or
-BingX Live selected in its Link Group. eTape holds the protective stop for both
-venues. Address each entry and stop to its original Execution Venue and account.
-Show VST for Virtual collateral and USDT for Live collateral. Both charts use
-the BingX public feed. [Execution Venue guide](../../README.md#usdt-perpetuals) ·
-[Link Group decision](../adr/0005-link-group-owned-execution-venue.md)
+Use Chart Risk Entry on a one-way, isolated BingX USDT perpetual with either
+BingX Virtual or BingX Live selected in its Link Group. Allow a protected
+position to grow through linked chart adds and shrink through partial closes.
+One eTape-held stop owns the entire BingX position until it goes flat. A
+same-side fill placed directly on BingX becomes part of that position and is
+included in the full close. Virtual collateral displays VST and Live displays
+USDT. [Link Group decision](../adr/0005-link-group-owned-execution-venue.md) ·
+[BingX position modes](https://bingx.com/en/support/articles/26343882391833-perpetual-futures-introducing-one-way-mode)
 
-## Entry and protection
+## Position-ID close verification
 
-- Start from flat with no working orders on that contract in one-way, isolated
-  mode. Reuse the two chart prices, risk budget, Limit Cushion, and Auto,
-  Perpetual long, and Perpetual short presets. Preview lots, base quantity,
-  estimated loss and margin, effective leverage, and the selected account.
-- Let the last trade trigger a price-capped immediate-or-cancel limit entry.
-  Keep both chart prices editable until dispatch. Reconcile the original client
-  order ID after an ambiguous response. Show protection as pending until actual
-  fills and Position Cycle ownership are confirmed. A terminal partial fill
-  protects the filled size. A zero fill retires the pending stop.
-- Trigger the fixed protective stop on BingX's fresh mark price and submit a
-  position-reducing market close. Allow stop edits while the bound position and
-  covered quantity remain valid and the edited stop clears liquidation. Cap
-  coverage at the confirmed chart entry quantity. Shrink it if the position
-  drops below that coverage. Show confirmed coverage and uncovered quantity in
-  Account. Allow protection to trigger while new entries are disarmed.
+A BingX Virtual BTC-USDT test in one-way, isolated mode opened 0.0002 BTC with
+an IOC, added 0.0002 BTC with a second IOC, and sold half through a sized
+reduce-only market order. Both IOC order records and the signed position
+snapshots reported the same position ID. A full market close by that ID filled
+the remaining 0.0002 BTC, with an exchange order ID that could be queried. A
+same-side reopening received a new position ID. BingX rejected the old ID with
+code 109400 and the replacement position's size stayed unchanged. The test
+contract was verified flat after cleanup.
+
+Use the dedicated full-position endpoint for the protective stop. The earlier
+Virtual test used the regular quantity-limited endpoint, which filled a
+reduce-only order carrying the wrong position ID. The regular endpoint serves
+manual partial closes on the current position.
+[BingX close-by-position-ID API](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#15-close-position-by-positionid) ·
+[Adapter notes](../external-apis.md#usdt-perpetual-exchanges)
+
+## Entry and shared stop
+
+- Start a new Position Cycle from a confirmed flat contract with no working
+  orders. Reuse the two chart prices, Limit Cushion, and Auto, Perpetual long,
+  and Perpetual short presets. Show the selected account, lots, base quantity,
+  estimated loss, margin and leverage in the preview.
+- Another same-side Chart Risk Entry adds to that Position Cycle when its stop
+  is healthy, covers the verified position, and has yet to trigger. Give the
+  add its own risk budget and quantity ceiling. Preview the current size, add
+  size, total size and proposed shared stop. Allow one pending entry or add
+  for the contract, including an unresolved IOC.
+- Use the last trade to trigger a price-capped IOC limit entry. Keep the chart
+  prices editable until dispatch. Reconcile by the original client order ID.
+  Confirm the opening order's fills and BingX position ID before assigning
+  protection. Base add coverage on confirmed fills. Retire a zero-fill add and
+  retain coverage after a partial fill.
+- Allow partial closes from the existing Order Ticket and reconcile manual
+  reductions and other changes reported by BingX. Show the latest confirmed
+  remaining position size on the shared stop. If the bound ID closes, retire
+  its stop. A subsequent opening has its own Position Cycle.
+- On a fresh mark-price crossing, cancel any waiting add. Reconcile any IOC
+  already sent before finalizing coverage, and account for late fills of that
+  linked order. Close the original position by its ID at market. Maintain
+  protection while new entries are disarmed. Show pending or unresolved
+  coverage and any residual exposure in Account.
 - After a restart or a disconnect that pauses protection, require **Resume**
-  after reconciling the original position and receiving a fresh mark. Evaluate
+  after confirming the original position and receiving a fresh mark. Evaluate
   the stop immediately on resume.
-  [Current MEXC Live workflow](../../engine/internal/exec/README.md#mexc-live-chart-risk-entry)
-- Treat Max Day Loss as a separate task. Under the current gate, an active cap
-  blocks BingX Live openings and protective reductions remain available.
-  [Current loss gate](../../README.md#usdt-perpetuals)
+- The existing Max Day Loss gate blocks BingX Live openings when enabled.
+  Protective closes remain available. Max Day Loss removal is a separate task.
+  [Current gates and workflow](../../README.md#usdt-perpetuals)
 
-## BingX Auto Leverage
+### Shared stop price for an add
 
-Size from the risk budget using the worst allowed IOC entry price, the chart
-stop, and estimated taker fees on both legs. For each eligible leverage, round
-down to valid BingX lots and check minimum order value, available collateral,
-account limits, and the contract's notional tier. Rank candidates by largest
-eligible quantity first and highest passing leverage at that quantity second.
-The preview shows estimated loss at the stop. A market close can fill away from
-that price.
+The new stop may stay where it is or tighten. For a
+long, the add's stop must be at or above the existing stop and below the add's
+entry trigger. For a short, the rule mirrors this. Keep the current stop until
+the first confirmed fill of the add. Apply the tighter price once and grow
+coverage as subsequent fills arrive.
+[Stock position adds specification](../../.scratch/chart-risk-position-adds/spec.md)
 
-Require margin to cover losses, maintenance, and closing fees at a mark beyond
-the stop. Start with eTape's existing minimum clearance of the larger of one tick
-or 0.10% of the IOC limit, using verified BingX maintenance tiers and deductions.
-Use the same calculation for preview, admission, and dispatch. A Fixed preset
-requires its chosen leverage to match the verified exchange setting and pass the
-liquidation check. [BingX maintenance model](https://bingx.com/en/support/articles/11263342608015/) ·
-[BingX liquidation threshold](https://bingx.com/en/support/articles/18418923135631)
+## Auto Leverage
 
-Honor saved numeric caps and offer an explicit option to use the exchange's
-maximum as the ceiling on BingX. Show the current and selected leverage in the
-read-only preview. In one-way mode, a leverage change applies to the account's
-contract in both directions and affects subsequent orders. Apply the selected
-setting at arming if it differs from the current one. Verify it and the opening
-capacity before accepting the arm. Recheck both at activation. The exchange
-setting persists if the entry expires or goes unfilled.
-[BingX Set Leverage](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#20-set-leverage)
+On a flat entry, size from the risk budget using the worst allowed IOC limit,
+the chart stop, and estimated taker fees on both legs. Round down to valid lots.
+Check the minimum order value, collateral, opening limits, and BingX's
+notional-based maintenance tiers and deductions. Auto chooses the largest
+eligible quantity and then the highest leverage for that quantity within the
+preset ceiling and the liquidation buffer. Honor saved numeric ceilings. The
+signed capacity at a different leverage is available after that setting is
+applied. Preview uses signed side leverage limits, maintenance tiers and
+collateral, then arming verifies the chosen size at the resulting leverage.
+Offer the exchange ceiling as an explicit option. A Fixed preset requires the
+chosen leverage to match the verified exchange setting.
+
+Require clearance beyond the stop of at least the greater of one tick and
+0.10% of the IOC limit. Preview the current and selected leverage without
+changing it. Verify the account is eligible and the contract is flat before
+applying the selected leverage at arming. Read it back and recheck leverage,
+capacity, collateral and clearance at activation. The one-way setting affects
+both directions and persists if the entry expires or goes unfilled. Estimated
+loss uses the stop price. A market close can fill away from it.
+[BingX maintenance model](https://bingx.com/en/support/articles/11263342608015/) ·
+[BingX leverage API](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#20-set-leverage)
+
+### Leverage for an add
+
+Size at the position's current verified leverage and
+check the preset, collateral, position limit and liquidation clearance against
+the combined position and shared stop. Use a smaller add if required. Reject
+the add if the position terms cannot be verified or a valid minimum add cannot
+fit. Compare the actual leverage, quantity and liquidation price after a fill.
+An add leaves exchange leverage writes to the flat-entry workflow.
 
 ## Implementation outline
 
-1. Extend the existing perpetual Chart Risk Entry preview and admission for the
-   selected BingX account. Reuse its signed margin, leverage, allowed size, and
-   account reads. Verify how to obtain the leverage and notional limits for a
-   proposed size, along with maintenance tiers and fees, in each environment.
-   The account's available opening volume read is for its current setting.
-   Check flat position, working orders, and the opening gates before any
-   leverage write. Reserve the account and contract against competing eTape
-   openings while arming. Reconcile an ambiguous write with an account read
-   before proceeding. Pause if fresh terms cannot support the reviewed entry.
-   Require a new review if an amendment needs different leverage. Compare the
-   resulting leverage and liquidation price against the broker's position
-   snapshot after a fill.
-   [Entry core](../../engine/internal/exec/perpetual.go) ·
-   [BingX orders](../../engine/internal/broker/bingx/orders.go) ·
-   [BingX trade API](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#39-position-and-maintenance-margin-ratio)
-2. Extend BingX reconciliation to prove the link between the IOC fills and the
-   exchange position ID. Verify whether an exact match in order detail or order
-   history supplies the same position ID as the signed position snapshot. Retain
-   pending ownership across restart if the ID arrives after terminal entry status.
-   Keep the Virtual account identity separate from Live custody acknowledgement.
-   Persist ownership before arming a stop. An external close and same-side reopen
-   must retire the original stop. If the original position cannot be proven, show
-   the exposure and require manual resolution.
-   [BingX account reads](../../engine/internal/broker/bingx/account.go) ·
-   [BingX order history](https://bingx-api.github.io/docs-v3/#/en/Swap/Trades%20Endpoints/Query%20Order%20history) ·
-   [Protection core](../../engine/internal/exec/perpetual_protection.go)
-3. Verify which one-way close request can enforce the original position ID at
-   BingX. A contract-only reduce-only order can hit a later same-side position
-   in the gap between the last account read and submission. BingX documents a
-   market close by position ID for the whole position, with no client order ID.
-   Prove that the selected close route enforces both the covered quantity and
-   the position ID, including rejection of a stale ID when a same-side position
-   has reopened. Preserve the close intent across restart, reconcile ambiguous
-   outcomes, and show remaining exposure after a terminal close.
-   [BingX close by position ID](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#15-close-position-by-positionid)
-4. Reuse the chart prices and Account states with the selected venue's VST or
-   LIVE badge. Include stop custody and automatic leverage changes in the
-   account-scoped Live review. Protect the original account if the Link Group
-   changes. Update the user and execution guides when shipping the feature.
+1. Reuse the existing perpetual entry gesture, side routing and chart price
+   editing. Tie add intents to the active position and shared stop. Carry the
+   original account and position ID through admission, fills, stop moves and
+   Resume. Apply the WebSocket contract changes in Go and regenerate TypeScript.
+   [Perpetual admission](../../engine/internal/exec/perpetual.go) ·
    [Chart Risk Entry UI](../../ui/src/chrome/panels/tv/ChartRiskEntry.tsx) ·
-   [Adapter and environment guide](../external-apis.md#usdt-perpetual-exchanges)
+   [Go WebSocket payloads](../../engine/internal/uihub/wsmsg/payloads.go)
+2. Adapt the held protection state to follow the verified position quantity
+   in both directions. Use one persistent whole-position close intent bound to
+   that position. Before a stop close, resolve the outstanding add and protect
+   any reconciled late fill belonging to it. Use the reviewed account's signed
+   position data to verify coverage after every fill, close and reconnect.
+   [Protection core](../../engine/internal/exec/perpetual_protection.go) ·
+   [BingX positions](../../engine/internal/broker/bingx/account.go) ·
+   [BingX orders](../../engine/internal/broker/bingx/orders.go)
+3. Journal the full close before calling BingX. Save its exchange order ID and
+   query the actual close order and fill quantity. After a lost response, resolve
+   the original position and available order or fill history before any retry.
+   Keep uncertain closes visible and block a new entry on the contract until
+   reconciled. A flat snapshot can retire the old stop. Attribute executions only
+   from matching order and fill evidence. Include whole-position ownership in the
+   Live acknowledgement and update the user and engine guides with the release.
+   [Perpetual order journal](../../engine/internal/broker/perps/adapter.go) ·
+   [BingX order lookup](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#9-query-order-details)
 
 ## Verification and rollout
 
-Use fixtures for both environments and a controlled chart session. Cover long
-and short, price and lot rounding, stale prices, changed account terms, partial
-and zero fills, lost entry and close responses, manual reductions, external
-close and reopen, restart and Resume, disarmed protection, and a close that
-leaves exposure. Verify that the public mark used by each chart is suitable for
-its Execution Venue. Check Link Group switches between VST and Live for account,
-orders, and collateral labels. Run the existing MEXC Chart Risk Entry tests.
+Use fixtures for both environments and a controlled chart session. Cover both
+directions, price and lot rounding, flat-entry Auto leverage, add sizing,
+first and partial fills, zero fills, liquidation limits, manual half-closes
+and direct same-side additions. Cover a stop crossing during a waiting or
+submitted add, partial close fills, lost replies, replay, restart and Resume,
+disarmed protection, external close and same-side reopen. Verify the public
+mark is suitable for each execution venue. Check that a Link Group change
+leaves the stop bound to the original account. Run existing stock and MEXC
+Chart Risk Entry regressions.
 
-Check a contract where the liquidation buffer limits leverage and one where
-higher leverage constrains quantity. Verify the preview leaves settings alone,
-only the reviewed setting is applied, ambiguous writes reconcile before dispatch,
-and a changed setting or insufficient available size pauses the entry.
+Verify the integrated flow on Virtual first. Check Live account reads and
+review Live enablement after Virtual acceptance. Any real order test requires
+separate authorization under repository rules. Disable new entries during a
+rollback while retaining controls for existing positions and stops.
+[Repository live-order rules](../../AGENTS.md#live-order-safety)
 
-Prove the workflow in Virtual first. Require confirmed position ownership,
-quantity-limited closes, and leverage readback before enabling each venue. Verify
-Live account reads and review Live enablement after Virtual acceptance. Any real
-order test needs separate authorization under the repository's live-order rules.
-If enabling entries is rolled back while a position remains open, keep its
-protection visible and manageable until it is closed or the trader explicitly
-cancels the stop. [Repository validation and live-order rules](../../AGENTS.md#live-order-safety)
+The Virtual adapter passed a BTC-USDT exchange cycle using its protected-entry
+preflight, a same-ID add, a two-lot manual reduction, and a two-lot
+whole-position close reconciled by broker order ID. The test left the account
+flat and restored the original isolated leverage. The Live account supplied
+signed one-way isolated opening terms. Live order submission is covered by
+fixtures.

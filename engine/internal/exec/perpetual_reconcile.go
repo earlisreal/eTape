@@ -13,6 +13,9 @@ type PerpetualSubmitDeclined struct{ Cause error }
 func (e PerpetualSubmitDeclined) Error() string { return e.Cause.Error() }
 func (e PerpetualSubmitDeclined) Unwrap() error { return e.Cause }
 
+// ErrPerpetualContractBusy means the signed broker write has yet to begin.
+var ErrPerpetualContractBusy = errors.New("resolve the outstanding perpetual order for this contract first")
+
 type PerpetualFill struct {
 	ID    string
 	Qty   float64
@@ -65,6 +68,8 @@ type PerpetualObservation struct {
 	OrderID       string
 	BrokerOrderID string
 	PositionID    string
+	OrderQty      float64 // exchange-confirmed size of a whole-position close
+	PositionGone  bool    // the target closed, with no attributable order acknowledgement
 	Status        OrderStatus
 	Fills         []PerpetualFill
 	Rejection     string
@@ -74,7 +79,7 @@ type PerpetualObservation struct {
 func (PerpetualObservation) isBrokerEvent() {}
 
 func (o PerpetualObservation) Terminal() bool {
-	return o.Rejection != "" || o.Status == StatusFilled || o.Status == StatusCanceled ||
+	return o.Rejection != "" || o.PositionGone || o.Status == StatusFilled || o.Status == StatusCanceled ||
 		o.Status == StatusExpired || o.Status == StatusRejected
 }
 
@@ -138,17 +143,49 @@ func (c *Core) foldPerpetualObservation(report PerpetualObservation) error {
 	if report.Rejection != "" {
 		return c.appendAndFold(OrderRejected{V: o.Venue, OID: o.ID, Ts: c.now(), Reason: report.Rejection}, SrcReconcile)
 	}
+	if o.isPerpetualRiskStop() && o.Perpetual.WholePosition {
+		if report.PositionID != o.Perpetual.PositionID {
+			return errors.New("position close does not identify the protected position")
+		}
+		if report.PositionGone {
+			return c.appendAndFold(OrderCanceled{V: o.Venue, OID: o.ID, Ts: c.now()}, SrcReconcile)
+		}
+		if !finitePositive(report.OrderQty) || report.OrderQty < o.ExecutedQty {
+			return errors.New("position close did not report a valid order size")
+		}
+		if o.Qty != report.OrderQty {
+			held := *o.Held
+			held.ResolvedQty = report.OrderQty
+			if err := c.appendAndFold(HeldOrderChanged{V: o.Venue, OID: o.ID, Held: held, Ts: c.now()}, SrcReconcile); err != nil {
+				return err
+			}
+			o = c.order(o.ID)
+		}
+	}
 	if report.BrokerOrderID == "" {
 		return errors.New("perpetual observation is missing the exchange order ID")
+	}
+	if o.Perpetual.WholePosition && o.Perpetual.IsRiskEntry() && len(report.Fills) != 0 && report.PositionID == "" {
+		return errors.New("BingX fills are awaiting a confirmed position ID")
 	}
 	if o.Perpetual.LocalProtection && o.Perpetual.IsRiskEntry() && o.Held != nil && len(report.Fills) != 0 && report.PositionID != "" {
 		h := *o.Held
 		if h.PerpetualPositionID != "" && h.PerpetualPositionID != report.PositionID {
-			return errors.New("MEXC entry reported a different position ID during reconciliation")
+			return errors.New("entry reported a different position ID during reconciliation")
 		}
 		if h.PerpetualPositionID == "" {
 			h.PerpetualPositionID = report.PositionID
-			if err := c.appendAndFold(HeldOrderChanged{V: o.Venue, OID: o.ID, Held: h, Ts: c.now()}, SrcReconcile); err != nil {
+			var event Event = HeldOrderChanged{V: o.Venue, OID: o.ID, Held: h, Ts: c.now()}
+			if o.Perpetual.WholePosition && o.Perpetual.PositionID != "" && o.Perpetual.PositionID != report.PositionID {
+				// The add landed after the originally protected position closed.
+				// Track a separate close for this fill's proven Position Cycle.
+				terms := *o.Perpetual
+				terms.ProtectionID, terms.LateAddClose = c.idgen.Next(), true
+				updated := o
+				updated.Held, updated.Perpetual, updated.UpdatedMs = &h, &terms, c.now()
+				event = RiskEntryChanged{Entry: updated}
+			}
+			if err := c.appendAndFold(event, SrcReconcile); err != nil {
 				return err
 			}
 		}

@@ -77,6 +77,18 @@ describe("OrderSettingsSection", () => {
       expect.objectContaining({ kind: "risk", auto: { leverageCap: 5 }, mode: "Dollar" }),
     ]));
   });
+  it("saves the BingX exchange ceiling option alongside the numeric cap", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("add-template"));
+    fireEvent.click(screen.getByTestId("add-risk"));
+    fireEvent.change(screen.getByLabelText("Instrument and direction"), { target: { value: "auto" } });
+    fireEvent.click(screen.getByLabelText("Use BingX exchange leverage ceiling"));
+    fireEvent.change(screen.getByLabelText("Leverage cap (×)"), { target: { value: "7" } });
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].templates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "risk", auto: { leverageCap: 7, bingxExchangeLeverage: true } }),
+    ]));
+  });
   it("lists templates and saves an edited label", () => {
     const { onSave } = wrap();
     const label = screen.getByTestId("tmpl-label-buy-5k") as HTMLInputElement;

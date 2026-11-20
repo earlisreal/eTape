@@ -223,6 +223,8 @@ type HeldOrder struct {
 	ResolvedQty         float64     `json:"resolvedQty,omitempty"`
 	PerpetualTriggered  bool        `json:"perpetualTriggered,omitempty"`
 	PerpetualPositionID string      `json:"perpetualPositionId,omitempty"`
+	PerpetualArmPending bool        `json:"perpetualArmPending,omitempty"`
+	PerpetualAddApplied bool        `json:"perpetualAddApplied,omitempty"`
 }
 
 type OrderActionKind string
@@ -255,6 +257,7 @@ type OrderAction struct {
 type Order struct {
 	Venue               VenueID
 	ID                  string
+	BrokerOrderID       string `json:",omitempty"`
 	Symbol              string
 	Side                Side
 	Type                OrderType
@@ -308,6 +311,8 @@ type Position struct {
 	Multiplier       float64
 	Leverage         int
 	MarginUsed       float64
+	IsolatedMargin   float64
+	LiquidationPrice float64
 	ProtectionPrice  float64
 	BrokerPositionID string
 }

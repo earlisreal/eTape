@@ -329,7 +329,7 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 			c.changeHeld(o, HeldPaused, err.Error(), false)
 			return
 		}
-		if p.LocalProtection {
+		if p.LocalProtection && !p.WholePosition {
 			child.Perpetual = &PerpetualOrder{Leverage: p.Leverage, Multiplier: p.Multiplier}
 		}
 	}
@@ -396,6 +396,13 @@ func (c *Core) postHeldChild(ctx context.Context, b Broker, req OrderRequest) {
 		return
 	}
 	if _, err := b.SubmitOrder(ctx, req); err != nil {
+		if req.Perpetual != nil && req.Perpetual.WholePosition && req.Type == TypeMarket && errors.Is(err, ErrPerpetualContractBusy) {
+			select {
+			case c.bevents <- HeldActivationOutcome{V: req.Venue, OID: req.ClientOrderID, Reason: err.Error(), Deferred: true}:
+			case <-ctx.Done():
+			}
+			return
+		}
 		var declined PerpetualSubmitDeclined
 		if errors.As(err, &declined) {
 			select {
@@ -572,6 +579,9 @@ func (c *Core) handleResumeHeld(ctx context.Context, cm ResumeHeldOrder) CmdAck 
 	if o.Held.Phase != HeldPaused {
 		return CmdAck{Accepted: false, Reason: "held order is not paused", OrderID: o.ID}
 	}
+	if o.Held.PerpetualArmPending {
+		return CmdAck{OrderID: o.ID, Reason: "wait for BingX arming to finish or review a new entry"}
+	}
 	if o.isPerpetualRiskStop() {
 		return c.resumePerpetualRiskStop(ctx, o)
 	}
@@ -603,6 +613,7 @@ func (c *Core) handleResumeHeld(ctx context.Context, cm ResumeHeldOrder) CmdAck 
 		c.releaseHeld(o.ID)
 		return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: o.ID}
 	}
+	delete(c.recoveredWholeRisk, o.ID)
 	c.requestProtectionBook(c.order(o.ID))
 	if o.Held.Trail != nil {
 		if o.Held.Trail.Triggered {

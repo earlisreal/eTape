@@ -26,10 +26,22 @@ type API interface {
 	Cancel(context.Context, exec.OrderRequest) error
 }
 
+// PositionCloser uses a broker-generated order ID for an exact full close.
+// The original request stays reserved even when the submission reply is lost.
+type PositionCloser interface {
+	PreparePositionClose(context.Context, exec.OrderRequest) (func(context.Context) (string, error), error)
+	ObservePositionClose(context.Context, exec.OrderRequest, string) (exec.PerpetualObservation, error)
+}
+
 type pending struct {
-	Request     exec.OrderRequest
-	Rejection   string
-	SubmittedMs int64 `json:",omitempty"`
+	Request       exec.OrderRequest
+	Rejection     string
+	SubmittedMs   int64  `json:",omitempty"`
+	BrokerOrderID string `json:",omitempty"`
+}
+
+func (p pending) isPositionClose() bool {
+	return p.Request.Perpetual.WholePosition && (p.Request.Side == exec.SideSell || p.Request.Side == exec.SideCover)
 }
 
 type journal struct {
@@ -46,6 +58,7 @@ type Adapter struct {
 
 	mu      sync.Mutex
 	journal journal
+	arming  map[string]bool
 }
 
 func New(venue exec.VenueID, clk clock.Clock, path, identity string, api API) (*Adapter, error) {
@@ -53,7 +66,7 @@ func New(venue exec.VenueID, clk clock.Clock, path, identity string, api API) (*
 		return nil, errors.New("incomplete perpetual venue configuration")
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
-	a := &Adapter{venue: venue, clock: clk, path: path, api: api, event: make(chan exec.BrokerEvent, 32),
+	a := &Adapter{venue: venue, clock: clk, path: path, api: api, event: make(chan exec.BrokerEvent, 32), arming: make(map[string]bool),
 		journal: journal{Identity: hash, Pending: make(map[string]pending)}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -104,6 +117,32 @@ func (a *Adapter) PendingOrderIDs() []string {
 	return ids
 }
 
+// AccountIdentity binds protection to the same adapter account across recovery.
+func (a *Adapter) AccountIdentity() string { return a.journal.Identity }
+
+// WithIdleContract serializes an arming preflight with order submission.
+func (a *Adapter) WithIdleContract(symbol string, fn func() error) error {
+	a.mu.Lock()
+	if a.arming[symbol] {
+		a.mu.Unlock()
+		return exec.ErrPerpetualContractBusy
+	}
+	for _, p := range a.journal.Pending {
+		if p.Request.Symbol == symbol {
+			a.mu.Unlock()
+			return exec.ErrPerpetualContractBusy
+		}
+	}
+	a.arming[symbol] = true
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		delete(a.arming, symbol)
+		a.mu.Unlock()
+	}()
+	return fn()
+}
+
 // RecordRejection restores a previously observed definitive submit rejection.
 // The poller still waits for the persisted terminal engine event.
 func (a *Adapter) RecordRejection(id, symbol, reason string) (bool, error) {
@@ -131,31 +170,37 @@ func (a *Adapter) SubmitOrder(ctx context.Context, req exec.OrderRequest) (exec.
 	reject := func(err error) (exec.OrderAck, error) {
 		return exec.OrderAck{}, exec.PerpetualSubmitDeclined{Cause: err}
 	}
-	if req.Venue != a.venue || req.ClientOrderID == "" || req.Perpetual == nil || req.Perpetual.ProtectionPrice != 0 {
+	if req.Venue != a.venue || req.ClientOrderID == "" || req.Perpetual == nil ||
+		req.Perpetual.ProtectionPrice != 0 && (!req.Perpetual.WholePosition || !req.Perpetual.LocalProtection || !req.Perpetual.IsRiskEntry()) {
 		return reject(errors.New("unsupported perpetual order"))
+	}
+	if a.arming[req.Symbol] {
+		return reject(exec.ErrPerpetualContractBusy)
 	}
 	for id, order := range a.journal.Pending {
 		if id == req.ClientOrderID {
 			return exec.OrderAck{}, errors.New("order already submitted; waiting for exchange reconciliation")
 		}
 		if order.Request.Symbol == req.Symbol {
-			return reject(errors.New("resolve the outstanding perpetual order for this contract first"))
+			return reject(exec.ErrPerpetualContractBusy)
 		}
 	}
-	send, err := a.api.Prepare(ctx, req)
+	p := pending{Request: req}
+	send, err := a.prepare(ctx, p)
 	if err != nil {
 		return reject(err)
 	}
 	if err := ctx.Err(); err != nil {
 		return reject(err)
 	}
-	p := pending{Request: req, SubmittedMs: a.clock.Now().UnixMilli()}
+	p.SubmittedMs = a.clock.Now().UnixMilli()
 	a.journal.Pending[req.ClientOrderID] = p
 	if err := a.save(); err != nil {
 		delete(a.journal.Pending, req.ClientOrderID)
 		return reject(fmt.Errorf("persist order before submit: %w", err))
 	}
-	if err := send(ctx); err != nil {
+	brokerID, err := send(ctx)
+	if err != nil {
 		var declined exec.PerpetualSubmitDeclined
 		if errors.As(err, &declined) {
 			p.Rejection = declined.Error()
@@ -168,8 +213,39 @@ func (a *Adapter) SubmitOrder(ctx context.Context, req exec.OrderRequest) (exec.
 		}
 		return exec.OrderAck{}, err
 	}
+	if brokerID != "" {
+		p.BrokerOrderID = brokerID
+		a.journal.Pending[req.ClientOrderID] = p
+		if err := a.save(); err != nil {
+			return exec.OrderAck{}, fmt.Errorf("persist whole-position close acknowledgement: %w", err)
+		}
+	}
 	// An acknowledgement can confirm receipt before the first order poll.
 	return exec.OrderAck{Accepted: true}, nil
+}
+
+func (a *Adapter) prepare(ctx context.Context, p pending) (func(context.Context) (string, error), error) {
+	if p.isPositionClose() {
+		if api, ok := a.api.(PositionCloser); ok {
+			return api.PreparePositionClose(ctx, p.Request)
+		}
+		return nil, errors.New("position-ID closes are unavailable")
+	}
+	send, err := a.api.Prepare(ctx, p.Request)
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context) (string, error) { return "", send(ctx) }, nil
+}
+
+func (a *Adapter) observe(ctx context.Context, p pending) (exec.PerpetualObservation, error) {
+	if p.isPositionClose() {
+		if api, ok := a.api.(PositionCloser); ok {
+			return api.ObservePositionClose(ctx, p.Request, p.BrokerOrderID)
+		}
+		return exec.PerpetualObservation{}, errors.New("position-ID closes are unavailable")
+	}
+	return a.api.Observe(ctx, p.Request)
 }
 
 func (a *Adapter) CancelOrder(ctx context.Context, id string) error {
@@ -179,6 +255,9 @@ func (a *Adapter) CancelOrder(ctx context.Context, id string) error {
 	if !ok || p.Rejection != "" {
 		return errors.New("no matching managed perpetual order")
 	}
+	if p.isPositionClose() {
+		return errors.New("a submitted whole-position close must reconcile")
+	}
 	return a.api.Cancel(ctx, p.Request)
 }
 
@@ -187,7 +266,7 @@ func (a *Adapter) CancelAll(ctx context.Context, symbol string) error {
 	defer a.mu.Unlock()
 	var result error
 	for _, p := range a.journal.Pending {
-		if p.Rejection == "" && (symbol == "" || p.Request.Symbol == symbol) {
+		if p.Rejection == "" && !p.isPositionClose() && (symbol == "" || p.Request.Symbol == symbol) {
 			result = errors.Join(result, a.api.Cancel(ctx, p.Request))
 		}
 	}
@@ -221,9 +300,15 @@ func (a *Adapter) snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Po
 
 func (a *Adapter) filterSnapshot(account exec.AccountSnapshot, positions []exec.Position, orders []exec.Order) (exec.AccountSnapshot, []exec.Position, []exec.Order) {
 	account.Venue, account.TsMs = a.venue, a.clock.Now().UnixMilli()
+	managedBrokerIDs := make(map[string]bool)
+	for _, p := range a.journal.Pending {
+		if p.BrokerOrderID != "" {
+			managedBrokerIDs[p.BrokerOrderID] = true
+		}
+	}
 	external := orders[:0]
 	for _, order := range orders {
-		if _, managed := a.journal.Pending[order.ID]; !managed {
+		if _, managed := a.journal.Pending[order.ID]; !managed && !managedBrokerIDs[order.BrokerOrderID] {
 			// Never adopt another client's order merely because its client
 			// ID uses the same prefix.
 			order.ID = "external:" + order.ID
@@ -272,7 +357,7 @@ func (a *Adapter) poll(ctx context.Context, connected bool) bool {
 		report := exec.PerpetualObservation{Venue: a.venue, OrderID: id, Rejection: p.Rejection}
 		if p.Rejection == "" {
 			var err error
-			report, err = a.api.Observe(ctx, p.Request)
+			report, err = a.observe(ctx, p)
 			if err != nil {
 				continue
 			}

@@ -648,6 +648,45 @@ try {
     }
     await perpetualPage.close();
   }
+  for (const venue of ["bingx-vst", "bingx-live"]) {
+    const target = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+    await target.goto(`http://127.0.0.1:${port}/?${venue}`);
+    await target.waitForFunction(() => window.chartPanelProbe?.isReady());
+    const host = await target.getByTestId("chart-host").boundingBox();
+    const chartRisk = async stopY => {
+      await target.mouse.move(host.x + 130, host.y + 210);
+      assert(await target.evaluate(() => window.chartPanelProbe.startRisk()), `${venue}: start Chart Risk Entry`);
+      await target.mouse.down();
+      await target.mouse.move(host.x + 180, host.y + stopY, { steps: 5 });
+      await target.mouse.up();
+    };
+    const account = venue === "bingx-vst" ? "VST" : "USDT";
+    await chartRisk(280);
+    const readout = target.locator("[data-risk-readout]");
+    await target.waitForFunction(() => document.querySelector("[data-risk-readout]")?.textContent.includes("3× → 8× at arming"));
+    assert.match(await readout.innerText(), new RegExp(`lots · Est\\. risk .* ${account} · 8× Auto`));
+    await target.keyboard.press("Enter");
+    await target.waitForFunction(() => window.chartPanelProbe.lastRiskSubmitted?.autoLeverage);
+    await target.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
+    const initial = await target.evaluate(() => window.chartPanelProbe.lastRiskSubmitted);
+    assert.equal(initial.venue, venue);
+    assert.equal(initial.leverage, 8);
+    await target.evaluate(() => window.chartPanelProbe.showBingXPosition(4));
+    const stop = target.getByTestId("order-label-sim-protection");
+    await stop.waitFor({ state: "visible" });
+    assert.match(await stop.getAttribute("title"), /SELL 4 lots.*Whole-position market close/s);
+    await chartRisk(268);
+    await target.waitForFunction(() => /4 existing \+ [\d,]+ added/.test(document.querySelector("[data-risk-readout]")?.textContent ?? ""));
+    await target.keyboard.press("Enter");
+    await target.waitForFunction(() => window.chartPanelProbe.lastRiskSubmitted?.sharedStopId === "sim-protection");
+    const add = await target.evaluate(() => window.chartPanelProbe.lastRiskSubmitted);
+    assert.equal(add.leverage, 8);
+    assert(add.stop >= initial.stop);
+    await target.evaluate(() => window.chartPanelProbe.showBingXPosition(2));
+    assert.match(await stop.getAttribute("title"), /SELL 2 lots.*Whole-position market close/s);
+    assert.deepEqual(await target.evaluate(() => window.chartPanelProbe.errors), []);
+    await target.close();
+  }
   assert.equal(productionErrors.length, 0, productionErrors.join("\n"));
   assert.equal(await productionPage.evaluate(() => window.chartPanelProbe.errors.length), 0, "Risk setup must not report chart paint errors");
 

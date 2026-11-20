@@ -1,6 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import type { AckMsg, StopLimitRoutePreview, SubmitRiskEntryArgs } from "../../../wire/contract";
 import type { PerpetualOpeningPreview } from "../../../gen/wsmsg";
+import { isWorking } from "../../../wire/orderStatus";
 import type { Stores } from "../../../data/registry";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import { nearestPriceLines, orderMarkerChipYs, snapOrderMarkerPrice } from "../../../render/chart/orderMarkers";
@@ -114,8 +115,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (rootRef.current)
             rootRef.current.style.display = "none"; pillLayer.current?.clear(); pillLayer.current?.sync(); };
         const editable = () => !!document.activeElement?.closest("input,textarea,select,[contenteditable='true']");
-        const livePerpetual = () => !!draft?.template.perpetual && latest.current.stores.exec.status()?.venues
-            .some(v => v.venue === venue && v.broker === "mexc" && v.env === "live");
+        const executionVenue = () => latest.current.stores.exec.status()?.venues.find(v => v.venue === venue);
+        const bingx = () => latest.current.symbol.startsWith("PERP.BINGX.") &&
+            ["bingx-vst", "bingx-live"].includes(executionVenue()?.broker ?? "");
+        const livePerpetual = () => !!draft?.template.perpetual && executionVenue()?.env === "live" &&
+            (executionVenue()?.broker === "mexc" || bingx());
+        const needsOpening = () => bingx() || livePerpetual();
         const openingLimit = () => {
             const side = perpetualSide();
             return side === "BUY" ? draft?.opening?.long : side === "SHORT" ? draft?.opening?.short : undefined;
@@ -134,9 +139,16 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             const p = latest.current;
             const qty = p.stores.exec.positions().find(pos => pos.venue === venue && pos.symbol === p.symbol)?.qty ?? 0;
             if (p.symbol.startsWith("PERP.")) {
-                const working = p.stores.exec.orders().some(({order}) => order.venue === venue && order.symbol === p.symbol &&
-                    ["SUBMITTED","ACCEPTED","PARTIALLY_FILLED"].includes(order.status));
-                return { qty, owner: undefined, stop: undefined, error: qty || working ? "Start from flat with no working orders." : undefined };
+                const working = p.stores.exec.orders().map(v => v.order)
+                    .filter(order => order.venue === venue && order.symbol === p.symbol && isWorking(order.status));
+                if (bingx() && qty) {
+                    const stop = working.find(o => o.wholePositionProtection && o.side === (qty > 0 ? "SELL" : "COVER") &&
+                        o.leavesQty === Math.abs(qty) && o.held && ["WAITING", "ARMED"].includes(o.held.phase) &&
+                        !o.held.childClientId && !o.held.perpetualTriggered && !o.held.cancelRequested);
+                    if (stop && working.length === 1) return { qty, owner: stop, stop, error: undefined };
+                    return { qty, owner: stop, stop, error: "An add needs the full shared stop and no other working orders." };
+                }
+                return { qty, owner: undefined, stop: undefined, error: qty || working.length ? "Start from flat with no working orders." : undefined };
             }
             return { ...riskEntryProtection(p.stores.exec.orders().map(v => v.order), qty, venue, p.symbol), qty };
         };
@@ -145,11 +157,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (draft?.template.perpetual) {
                 const side = perpetualSide();
                 if (!side) return null;
-                const live = livePerpetual(), terms = openingLimit();
-                if (live && !terms?.leverage) return null;
+                const opening = needsOpening(), terms = openingLimit();
+                if (opening && !terms?.leverage || bingx() && !draft.opening?.notional) return null;
                 const template = { ...draft.template, perpetual: { ...draft.template.perpetual, side } };
-                return perpetualRiskSize(template, contract(), draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0,
-                    reviewedOnly && draft.complete && !pointer ? draft.maxQty : undefined, live ? terms : undefined);
+                const available = Math.min(a?.availableCash ?? 0, draft.opening?.notional ? draft.opening.collateral ?? 0 : Infinity);
+                return perpetualRiskSize(template, contract(), draft.buy ?? 0, draft.sell ?? 0, available,
+                    reviewedOnly && draft.complete && !pointer ? draft.maxQty : undefined, opening ? terms : undefined, draft.opening?.notional);
             }
             const context = protection();
             const stock = draft && riskEntrySize(riskEntryAddTemplate(draft.template, context.owner, context.stop),
@@ -167,24 +180,26 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 if (draft.template.auto && draft.sell === draft.buy) return "Choose a stop at a different price from the entry.";
                 if (short() ? draft.sell <= draft.buy : draft.sell >= draft.buy)
                     return short() ? "Choose a stop above the short entry." : draft.template.perpetual ? "Choose a stop below the long entry." : "Sell trigger must be below buy trigger.";
-                if (livePerpetual() && draft.template.perpetual) {
-                    if (!draft.opening) return "Checking MEXC isolated leverage…";
+                if (needsOpening() && draft.template.perpetual) {
+                    if (!draft.opening) return "Checking isolated leverage and opening capacity…";
                     if (draft.opening.reason) return draft.opening.reason;
                     const terms = openingLimit();
-                    if (!terms?.leverage) return "MEXC isolated leverage is unavailable for this direction.";
-                    const { leverage, leverageCap } = draft.template.perpetual;
-                    if (leverageCap !== undefined || leverage === undefined) {
+                    if (!terms?.leverage) return "Isolated leverage is unavailable for this direction.";
+                    const { leverage, leverageCap, bingxExchangeLeverage } = draft.template.perpetual;
+                    if (bingx() && draft.opening.notional?.position.qty !== protection().qty)
+                        return "BingX position changed. Review a new chart entry.";
+                    if ((leverageCap !== undefined || leverage === undefined) && (!bingx() || protection().qty)) {
                         const cap = leverageCap ?? defaultLeverageCap;
-                        if (terms.leverage > cap)
-                            return `MEXC isolated leverage is ${terms.leverage}×, above this preset’s ${cap}× Auto cap. Lower the leverage on MEXC.`;
-                    } else if (leverage !== terms.leverage) {
-                        return `MEXC isolated leverage is ${terms.leverage}× and this preset uses ${leverage}×. Match the settings before sending.`;
+                        if (terms.leverage > cap && (!bingx() || !bingxExchangeLeverage))
+                            return `Isolated leverage is ${terms.leverage}×, above this preset’s ${cap}× Auto cap.`;
+                    } else if (leverageCap === undefined && leverage !== undefined && leverage !== terms.leverage) {
+                        return `Isolated leverage is ${terms.leverage}× and this preset uses ${leverage}×. Match the settings before sending.`;
                     }
-                    if (terms.maxContracts < (contract()?.minimum ?? 1))
-                        return "MEXC isolated risk tier cannot support the minimum contract size.";
+                    if ((!bingx() || protection().qty) && terms.maxContracts < (contract()?.minimum ?? 1))
+                        return "Isolated opening capacity is below the minimum size.";
                 }
                 const estimate = size();
-                if (estimate?.kind === "perpetual" && estimate.autoLeverage && !contract()?.riskTiers?.length)
+                if (!bingx() && estimate?.kind === "perpetual" && estimate.autoLeverage && !contract()?.riskTiers?.length)
                     return "Isolated risk tiers unavailable for Auto leverage.";
                 if (!estimate?.qty || (draft.complete && !draft.maxQty))
                     return draft.template.perpetual ? "Margin, leverage or the liquidation buffer cannot support the minimum contract size." : "Risk or funding budget rounds to zero shares.";
@@ -203,7 +218,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return "Venue or position data unavailable; reconcile first.";
             if (v.env === "live" && !v.heldStopLimitAcknowledged)
                 return draft?.template.perpetual
-                    ? "Enable Stop-Limit in Settings → Orders & hotkeys → Review MEXC Live Chart Risk Entry."
+                    ? `Review ${bingx() ? "BingX" : "MEXC"} Live Chart Risk Entry in Settings → Orders & hotkeys and enable Stop-Limit.`
                     : "Review / enable live accounts in Settings → Orders & hotkeys.";
             if (draft?.template.perpetual && v.env === "live" && status.global.maxDayLoss > 0)
                 return "The global USD Max Day Loss limit blocks live perpetual openings.";
@@ -211,8 +226,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (sizing) return sizing;
             if (context.error) return context.error;
             if (draft?.template.perpetual) {
-                if (v.broker !== "mexc-sim" && v.broker !== "mexc") return "Select a MEXC Execution Venue.";
+                if (!bingx() && v.broker !== "mexc-sim" && v.broker !== "mexc") return "Select a supported perpetual Execution Venue.";
                 if (!contract()?.tradingEnabled) return "Waiting for tradable contract rules.";
+                if (bingx() && draft.sharedEntryId !== (context.stop?.id ?? "")) return "Shared protection changed; review a new chart entry.";
+                if (bingx() && context.stop && draft.sell !== undefined &&
+                    (short() ? draft.sell > context.stop.stopPrice : draft.sell < context.stop.stopPrice))
+                    return "An add must keep or tighten the shared stop.";
                 return "";
             }
             if (draft && draft.sharedEntryId !== (context.owner?.id ?? "")) return "Shared protection changed; review a new chart risk entry.";
@@ -272,15 +291,26 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 path?.setAttribute("d", `M ${x} ${buyY} V ${sellY} M ${x - 4} ${headY} L ${x} ${sellY} L ${x + 4} ${headY}`);
                 path?.setAttribute("stroke", isShort ? up : down);
                 const amount = s?.qty ? s.risk * qty / s.qty : 0;
-                const unit = draft.template.perpetual ? "contracts" : "shares";
+                const unit = draft.template.perpetual ? bingx() ? "lots" : "contracts" : "shares";
+                const currency = bingx() && executionVenue()?.broker === "bingx-vst" ? "VST" : "USDT";
                 readout.textContent = sizingError() || !s ? `— ${unit} · Est. risk —` :
-                    `${qty.toLocaleString("en-US")} ${unit} · Est. risk ${s.kind === "perpetual" ? `${amount.toFixed(2)} USDT · ${s.leverage}×${s.autoLeverage ? " Auto" : ""}` : amount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
-                if (s?.kind === "perpetual" && qty > 0)
-                    readout.textContent += `\nEst. initial margin ${(s.margin * qty / s.qty).toFixed(2)} USDT`;
+                    `${qty.toLocaleString("en-US")} ${unit} · Est. risk ${s.kind === "perpetual" ? `${amount.toFixed(2)} ${currency} · ${s.leverage}×${s.autoLeverage ? " Auto" : ""}` : amount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
+                if (s?.kind === "perpetual" && qty > 0) {
+                    readout.textContent += `\nEst. initial margin ${(s.margin * qty / s.qty).toFixed(2)} ${currency}`;
+                    if (bingx()) {
+                        const base = Number(contract()?.multiplier ?? 0) * qty;
+                        const current = openingLimit()?.leverage;
+                        readout.textContent += ` · ${base.toLocaleString("en-US", { maximumFractionDigits: 10 })} ${contract()?.base ?? "base units"}`;
+                        if (current && current !== s.leverage) readout.textContent += `\nLeverage ${current}× → ${s.leverage}× at arming`;
+                    }
+                }
                 if (draft.template.auto && (perpetualSide() || (!draft.template.perpetual && draft.sell! < draft.buy!)))
                     readout.textContent = `${isShort ? "Short" : "Long"} · ${readout.textContent}`;
                 const context = protection();
-                if (context.stop) readout.textContent += `\n${context.qty.toLocaleString("en-US")} existing + ${qty.toLocaleString("en-US")} added = ${(context.qty + qty).toLocaleString("en-US")} total\nShared stop ${context.stop.stopPrice.toFixed(context.stop.stopPrice < 1 ? 4 : 2)} → ${draft.sell!.toFixed(draft.sell! < 1 ? 4 : 2)} on first fill · ${context.stop.held?.trail ? "trailing mode retained" : "Fixed"}`;
+                if (context.stop) {
+                    const existing = Math.abs(context.qty);
+                    readout.textContent += `\n${existing.toLocaleString("en-US")} existing + ${qty.toLocaleString("en-US")} added = ${(existing + qty).toLocaleString("en-US")} total\nShared stop ${pxText(context.stop.stopPrice)} → ${pxText(draft.sell!)} on first fill · ${context.stop.held?.trail ? "trailing mode retained" : "Fixed"}`;
+                }
                 readout.style.whiteSpace = "pre-line";
                 readout.style.maxWidth = `${Math.max(0, plotWidth - 16)}px`;
                 readout.style.left = `${Math.max(4, Math.min(x + 10, plotWidth - readout.offsetWidth - 12))}px`;
@@ -313,7 +343,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                         button.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${side === "buy" ? "BUY" : "SELL"} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
                         if (draft.template.perpetual)
                             button.title = side === "buy" ? `${leg(side)} entry · IOC limit ${limit ?? "pending"} · Last trade · 24 hours` :
-                                `${leg(side)} protective stop · Fair price · Confirmed fills${isLivePerpetual ? " · Held by eTape" : ""}`;
+                                `${leg(side)} protective stop · Fair price · ${bingx() ? "Whole position · Held by eTape" : `Confirmed fills${isLivePerpetual ? " · Held by eTape" : ""}`}`;
                         button.setAttribute("aria-label", `${draft.template.perpetual ? leg(side) : side === "buy" ? "Buy" : "Sell"} trigger ${pxText(price)}; drag or use arrow keys to adjust`);
                         button.disabled = draft.busy || draft.unknown;
                     }
@@ -353,7 +383,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 const willTrigger = route?.hasTrustedEligiblePrint && age >= 0 && age <= 2000 && draft.buy !== undefined && (route.lastEligiblePrice ?? 0) >= draft.buy;
                 status.textContent = draft.unknown ? "Submit outcome unknown. Verify Orders; this setup cannot be resent." : draft.busy ? "Submitting linked pair…" :
                     [error, draft.error !== error ? draft.error : "", willTrigger ? "BUY WILL TRIGGER NOW" : "",
-                        isLivePerpetual ? `${venue} LIVE · eTape-held fair-price stop` : ""].filter(Boolean).join(" · ");
+                        bingx() ? `${venue} ${isLivePerpetual ? "LIVE" : "VST"} · eTape-held whole-position stop` :
+                            isLivePerpetual ? `${venue} LIVE · eTape-held fair-price stop` : ""].filter(Boolean).join(" · ");
                 status.style.display = status.textContent ? "block" : "none";
                 status.style.color = draft.busy ? latest.current.chrome.text : latest.current.chrome.down;
             }
@@ -370,7 +401,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     if (draft !== current) return;
                     const terms = raw as PerpetualOpeningPreview | undefined;
                     current.opening = terms?.long && terms.short ? terms :
-                        { long: { leverage: 0, maxContracts: 0 }, short: { leverage: 0, maxContracts: 0 }, reason: "MEXC isolated risk terms unavailable." };
+                        { long: { leverage: 0, maxContracts: 0 }, short: { leverage: 0, maxContracts: 0 }, reason: "Isolated risk terms unavailable." };
                 }).finally(() => {
                     delete current.openingRequest;
                     if (draft !== current) return;
@@ -394,7 +425,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             try {
                 if (!current.template.perpetual)
                     current.route = await latest.current.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol, riskEntry: true }) as StopLimitRoutePreview;
-                else if (livePerpetual() && (!current.opening || current.opening.reason))
+                else if (needsOpening() && (!current.opening || current.opening.reason))
                     await readOpening(current, symbol);
             }
             catch {
@@ -432,6 +463,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 const ack = s.kind === "perpetual" ? await latest.current.sendCommand("SubmitPerpetualRiskEntry", {
                     venue, symbol, side: s.side, trigger: current.buy, stop: current.sell, leverage: s.leverage,
                     ...(s.autoLeverage ? { autoLeverage: true } : {}),
+                    ...(bingx() && current.sharedEntryId ? { sharedStopId: current.sharedEntryId } : {}),
                     cushion: current.template.buyCushion, budget: current.template.value, maxQty: Math.min(current.maxQty, s.qty),
                     collateralPct: current.template.mode !== "Dollar",
                 }) : await latest.current.sendCommand("SubmitRiskEntry", args);
@@ -449,7 +481,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 else {
                     current.busy = false;
                     current.error = ack.reason || "Pair rejected.";
-                    if (livePerpetual()) void readOpening(current, symbol);
+                    if (needsOpening()) void readOpening(current, symbol);
                     paint();
                 }
             }
@@ -478,8 +510,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 push({ level: "warn", text: "Choose a Chart Risk Entry preset for the chart's instrument type." });
                 return;
             }
-            if (isPerpetual && !p.symbol.startsWith("PERP.MEXC.")) {
-                push({ level: "warn", text: "Perpetual Chart Risk Entry is available on MEXC Live and MEXC paper." });
+            if (isPerpetual && !p.symbol.startsWith("PERP.MEXC.") && !bingx()) {
+                push({ level: "warn", text: "Select a MEXC or BingX Chart Risk Entry venue for this contract." });
                 return;
             }
             if (template.auto) {
@@ -495,7 +527,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             paint();
             const current = draft;
             if (current.template.perpetual) {
-                if (livePerpetual()) void readOpening(current, p.symbol);
+                if (needsOpening()) void readOpening(current, p.symbol);
                 return;
             }
             void p.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol: p.symbol, riskEntry: true }).then(raw => {

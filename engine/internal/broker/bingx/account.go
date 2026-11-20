@@ -14,15 +14,17 @@ import (
 )
 
 type position struct {
-	ID        json.RawMessage `json:"positionId"`
-	Symbol    string          `json:"symbol"`
-	Side      string          `json:"positionSide"`
-	Isolated  bool            `json:"isolated"`
-	Quantity  json.Number     `json:"positionAmt"`
-	Available json.Number     `json:"availableAmt"`
-	Average   json.Number     `json:"avgPrice"`
-	Margin    json.Number     `json:"initialMargin"`
-	Leverage  int             `json:"leverage"`
+	ID             json.RawMessage `json:"positionId"`
+	Symbol         string          `json:"symbol"`
+	Side           string          `json:"positionSide"`
+	Isolated       bool            `json:"isolated"`
+	Quantity       json.Number     `json:"positionAmt"`
+	Available      json.Number     `json:"availableAmt"`
+	Average        json.Number     `json:"avgPrice"`
+	Margin         json.Number     `json:"initialMargin"`
+	IsolatedMargin json.Number     `json:"margin"`
+	Liquidation    json.Number     `json:"liquidationPrice"`
+	Leverage       int             `json:"leverage"`
 }
 
 type order struct {
@@ -231,8 +233,14 @@ func (a *apiClient) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.
 			return state.Account, nil, nil, fmt.Errorf("invalid %s position values", a.env.label)
 		}
 		seen[p.Symbol] = true
+		isolatedMargin, _ := p.IsolatedMargin.Float64()
+		liquidation, liqErr := p.Liquidation.Float64()
+		if liqErr != nil || !p.Isolated {
+			liquidation = -1
+		}
 		positions = append(positions, exec.Position{Symbol: "PERP.BINGX." + p.Symbol, Qty: qty, AvgPrice: avg,
-			Multiplier: math.Pow10(-*terms.QtyDigits), Leverage: p.Leverage, MarginUsed: margin, BrokerPositionID: positionID(p.ID)})
+			Multiplier: math.Pow10(-*terms.QtyDigits), Leverage: p.Leverage, MarginUsed: margin, BrokerPositionID: positionID(p.ID),
+			IsolatedMargin: isolatedMargin, LiquidationPrice: liquidation})
 	}
 	var orders []exec.Order
 	for _, o := range state.Orders {
@@ -253,7 +261,7 @@ func (a *apiClient) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.
 			id = strings.ToUpper(o.Client)
 		}
 		price, _ := o.Price.Float64()
-		orders = append(orders, exec.Order{ID: id, Symbol: "PERP.BINGX." + o.Symbol,
+		orders = append(orders, exec.Order{ID: id, BrokerOrderID: o.id(), Symbol: "PERP.BINGX." + o.Symbol,
 			Side: side(o.Side == "BUY", o.ReduceOnly), Status: exec.StatusAccepted, Type: exec.TypeLimit,
 			Qty: qty, ExecutedQty: filled, LeavesQty: qty - filled, LimitPrice: price, CreatedMs: o.Time})
 	}

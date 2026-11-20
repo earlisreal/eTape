@@ -21,7 +21,7 @@ import (
 )
 
 func (a *apiClient) Prepare(ctx context.Context, req exec.OrderRequest) (func(context.Context) error, error) {
-	if req.Perpetual != nil && req.Perpetual.PositionID != "" {
+	if req.Perpetual != nil && req.Perpetual.PositionID != "" && !req.Perpetual.WholePosition {
 		return nil, errors.New("BingX position-bound quantity-limited closes are not verified")
 	}
 	if err := a.refreshCatalog(ctx); err != nil {
@@ -79,7 +79,18 @@ func (a *apiClient) Prepare(ctx context.Context, req exec.OrderRequest) (func(co
 			held, available, leverage = qty, math.Abs(avail), p.Leverage
 		}
 	}
-	if reduce {
+	if req.Perpetual.WholePosition {
+		if reduce || !req.Perpetual.LocalProtection || !req.Perpetual.IsRiskEntry() || req.Type != exec.TypeLimit || req.TIF != exec.TIFIOC {
+			return nil, errors.New("invalid BingX Chart Risk Entry child")
+		}
+		opening, err := a.riskOpening(ctx, id.Native, item, state)
+		if err != nil {
+			return nil, err
+		}
+		if err := a.checkRiskOpening(req, terms, opening, true); err != nil {
+			return nil, err
+		}
+	} else if reduce {
 		if item.Close != "true" || held == 0 || buy != (held < 0) || req.Qty > min(math.Abs(held), available) {
 			return nil, fmt.Errorf("%s close exceeds the confirmed isolated position available to reduce", a.env.label)
 		}
@@ -118,25 +129,11 @@ func (a *apiClient) Prepare(ctx context.Context, req exec.OrderRequest) (func(co
 }
 
 func (a *apiClient) checkOpening(ctx context.Context, symbol string, buy bool, qty float64, req exec.OrderRequest, available float64, item contract) error {
-	params := func() url.Values { return url.Values{"symbol": {symbol}} }
-	var margin struct {
-		Type string `json:"marginType"`
-	}
-	if err := a.request(ctx, http.MethodGet, "/openApi/swap/v2/trade/marginType", params(), true, &margin); err != nil {
+	if err := a.checkIsolated(ctx, symbol); err != nil {
 		return err
 	}
-	if margin.Type != "ISOLATED" {
-		return fmt.Errorf("set this %s contract to isolated margin", a.env.label)
-	}
-	var limit struct {
-		Long     int         `json:"longLeverage"`
-		Short    int         `json:"shortLeverage"`
-		LongMax  int         `json:"maxLongLeverage"`
-		ShortMax int         `json:"maxShortLeverage"`
-		LongQty  json.Number `json:"availableLongVol"`
-		ShortQty json.Number `json:"availableShortVol"`
-	}
-	if err := a.request(ctx, http.MethodGet, "/openApi/swap/v2/trade/leverage", params(), true, &limit); err != nil {
+	limit, err := a.openingLeverage(ctx, symbol)
+	if err != nil {
 		return err
 	}
 	current, maximum, maxQty := limit.Short, limit.ShortMax, limit.ShortQty
@@ -148,17 +145,13 @@ func (a *apiClient) checkOpening(ctx context.Context, symbol string, buy bool, q
 	if parseErr != nil || leverage < 1 || current != leverage || maximum < leverage || qty > maximumQty {
 		return fmt.Errorf("match the %s contract's configured leverage and available size", a.env.label)
 	}
-	var mark struct {
-		Symbol string      `json:"symbol"`
-		Price  json.Number `json:"markPrice"`
-	}
-	if err := a.request(ctx, http.MethodGet, "/openApi/swap/v2/quote/premiumIndex", params(), false, &mark); err != nil {
+	price, err := a.markPrice(ctx, symbol)
+	if err != nil {
 		return err
 	}
-	price, priceErr := mark.Price.Float64()
 	minimum, minErr := item.MinimumValue.Float64()
 	fee, feeErr := item.Fee.Float64()
-	if mark.Symbol != symbol || priceErr != nil || price <= 0 || minErr != nil || feeErr != nil || minimum < 0 || fee < 0 {
+	if minErr != nil || feeErr != nil || minimum < 0 || fee < 0 {
 		return fmt.Errorf("%s mark or minimum trade value unavailable", a.env.label)
 	}
 	if qty*max(price, req.LimitPrice)*(1/float64(leverage)+2*fee) > available {
@@ -190,19 +183,24 @@ func (a *apiClient) lookup(ctx context.Context, req exec.OrderRequest) (order, e
 		o.Type != req.Type.String() || o.Side != "BUY" && o.Side != "SELL" || buy != (o.Side == "BUY") || o.ReduceOnly != reduce {
 		return o, 0, fmt.Errorf("mismatched %s order identity", a.env.label)
 	}
-	switch o.Status {
+	status, err := a.orderStatus(o.Status)
+	return o, status, err
+}
+
+func (a *apiClient) orderStatus(status string) (exec.OrderStatus, error) {
+	switch status {
 	case "NEW", "PENDING", "PARTIALLYFILLED":
-		return o, exec.StatusAccepted, nil
+		return exec.StatusAccepted, nil
 	case "FILLED":
-		return o, exec.StatusFilled, nil
+		return exec.StatusFilled, nil
 	case "CANCELLED":
-		return o, exec.StatusCanceled, nil
+		return exec.StatusCanceled, nil
 	case "FAILED":
-		return o, exec.StatusRejected, nil
+		return exec.StatusRejected, nil
 	case "EXPIRED":
-		return o, exec.StatusExpired, nil
+		return exec.StatusExpired, nil
 	default:
-		return o, 0, fmt.Errorf("unknown %s order state", a.env.label)
+		return 0, fmt.Errorf("unknown %s order state", a.env.label)
 	}
 }
 
@@ -216,7 +214,43 @@ func (a *apiClient) Observe(ctx context.Context, req exec.OrderRequest) (exec.Pe
 	if !valid {
 		return exec.PerpetualObservation{}, fmt.Errorf("invalid %s order quantity", a.env.label)
 	}
+	if req.Perpetual.WholePosition && req.Perpetual.IsRiskEntry() && filled > 0 && positionID(o.PositionID) == "" {
+		o.PositionID, err = a.filledPositionID(ctx, o)
+		if err != nil {
+			return exec.PerpetualObservation{}, err
+		}
+	}
 	return a.readFills(ctx, o, status, digits, filled, o.Time-1000, a.clock.Now().UnixMilli())
+}
+
+func (a *apiClient) filledPositionID(ctx context.Context, observed order) (json.RawMessage, error) {
+	if observed.Time <= 1000 {
+		return nil, errors.New("BingX entry order time is unavailable")
+	}
+	// An exact order-history match can supply the position ID omitted by
+	// order detail. The current position alone cannot identify an IOC fill.
+	orders := list[order]{Key: "orders"}
+	params := url.Values{"symbol": {observed.Symbol}, "limit": {"1000"},
+		"startTime": {strconv.FormatInt(observed.Time-1000, 10)},
+		"endTime":   {strconv.FormatInt(max(observed.Time, min(observed.Time+60_000, a.clock.Now().UnixMilli())), 10)}}
+	if err := a.request(ctx, http.MethodGet, "/openApi/swap/v2/trade/allOrders", params, true, &orders); err != nil {
+		return nil, err
+	}
+	var position json.RawMessage
+	for _, row := range orders.Items {
+		if row.id() != observed.id() || row.Symbol != observed.Symbol || row.Side != observed.Side || row.Type != observed.Type ||
+			row.ReduceOnly || !strings.EqualFold(row.Client, observed.Client) || positionID(row.PositionID) == "" {
+			continue
+		}
+		if position != nil && positionID(position) != positionID(row.PositionID) {
+			return nil, errors.New("BingX entry order history has conflicting position IDs")
+		}
+		position = row.PositionID
+	}
+	if position == nil {
+		return nil, errors.New("BingX fills are awaiting a verified position ID")
+	}
+	return position, nil
 }
 
 func lotDigits(req exec.OrderRequest) int {

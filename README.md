@@ -278,12 +278,12 @@ with a buffer. If margin or risk tiers limit the entry, the preview shows the
 smaller size. eTape waits for the last trade to trigger a price-capped IOC. The
 simulator holds a fair-price stop for the filled contracts. Paper positions and
 stops are stored alongside the local eTape database for restart recovery.
-On MEXC paper and live, drag either pending chart line or use the price pill's
+On MEXC and BingX, drag either pending chart line or use the price pill's
 arrow keys. The entry and stop must stay in the original long or short
 direction. eTape recalculates contract quantity using the original risk budget
 and admitted leverage. You can also adjust the fixed stop after a fill.
 MEXC Chart Risk Entry starts from flat and uses fixed fair-price protection.
-Stock Chart Risk Entry also supports trailing protection and shared-stop adds.
+Stock Chart Risk Entry supports trailing protection and shared-stop adds.
 Simulated funding uses the last observed rate and the published settlement time.
 **Futures API Check** in Settings verifies USDT balance access and position mode
 for MEXC, Binance and BingX. MEXC also reports counts for open positions, working
@@ -292,8 +292,9 @@ orders and active TP/SL orders.
 Under **Settings → Venues & creds**, choose **MEXC Live**, **BingX Live** or
 **BingX Virtual**. Enter the venue's Futures API credentials, run
 **Test connection**, save, and restart the engine. Set the exchange account
-to one-way mode. Set isolated margin and the intended leverage on the exchange
-before opening a position. Find the exchange in **Crypto Scanner → Exchange**
+to one-way mode and the contract to isolated margin. Set the intended leverage
+on the exchange for manual entries and fixed-leverage presets. Find the exchange
+in **Crypto Scanner → Exchange**
 or **Browse USDT perpetuals**, then select its **Execution Venue** in the
 linked Order Ticket. BingX Live uses production USDT collateral and displays
 the LIVE badge. BingX Virtual uses exchange-hosted simulated funds and
@@ -323,9 +324,26 @@ or broker disconnect pauses the stop. Review Account for pending, paused or
 uncovered protection. Disarming preserves working protection. Canceling the
 stop removes it.
 
-BingX Live and Virtual execution require an exchange account smoke test to
-confirm real account behavior. Forced-liquidation modeling is pending for the
-local simulator.
+For **BingX Chart Risk Entry**, select BingX Virtual or BingX Live in the linked
+Order Ticket. Live requires **Settings → Orders & hotkeys → Review BingX Live
+Chart Risk Entry → Enable Stop-Limit**. Start flat with no working orders. The
+preview shows lots, base quantity, risk, initial margin and leverage. From
+flat, Auto sizes to the risk budget and chooses the highest eligible leverage
+for that size within the preset cap and liquidation buffer. Enable
+**Use BingX exchange leverage ceiling** to use the verified exchange limit as
+the cap. eTape verifies the chosen setting on BingX when arming.
+
+Use Chart Risk Entry again on the same side to add with its own risk budget at
+the position's current leverage. Keep or tighten the shared stop. A tighter
+price takes effect on the first confirmed add fill. Use the Order Ticket to
+sell or cover part of the position. The stop tracks the remaining position and
+also includes same-side additions placed directly on BingX. A BingX mark-price
+crossing sends a market close for that original position ID. Disarm leaves the
+stop active. eTape must be running with fresh data. After a restart or a
+disconnect that pauses protection, use **Account → Open Orders → Resume**.
+[BingX Chart Risk Entry plan](docs/plans/2026-11-20-bingx-chart-risk-entry.md)
+
+Forced-liquidation modeling is pending for the local simulator.
 
 ## Connecting brokers
 

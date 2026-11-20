@@ -54,6 +54,32 @@ A terminal close with remaining exposure produces an
 Account warning. Manual reductions shrink the remaining stop quantity and a
 flat or changed position retires the untriggered stop.
 
+## BingX Chart Risk Entry
+
+BingX Virtual and Live hold a price-capped IOC entry in eTape. Entry requires
+signed one-way, isolated contract terms. The risk model includes taker fees on
+both legs and estimates liquidation clearance using BingX's maintenance tiers
+and isolated margin. From flat, Auto maximizes risk-sized lots first, then
+selects the highest eligible leverage. Arming reserves the contract while it
+verifies or applies the leverage, and IOC dispatch checks the signed terms
+again. Adds use the confirmed position's leverage and a separate budget.
+
+A signed IOC fill and matching signed position identify the original Position
+Cycle. One engine-held mark-price stop covers that entire position. Same-side
+fills grow its displayed size, and partial reductions shrink it. A linked add
+persists its tighter stop price on the first confirmed fill. A crossing
+cancels unsubmitted adds and waits for outstanding managed orders to reconcile.
+The journal sends one market close by exact position ID, then reconciles the
+broker-generated order ID and fill size. A missing reply leaves the submitted
+close pending while that position remains open. A signed snapshot that proves
+the original position is gone can retire the close without attributing a fill.
+
+The stop remains eligible while the engine is disarmed. Restart and connection
+gaps that pause the order require Resume on fresh position and mark data. The
+stop retains its original venue and exact position ID across Link Group changes.
+The live account acknowledgement covers this whole-position behavior.
+[Plan and exchange verification](../../../docs/plans/2026-11-20-bingx-chart-risk-entry.md)
+
 ## Trailing stops
 
 `SubmitTrail` admits one reducing SELL/COVER strategy per venue and symbol.

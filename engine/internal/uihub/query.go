@@ -121,7 +121,16 @@ func (q *queries) handleContext(ctx context.Context, name string, args json.RawM
 		if err != nil {
 			return wsmsg.PerpetualOpeningPreview{Reason: err.Error()}
 		}
-		return wsmsg.PerpetualOpeningPreview{Long: wsmsg.PerpetualOpeningLimit(terms.Long), Short: wsmsg.PerpetualOpeningLimit(terms.Short)}
+		preview := wsmsg.PerpetualOpeningPreview{Long: wsmsg.PerpetualOpeningLimit(terms.Long), Short: wsmsg.PerpetualOpeningLimit(terms.Short), Collateral: terms.Collateral}
+		if risk := terms.Notional; risk != nil {
+			tiers := make([]wsmsg.PerpetualNotionalTier, 0, len(risk.Tiers))
+			for _, tier := range risk.Tiers {
+				tiers = append(tiers, wsmsg.PerpetualNotionalTier(tier))
+			}
+			preview.Notional = &wsmsg.PerpetualNotionalRisk{Mark: risk.Mark, MinimumValue: risk.MinimumValue,
+				Tiers: tiers, Position: wsmsg.PerpetualRiskPosition(risk.Position)}
+		}
+		return preview
 	case "QueryAppInfo":
 		return wsmsg.AppInfo{Version: buildinfo.Version}
 	case "QueryChartWindow":

@@ -200,10 +200,10 @@ func (r *streamReconciler) observe(ctx context.Context, id string, useHint bool)
 	report := exec.PerpetualObservation{Rejection: pending.Rejection}
 	var err error
 	if pending.Rejection == "" {
-		if useHint {
+		if useHint && !pending.isPositionClose() {
 			report, err = r.stream.ObserveFill(ctx, pending.Request, pending.SubmittedMs, p.hint)
 		} else {
-			report, err = r.adapter.api.Observe(ctx, pending.Request)
+			report, err = r.adapter.observe(ctx, pending)
 		}
 	}
 	report.Venue, report.OrderID = r.adapter.venue, id

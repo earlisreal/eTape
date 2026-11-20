@@ -328,7 +328,8 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		}
 		entry := exec.SubmitPerpetualRiskEntry{Venue: exec.VenueID(a.Venue), Symbol: a.Symbol,
 			Side: sideFromWire(a.Side), Trigger: a.Trigger, Stop: a.Stop, Leverage: a.Leverage, AutoLeverage: a.AutoLeverage,
-			Cushion: exec.LimitCushion{Value: a.Cushion.Value, Unit: a.Cushion.Unit}, Budget: a.Budget, MaxQty: a.MaxQty, CollateralPct: a.CollateralPct}
+			Cushion: exec.LimitCushion{Value: a.Cushion.Value, Unit: a.Cushion.Unit}, Budget: a.Budget, MaxQty: a.MaxQty, CollateralPct: a.CollateralPct,
+			SharedStopID: a.SharedStopID}
 		if core, ok := cd.ex.(interface {
 			DoContext(context.Context, exec.Command) exec.CmdAck
 		}); ok {

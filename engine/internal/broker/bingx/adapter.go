@@ -52,6 +52,7 @@ type apiClient struct {
 	catalogUntil time.Time
 	orderReads   *netx.TokenBucket
 	fillReads    *netx.TokenBucket
+	riskReads    *netx.TokenBucket
 }
 
 type contract struct {
@@ -92,10 +93,17 @@ func newAPI(env environment, cr creds.Pair, clk clock.Clock) *apiClient {
 	return &apiClient{env: env, clock: clk, creds: cr,
 		orderReads: netx.NewTokenBucket(clock.System{}, 30, 1),
 		fillReads:  netx.NewTokenBucket(clock.System{}, 5, 1),
+		riskReads:  netx.NewTokenBucket(clock.System{}, 2, 1),
 		http: &http.Client{
 			Timeout:       5 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		}}
+}
+
+func (a *Adapter) Capabilities() exec.Capabilities {
+	caps := a.Adapter.Capabilities()
+	caps.EngineHeldPerpetualRiskEntry = true
+	return caps
 }
 
 // VerifyVirtual checks account access and one-way mode with read-only VST requests.
@@ -157,8 +165,10 @@ func (a *apiClient) request(ctx context.Context, method, path string, params url
 		switch path {
 		case "/openApi/swap/v2/trade/order":
 			budget = a.orderReads
-		case "/openApi/swap/v2/trade/allFillOrders":
+		case "/openApi/swap/v2/trade/allFillOrders", "/openApi/swap/v2/trade/allOrders":
 			budget = a.fillReads
+		case "/openApi/swap/v2/trade/leverage", "/openApi/swap/v2/trade/marginType", "/openApi/swap/v1/maintMarginRatio":
+			budget = a.riskReads
 		}
 	}
 	if budget != nil {

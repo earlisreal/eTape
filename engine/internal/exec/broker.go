@@ -61,14 +61,23 @@ type PerpetualBroker interface {
 type PerpetualOpeningLimit struct {
 	Leverage     int
 	MaxContracts int64
+	MaxLeverage  int
 }
 
 type PerpetualOpeningTerms struct {
 	Long, Short PerpetualOpeningLimit
+	Notional    *instrument.NotionalRisk
+	PositionID  string
+	Collateral  float64
 }
 
 type perpetualOpeningTermReader interface {
 	OpeningTerms(context.Context, string) (PerpetualOpeningTerms, error)
+}
+
+type wholePositionRiskBroker interface {
+	AccountIdentity() string
+	ArmPerpetualRisk(context.Context, OrderRequest) (int64, error)
 }
 
 // BrokerEvent is anything a Broker pushes: order-lifecycle events (which also
@@ -98,9 +107,10 @@ type BrokerSubmitOutcome struct {
 // HeldActivationOutcome is kept separate from OrderRejected because a failed
 // child POST may have reached the venue even when its response was lost.
 type HeldActivationOutcome struct {
-	V      VenueID
-	OID    string
-	Reason string
+	V        VenueID
+	OID      string
+	Reason   string
+	Deferred bool // adapter confirmed no write because an earlier order is still reconciling
 }
 
 // Order-lifecycle events are emitted by adapters AND persisted.

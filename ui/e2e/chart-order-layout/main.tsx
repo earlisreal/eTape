@@ -20,14 +20,16 @@ import "../../src/global.css";
 
 // This harness never creates a socket, broker adapter, or engine connection.
 const mexcLive = location.search.startsWith("?mexc-live");
-const autoLeverage = mexcLive || location.search.startsWith("?auto-leverage");
-const executionVenue = mexcLive ? "mexc-live" : "sim";
-const chartSymbol = autoLeverage ? "PERP.MEXC.BTC_USDT" : "US.AAPL";
+const bingxVenue = ["bingx-vst", "bingx-live"].find(venue => location.search === `?${venue}`);
+const autoLeverage = !!bingxVenue || mexcLive || location.search.startsWith("?auto-leverage");
+const executionVenue = bingxVenue ?? (mexcLive ? "mexc-live" : "sim");
+const live = mexcLive || bingxVenue === "bingx-live";
+const chartSymbol = bingxVenue ? "PERP.BINGX.BTC-USDT" : autoLeverage ? "PERP.MEXC.BTC_USDT" : "US.AAPL";
 const stores = makeStores();
 const linkGroups = new LinkGroups({ post() {}, onMessage() { return () => {}; }, close() {} }, () => {}, () => stores.exec.status());
 stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: {
   masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
-  venues: [{ venue: executionVenue, broker: mexcLive ? "mexc" : autoLeverage ? "mexc-sim" : "sim", env: mexcLive ? "live" : "paper", connected: true, reconcilePending: false, note: "",
+  venues: [{ venue: executionVenue, broker: bingxVenue ?? (mexcLive ? "mexc" : autoLeverage ? "mexc-sim" : "sim"), env: live ? "live" : "paper", connected: true, reconcilePending: false, note: "",
     lastReconcileMs: null, heldStopLimitAcknowledged: true, positionDataReady: true,
     gate: { maxOrderValue: 10000, maxPositionValue: 10000, maxPositionShares: 100, maxOpenOrders: 10 } }],
 } });
@@ -36,6 +38,7 @@ linkGroups.focusVenue("green", executionVenue);
 stores.exec.apply({ kind: "snapshot", topic: "exec.account", key: executionVenue, payload: {
   venue: executionVenue, equity: 10000, buyingPower: 10000, availableCash: autoLeverage ? 300 : 10000, sodEquity: 10000,
   realized: 0, dayPnl: 0, leverage: 1, tsMs: Date.now(), cycleStartMs: 0, cycleRealized: 0,
+  currency: bingxVenue === "bingx-vst" ? "VST" : "USDT",
 } });
 if (autoLeverage) stores.quote.apply({ kind: "snapshot", topic: "md.quote", payload: {
   symbol: chartSymbol, mark: 4.51, bid: 4.50, ask: 4.52, last: 4.51, ts: new Date().toISOString(),
@@ -68,7 +71,8 @@ const sendCommand = async (name, args) => {
       stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
         id: "sim-risk", venue: executionVenue, symbol: args.symbol, side: args.side, type: "STOP_LIMIT", tif: "IOC", session: "AUTO",
         qty: args.maxQty, limitPrice: args.trigger, stopPrice: args.trigger, pendingProtectionPrice: args.stop,
-        perpetualRisk: { budget: args.budget, leverage: args.leverage, autoLeverage: args.autoLeverage, entryCushion: args.cushion },
+        perpetualRisk: { budget: args.budget, leverage: args.leverage, autoLeverage: args.autoLeverage, entryCushion: args.cushion,
+          ...(bingxVenue ? { wholePosition: true, sharedStopId: args.sharedStopId } : {}) },
         status: "SUBMITTED", executedQty: 0, leavesQty: args.maxQty, avgFillPrice: 0, rejectReason: "", replacesId: "",
         createdMs: Date.now(), updatedMs: Date.now(), held: { phase: "WAITING", deadlineMs: Date.now() + 3600000 },
       } });
@@ -130,6 +134,15 @@ const chartBars = axisFlicker ? Array.from({ length: 90 }, (_, i) => {
     l: close - 0.1, c: close, v: 100 + i, inProgress: false };
 });
 const sendQuery = async (name, args) => {
+  if (name === "QueryPerpetualOpening" && bingxVenue) {
+    const qty = stores.exec.positions()[0]?.qty ?? 0;
+    const leverage = qty ? 8 : 3;
+    const side = { leverage, maxLeverage: 8, maxContracts: 1000 };
+    return { long: side, short: side, collateral: 300, notional: {
+      mark: 4.51, minimumValue: 2, tiers: [{ maximum: 1_000_000, rate: .005, deduction: 0 }],
+      position: { qty, avgPrice: 4.51, leverage, margin: qty * 4.51 / leverage, liquidationPrice: 3.99 },
+    } };
+  }
   if (name === "QueryPerpetualOpening") return {
     long: { leverage: 5, maxContracts: 100000 }, short: { leverage: 4, maxContracts: 100000 },
   };
@@ -244,6 +257,14 @@ function ConfigReadyProbe() {
           status: "ACCEPTED", qty: filled, leavesQty: filled, stopPrice: entry.pendingProtectionPrice, limitPrice: 0,
           pendingProtectionPrice: undefined, perpetualRisk: undefined, held: mexcLive ? { phase: "WAITING", deadlineMs: 0 } : undefined,
         } });
+      }, showBingXPosition(qty) {
+        const entry = stores.exec.liveOrder("sim-risk");
+        const stop = stores.exec.liveOrder("sim-protection");
+        stores.exec.apply({ kind: "snapshot", topic: "exec.positions", payload: [{ venue: executionVenue, symbol: chartSymbol, qty, avgPrice: 4.51 }] });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [{ ...(stop ?? entry), id: "sim-protection",
+          side: "SELL", type: "STOP", status: "SUBMITTED", qty, leavesQty: qty, stopPrice: stop?.stopPrice ?? entry.pendingProtectionPrice,
+          limitPrice: 0, pendingProtectionPrice: undefined, perpetualRisk: undefined, wholePositionProtection: true, held: { phase: "WAITING", deadlineMs: 0 },
+        }] });
       }, protectPosition(stopPrice) {
         const common = { venue: "sim", symbol: "US.AAPL", type: "STOP_LIMIT", tif: "DAY", session: "EXTENDED", rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, avgFillPrice: 0 };
         stores.exec.apply({ kind: "snapshot", topic: "exec.positions", payload: [{ venue: "sim", symbol: "US.AAPL", qty: 100, avgPrice: stopPrice + .1 }] });

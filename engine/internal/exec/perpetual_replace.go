@@ -49,6 +49,13 @@ func (c *Core) replacePerpetualRisk(ctx context.Context, cm ReplaceOrder, o Orde
 	} else if o.isPerpetualRiskStop() && editablePerpetualHeld(o) &&
 		(cm.ExpectedHeldPhase == HeldWaiting || cm.ExpectedHeldPhase == HeldArmed) &&
 		c.ownsPerpetualPosition(o, c.state.Venue(o.Venue).Positions[o.Symbol]) {
+		if o.Perpetual.WholePosition {
+			position := c.state.Venue(o.Venue).Positions[o.Symbol]
+			if !rules.StopClearsLiquidation(position.AvgPrice, cm.StopPrice, position.LiquidationPrice, o.Side == SideSell) {
+				ack.Reason = "protective stop must clear BingX liquidation"
+				return ack
+			}
+		}
 		if fair, fresh := b.FairPrice(o.Symbol); fresh && StopLimitTriggered(o.Side, fair, cm.StopPrice) {
 			if ok, reason := c.checkSellLeaves(OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side}, o.LeavesQty, o.ID); !ok {
 				ack.Reason = fmt.Sprintf("stop stays at %g: %s", o.StopPrice, reason)
@@ -101,7 +108,18 @@ func (c *Core) replacePerpetualEntry(ctx context.Context, cm ReplaceOrder, o Ord
 	}
 	cash := c.state.Venue(o.Venue).Account.AvailableCash
 	qty := min(cm.Qty, float64(rules.SizeRisk(options.RiskBudget, cash, limit, options.ProtectionPrice, options.Leverage)))
-	if options.AutoLeverage {
+	if options.WholePosition {
+		if options.Notional == nil {
+			return blocked("BingX opening terms are unavailable")
+		}
+		position := c.state.Venue(o.Venue).Positions[o.Symbol]
+		terms := *options.Notional
+		terms.Position = instrument.RiskPosition{Qty: position.Qty, AvgPrice: position.AvgPrice,
+			Margin: position.IsolatedMargin, LiquidationPrice: position.LiquidationPrice, Leverage: position.Leverage}
+		lots, _ := rules.SizeNotionalRisk(terms, options.RiskBudget, cash, limit, options.ProtectionPrice,
+			options.Leverage, options.Leverage, options.Leverage, options.OpeningMaxQty, int64(min(cm.Qty, float64(options.OpeningMaxQty))), long)
+		qty = float64(lots)
+	} else if options.AutoLeverage {
 		terms := rules
 		terms.MinLeverage = options.Leverage
 		sized, _ := terms.AutoRiskSize(options.RiskBudget, cash, limit, options.ProtectionPrice, options.Leverage, int64(cm.Qty), long)

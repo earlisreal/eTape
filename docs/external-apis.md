@@ -171,8 +171,8 @@ against the live position before submission. [MEXC signing](https://www.mexc.com
 
 BingX Live uses `open-api.bingx.com` and USDT collateral. BingX Virtual uses
 `open-api-vst.bingx.com` and VST collateral. Each venue binds its credentials
-and order journal to its own environment. Orders use `positionSide=BOTH` and
-exits add the reduce-only flag. The adapter converts integer lots to exact base
+and order journal to its own environment. Ordinary orders use `positionSide=BOTH`
+and sized exits add the reduce-only flag. The adapter converts integer lots to exact base
 quantities and verifies one-way mode, the account position, collateral, mark and
 the configured isolated leverage before opening. Both venues use the public
 BingX feed for charts and depth. The BingX Live credential test reads balance,
@@ -202,13 +202,21 @@ lookup. [BingX private order updates](https://bingx-api.github.io/docs-v3/#/en/S
 · [Order-detail limit](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#9-query-order-details)
 · [Fill-history limit](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#13-trade-fill-history)
 
-BingX order and position reads preserve the exchange's exact position IDs
-when present. Chart Risk Entry is unavailable on BingX Virtual and Live. A
-Virtual one-way BTC-USDT test confirmed the filled IOC's order detail and
-position snapshot reported the same position ID, but BingX accepted a sized
-reduce-only market close carrying a different ID. BingX's documented
-close-by-position-ID route closes the whole position. The BingX adapter rejects
-requests that require a position-bound close before submission.
+BingX Chart Risk Entry reads isolated margin, leverage and capacity, and
+notional maintenance tiers from each account's environment. Signed position
+rows supply the actual isolated `margin`, `liquidationPrice` and exact
+`positionId`. The side capacity applies at the configured leverage. eTape
+checks it again after changing leverage on a flat contract and before IOC
+submission. Both venues use the public BingX mark for the held stop. The
+Virtual and Live BTC-USDT marks agreed within five basis points in the rollout
+check.
+
+Use `POST /openApi/swap/v1/trade/closePosition` for whole-position stops and
+query its broker-generated `orderId` for fills. The adapter rejects sized
+position-ID closes because a one-way Virtual test filled a regular reduce-only
+order with a mismatched ID. The dedicated route rejected a stale ID after a
+reopen in Virtual. Missing close acknowledgements remain unresolved while the
+original position is present, with no duplicate market close.
 [Chart Risk Entry plan](plans/2026-11-20-bingx-chart-risk-entry.md) ·
 [BingX close by position ID](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#15-close-position-by-positionid)
 
@@ -217,7 +225,9 @@ before writing to an exchange. They retain ambiguous outcomes and query the
 original ID after restart. eTape imports individual fills once and uses account
 polls as the source of position quantities. Only eTape-managed orders can be
 canceled from these routes. HTTP fixtures cover the request and reconciliation
-protocols. Private exchange smoke tests are pending.
+protocols. The BingX Virtual Chart Risk Entry adapter also passed an exchange
+cycle with a same-side add, half close and close of the remaining position.
+BingX Live opening terms were verified with read-only requests.
 
 ## Research-only alternatives
 

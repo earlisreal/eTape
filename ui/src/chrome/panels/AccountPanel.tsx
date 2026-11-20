@@ -311,8 +311,9 @@ function OrdersTable({
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}
                 {custody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{custody}</div>}</td>
               <td data-column="actions">{order.held?.trail && !order.held.trail.retired && !order.held.trail.triggered && ["WAITING","ARMED"].includes(order.held.phase) && <button type="button" aria-label="Edit trail" onClick={()=>{const current=stores.exec.liveOrder(order.id)??order;setTrailEdit({order:current,config:current.held!.trail!.config});}}>Edit</button>}{order.held?.trail && !order.held.trail.retired && order.held.phase==="PAUSED" && <button type="button" aria-label="Resume trail" onClick={()=>void oc.resumeHeld(order.venue,order.id)}>Resume</button>}
-                {order.symbol.startsWith("PERP.MEXC.") && order.held?.phase === "PAUSED" &&
-                  <button type="button" aria-label="Resume held MEXC order" onClick={() => void oc.resumeHeld(order.venue, order.id)}>Resume</button>}
+                {(order.symbol.startsWith("PERP.MEXC.") || order.wholePositionProtection || order.perpetualRisk?.wholePosition) &&
+                  order.held?.phase === "PAUSED" && !order.held.perpetualArmPending &&
+                  <button type="button" aria-label={order.symbol.startsWith("PERP.MEXC.") ? "Resume held MEXC order" : "Resume held BingX order"} onClick={() => void oc.resumeHeld(order.venue, order.id)}>Resume</button>}
                 {(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
                 style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton> : null}</td>
             </tr>

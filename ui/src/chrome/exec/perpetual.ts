@@ -1,10 +1,10 @@
-import type { Order, PerpetualContract, PerpetualOpeningLimit } from "../../gen/wsmsg";
+import type { Order, PerpetualContract, PerpetualNotionalRisk, PerpetualOpeningLimit } from "../../gen/wsmsg";
 import { isWorking } from "../../wire/orderStatus";
 import { defaultLeverageCap, type RiskEntryTemplate } from "./actionTemplate";
 
 export function pendingPerpetualStop(order: Order): { price: number; side: "SELL" | "COVER" } | undefined {
   const price = order.pendingProtectionPrice;
-  if (!price || !isWorking(order.status)) return undefined;
+  if (!price || !isWorking(order.status) || order.perpetualRisk?.sharedStopId) return undefined;
   return { price, side: order.side === "SHORT" ? "COVER" : "SELL" };
 }
 
@@ -18,7 +18,7 @@ export function perpetualTick(price: number, contract: PerpetualContract, roundi
 
 export function perpetualRiskSize(
   template: Pick<RiskEntryTemplate, "perpetual" | "mode" | "value" | "buyCushion">, contract: PerpetualContract | undefined, trigger: number, stop: number, collateral: number,
-  maxQty = Infinity, openingLimit?: PerpetualOpeningLimit,
+  maxQty = Infinity, openingLimit?: PerpetualOpeningLimit, notionalRisk?: PerpetualNotionalRisk,
 ) {
   const p = template.perpetual;
   if (!p || !contract || !contract.tradingEnabled || trigger <= 0 || stop <= 0 ||
@@ -34,14 +34,59 @@ export function perpetualRiskSize(
   const fees = (limit + stop) * unit * fee;
   const riskPerContract = Math.abs(limit - stop) * unit + fees;
   const budget = template.mode === "Dollar" ? template.value : collateral * template.value / 100;
-  const target = Math.min(contract.maximum, openingLimit?.maxContracts ?? Infinity, budget / riskPerContract, maxQty);
+  const target = Math.min(contract.maximum, notionalRisk ? Infinity : openingLimit?.maxContracts ?? Infinity, budget / riskPerContract, maxQty);
   const sizeAt = (leverage: number, maximum: number) => {
     const available = Math.min(target, maximum, collateral / (limit * unit / leverage + fees));
     const qty = Math.floor(available / contract.quantityStep + 1e-10) * contract.quantityStep;
     return Number.isSafeInteger(qty) && qty >= contract.minimum ? qty : 0;
   };
   let qty = 0, leverage = p.leverage ?? 0;
-  if (autoLeverage) {
+  if (notionalRisk && openingLimit) {
+    const ceiling = autoLeverage ? (p.bingxExchangeLeverage ? Infinity : p.leverageCap ?? defaultLeverageCap) : leverage;
+    const held = notionalRisk.position;
+    let upper = Math.min(ceiling, openingLimit.maxLeverage ?? 0, contract.maxLeverage);
+    let lower = autoLeverage ? contract.minLeverage : leverage;
+    if (held.qty) {
+      const heldBuffer = Math.max(Number(contract.priceTick), held.avgPrice * 0.001);
+      const clears = long ? stop - heldBuffer > held.liquidationPrice : held.liquidationPrice > stop + heldBuffer;
+      if (!clears || held.liquidationPrice < 0 || held.margin <= 0 || long !== (held.qty > 0) ||
+          held.leverage !== openingLimit.leverage || held.leverage < lower || held.leverage > upper) return null;
+      upper = lower = held.leverage;
+    }
+    const direction = long ? 1 : -1;
+    const mark = stop - direction * Math.max(Number(contract.priceTick), limit * 0.001);
+    const currentSize = Math.abs(held.qty) * unit;
+    const currentEquity = held.margin + direction * (mark - held.avgPrice) * currentSize;
+    const marginPrice = Math.max(notionalRisk.mark, limit);
+    const minQty = Math.max(contract.minimum, Math.ceil(notionalRisk.minimumValue / (limit * unit)));
+    const step = contract.quantityStep;
+    const maximum = notionalRisk.tiers.at(-1)?.maximum;
+    if (mark <= 0 || step < 1 || !maximum) return null;
+    for (let candidate = upper; candidate >= lower; candidate--) {
+      const capacity = candidate === openingLimit.leverage ? openingLimit.maxContracts : Infinity;
+      const affordable = collateral / (marginPrice * unit / candidate + fees);
+      let lots = Math.floor(Math.min(target, capacity, affordable) / step) * step;
+      if (!Number.isSafeInteger(lots) || lots < minQty || lots <= qty) continue;
+      const passes = (size: number) => {
+        const base = size * unit;
+        const value = (currentSize + base) * mark;
+        const tier = notionalRisk.tiers.find(t => value <= t.maximum);
+        const equity = currentEquity + base * (limit / candidate + direction * (mark - limit) - limit * fee);
+        return !!tier && (currentSize + base) * marginPrice <= maximum &&
+          equity > Math.max(0, value * tier.rate - tier.deduction) + value * fee;
+      };
+      if (!passes(lots)) {
+        let left = 0, right = lots / step;
+        while (left < right) {
+          const middle = left + Math.floor((right - left + 1) / 2);
+          if (passes(middle * step)) left = middle;
+          else right = middle - 1;
+        }
+        lots = left * step;
+      }
+      if (lots >= minQty && lots > qty) { qty = lots; leverage = candidate; }
+    }
+  } else if (autoLeverage) {
     // Match ContractRules.AutoRiskSize at the buffered mark beyond the stop.
     const cap = Math.min(p.leverageCap ?? defaultLeverageCap, contract.maxLeverage);
     const buffer = Math.max(Number(contract.priceTick), limit * 0.001);

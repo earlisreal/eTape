@@ -107,7 +107,12 @@ func TestReadExecPerpetualRiskOrderHistoriesRestoresLinkedStop(t *testing.T) {
 	stop := exec.OrderSubmitted{Order: exec.Order{Venue: venue, ID: "stop", UpdatedMs: 2}}
 	paper := exec.OrderSubmitted{Order: exec.Order{Venue: "paper", ID: "paper", UpdatedMs: 3,
 		Perpetual: &exec.PerpetualOrder{ProtectionID: "paper-stop"}}}
-	for _, ev := range []exec.Event{entry, stop, paper, exec.OrderCanceled{V: venue, OID: "stop", Ts: 4}} {
+	lateAdd := entry.Order
+	lateAdd.UpdatedMs = 5
+	lateAdd.Perpetual = &exec.PerpetualOrder{ProtectionID: "late-stop", LocalProtection: true, WholePosition: true, LateAddClose: true}
+	lateStop := exec.OrderSubmitted{Order: exec.Order{Venue: venue, ID: "late-stop", UpdatedMs: 6}}
+	for _, ev := range []exec.Event{entry, stop, paper, exec.OrderCanceled{V: venue, OID: "stop", Ts: 4},
+		exec.RiskEntryChanged{Entry: lateAdd}, lateStop} {
 		kind, payload, err := exec.EncodeEvent(ev)
 		if err != nil {
 			t.Fatal(err)
@@ -118,7 +123,8 @@ func TestReadExecPerpetualRiskOrderHistoriesRestoresLinkedStop(t *testing.T) {
 		}
 	}
 	got, err := s.ReadExecPerpetualRiskOrderHistories(venue)
-	if err != nil || len(got) != 3 || got[0].OrderID != "entry" || got[1].OrderID != "stop" || got[2].Kind != "order_canceled" {
+	if err != nil || len(got) != 5 || got[0].OrderID != "entry" || got[1].OrderID != "stop" ||
+		got[2].Kind != "order_canceled" || got[4].OrderID != "late-stop" {
 		t.Fatalf("risk entry and stop history not restored: %+v, %v", got, err)
 	}
 }

@@ -147,22 +147,26 @@ func (c *Core) perpetualProtectionWarnings(v VenueID, b PerpetualBroker) []Prote
 		_, fresh := b.FairPrice(entry.Symbol)
 		switch {
 		case !c.state.PositionsReady(v):
-			w.State, w.Reason = "unverified", "Engine-held stop waiting for MEXC position data"
+			w.State, w.Reason = "unverified", "Engine-held stop waiting for exchange position data"
 		case !c.ownsPerpetualPosition(entry, p):
 			w.Reason = "Engine-held stop could not verify the original position"
 		case stop.ID == "" && entry.Working():
 			w.Reason = "Engine-held stop waiting for entry reconciliation"
-		case !stop.Working():
+		case !stop.isPerpetualRiskStop() || !stop.Working():
 			w.Reason = "Engine-held stop unavailable; review Orders and Positions"
 		case stop.Held.Phase == HeldPaused:
 			w.Reason = "Engine-held stop paused; resume in Orders"
 		case stop.Held.ChildClientID != "" || stop.Held.PerpetualTriggered:
-			w.Reason = "Engine-held close awaiting MEXC execution or reconciliation"
+			w.Reason = "Engine-held close awaiting execution or reconciliation"
 		case !fresh:
-			w.Reason = "Engine-held stop waiting for fresh MEXC fair price"
+			w.Reason = "Engine-held stop waiting for a fresh exchange mark"
 		case stop.LeavesQty < w.Qty:
 			w.Qty -= stop.LeavesQty
 			w.Reason = "Contracts above the engine-held stop size"
+		case o.WholePosition:
+			if rules, ok := b.ContractRules(entry.Symbol); !ok || !rules.StopClearsLiquidation(p.AvgPrice, stop.StopPrice, p.LiquidationPrice, p.Qty > 0) {
+				w.Reason = "BingX liquidation clearance changed; review the shared stop"
+			}
 		}
 		if w.Reason != "" {
 			bySymbol[w.Symbol] = w

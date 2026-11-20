@@ -138,8 +138,9 @@ type Order struct {
 	RiskEntry           *RiskEntry   `json:"riskEntry,omitempty"`
 	RiskEntryID         string       `json:"riskEntryId,omitempty"`
 
-	PendingProtectionPrice float64             `json:"pendingProtectionPrice,omitempty"`
-	PerpetualRisk          *PerpetualRiskTerms `json:"perpetualRisk,omitempty"`
+	PendingProtectionPrice  float64             `json:"pendingProtectionPrice,omitempty"`
+	PerpetualRisk           *PerpetualRiskTerms `json:"perpetualRisk,omitempty"`
+	WholePositionProtection bool                `json:"wholePositionProtection,omitempty"`
 }
 
 type PerpetualRiskTerms struct {
@@ -148,6 +149,8 @@ type PerpetualRiskTerms struct {
 	AutoLeverage  bool         `json:"autoLeverage,omitempty"`
 	OpeningMaxQty int64        `json:"openingMaxQty,omitempty"`
 	EntryCushion  LimitCushion `json:"entryCushion"`
+	SharedStopID  string       `json:"sharedStopId,omitempty"`
+	WholePosition bool         `json:"wholePosition,omitempty"`
 }
 
 type LimitCushion struct {
@@ -215,12 +218,36 @@ type QueryPerpetualOpeningArgs struct {
 type PerpetualOpeningLimit struct {
 	Leverage     int   `json:"leverage"`
 	MaxContracts int64 `json:"maxContracts"`
+	MaxLeverage  int   `json:"maxLeverage,omitempty"`
+}
+
+type PerpetualNotionalTier struct {
+	Maximum   float64 `json:"maximum"`
+	Rate      float64 `json:"rate"`
+	Deduction float64 `json:"deduction"`
+}
+
+type PerpetualRiskPosition struct {
+	Qty              float64 `json:"qty"`
+	AvgPrice         float64 `json:"avgPrice"`
+	Margin           float64 `json:"margin"`
+	LiquidationPrice float64 `json:"liquidationPrice"`
+	Leverage         int     `json:"leverage"`
+}
+
+type PerpetualNotionalRisk struct {
+	Mark         float64                 `json:"mark"`
+	MinimumValue float64                 `json:"minimumValue"`
+	Tiers        []PerpetualNotionalTier `json:"tiers"`
+	Position     PerpetualRiskPosition   `json:"position"`
 }
 
 type PerpetualOpeningPreview struct {
-	Long   PerpetualOpeningLimit `json:"long"`
-	Short  PerpetualOpeningLimit `json:"short"`
-	Reason string                `json:"reason,omitempty"`
+	Long       PerpetualOpeningLimit  `json:"long"`
+	Short      PerpetualOpeningLimit  `json:"short"`
+	Reason     string                 `json:"reason,omitempty"`
+	Notional   *PerpetualNotionalRisk `json:"notional,omitempty"`
+	Collateral float64                `json:"collateral,omitempty"`
 }
 
 type SubmitPerpetualRiskEntryArgs struct {
@@ -235,18 +262,20 @@ type SubmitPerpetualRiskEntryArgs struct {
 	Budget        float64      `json:"budget"`
 	MaxQty        float64      `json:"maxQty"`
 	CollateralPct bool         `json:"collateralPct"`
+	SharedStopID  string       `json:"sharedStopId,omitempty"`
 }
 
 type HeldOrder struct {
-	PerpetualTriggered bool        `json:"perpetualTriggered,omitempty"`
-	Trail              *TrailState `json:"trail,omitempty"`
-	Phase              string      `json:"phase"`
-	DeadlineMs         int64       `json:"deadlineMs"`
-	ChildClientID      string      `json:"childClientId,omitempty"`
-	ChildBrokerID      string      `json:"childBrokerId,omitempty"`
-	PausedReason       string      `json:"pausedReason,omitempty"`
-	CancelRequested    bool        `json:"cancelRequested,omitempty"`
-	ResolvedQty        float64     `json:"resolvedQty,omitempty"`
+	PerpetualTriggered  bool        `json:"perpetualTriggered,omitempty"`
+	PerpetualArmPending bool        `json:"perpetualArmPending,omitempty"`
+	Trail               *TrailState `json:"trail,omitempty"`
+	Phase               string      `json:"phase"`
+	DeadlineMs          int64       `json:"deadlineMs"`
+	ChildClientID       string      `json:"childClientId,omitempty"`
+	ChildBrokerID       string      `json:"childBrokerId,omitempty"`
+	PausedReason        string      `json:"pausedReason,omitempty"`
+	CancelRequested     bool        `json:"cancelRequested,omitempty"`
+	ResolvedQty         float64     `json:"resolvedQty,omitempty"`
 }
 
 type TrailSessions struct {

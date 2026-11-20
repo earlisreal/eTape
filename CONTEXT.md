@@ -248,7 +248,7 @@ _Avoid_: Previous extended-session close
 ## Order Entry
 
 **Chart Risk Entry**:
-An entry sized to a loss budget from two chart-selected prices, with a linked protective stop. Stocks support long entries with the selected Protection Mode. MEXC perpetuals support long and short entries with a fixed fair-price stop. On MEXC Live, eTape holds that stop and sends a reduce-only market close when it triggers. An Auto preset takes the instrument from the chart and resolves the direction from the entry and stop prices within those supported sides.
+An entry sized to a loss budget from two chart-selected prices, with a linked protective stop. Stocks support long entries with the selected Protection Mode. MEXC and BingX perpetuals support long and short entries with a fixed mark-price stop. On BingX Virtual and Live, eTape holds one shared stop for the entire position identified by BingX. Same-side entries and partial exits change the size covered by that stop. An Auto preset takes the instrument from the chart and resolves the direction from the entry and stop prices within those supported sides.
 _Avoid_: Risk confirmation, bracket (when referring to this entry tool)
 
 **Auto Leverage**:
