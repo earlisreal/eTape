@@ -182,6 +182,16 @@ generic Binance and BingX Futures API checks use their production read-only
 endpoints. [BingX API environments](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/base-urls.md)
 · [Swap orders and fills](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md)
 
+BingX order and position reads preserve the exchange's exact position IDs
+when present. Chart Risk Entry is unavailable on BingX Virtual and Live. A
+Virtual one-way BTC-USDT test confirmed the filled IOC's order detail and
+position snapshot reported the same position ID, but BingX accepted a sized
+reduce-only market close carrying a different ID. BingX's documented
+close-by-position-ID route closes the whole position. The BingX adapter rejects
+requests that require a position-bound close before submission.
+[Chart Risk Entry plan](plans/2026-11-20-bingx-chart-risk-entry.md) ·
+[BingX close by position ID](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#15-close-position-by-positionid)
+
 The authenticated adapters save pending submissions next to the local database
 before writing to an exchange. They retain ambiguous outcomes and query the
 original ID after restart. eTape imports individual fills once and uses account

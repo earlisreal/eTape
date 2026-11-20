@@ -20,6 +20,9 @@ import (
 )
 
 func (a *apiClient) Prepare(ctx context.Context, req exec.OrderRequest) (func(context.Context) error, error) {
+	if req.Perpetual != nil && req.Perpetual.PositionID != "" {
+		return nil, errors.New("BingX position-bound quantity-limited closes are not verified")
+	}
 	if err := a.refreshCatalog(ctx); err != nil {
 		return nil, err
 	}
@@ -245,6 +248,7 @@ func (a *apiClient) Observe(ctx context.Context, req exec.OrderRequest) (exec.Pe
 	if sum != filled {
 		return report, fmt.Errorf("%s fills do not yet reconcile with the order", a.env.label)
 	}
+	report.PositionID = positionID(o.PositionID)
 	slices.SortFunc(report.Fills, func(a, b exec.PerpetualFill) int {
 		if n := cmp.Compare(a.TsMs, b.TsMs); n != 0 {
 			return n

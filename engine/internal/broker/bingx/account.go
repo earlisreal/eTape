@@ -14,30 +14,32 @@ import (
 )
 
 type position struct {
-	Symbol    string      `json:"symbol"`
-	Side      string      `json:"positionSide"`
-	Isolated  bool        `json:"isolated"`
-	Quantity  json.Number `json:"positionAmt"`
-	Available json.Number `json:"availableAmt"`
-	Average   json.Number `json:"avgPrice"`
-	Margin    json.Number `json:"initialMargin"`
-	Leverage  int         `json:"leverage"`
+	ID        json.RawMessage `json:"positionId"`
+	Symbol    string          `json:"symbol"`
+	Side      string          `json:"positionSide"`
+	Isolated  bool            `json:"isolated"`
+	Quantity  json.Number     `json:"positionAmt"`
+	Available json.Number     `json:"availableAmt"`
+	Average   json.Number     `json:"avgPrice"`
+	Margin    json.Number     `json:"initialMargin"`
+	Leverage  int             `json:"leverage"`
 }
 
 type order struct {
-	ID           json.Number `json:"orderId"`
-	StringID     string      `json:"orderID"`
-	Client       string      `json:"clientOrderId"`
-	Symbol       string      `json:"symbol"`
-	Side         string      `json:"side"`
-	PositionSide string      `json:"positionSide"`
-	ReduceOnly   bool        `json:"reduceOnly"`
-	Type         string      `json:"type"`
-	Status       string      `json:"status"`
-	Quantity     json.Number `json:"origQty"`
-	Filled       json.Number `json:"executedQty"`
-	Price        json.Number `json:"price"`
-	Time         int64       `json:"time"`
+	ID           json.Number     `json:"orderId"`
+	StringID     string          `json:"orderID"`
+	PositionID   json.RawMessage `json:"positionID"`
+	Client       string          `json:"clientOrderId"`
+	Symbol       string          `json:"symbol"`
+	Side         string          `json:"side"`
+	PositionSide string          `json:"positionSide"`
+	ReduceOnly   bool            `json:"reduceOnly"`
+	Type         string          `json:"type"`
+	Status       string          `json:"status"`
+	Quantity     json.Number     `json:"origQty"`
+	Filled       json.Number     `json:"executedQty"`
+	Price        json.Number     `json:"price"`
+	Time         int64           `json:"time"`
 }
 
 func (o order) id() string {
@@ -49,6 +51,16 @@ func (o order) id() string {
 
 func validID(id string) bool {
 	return id != "" && id != "0" && !strings.ContainsFunc(id, func(r rune) bool { return r < '0' || r > '9' })
+}
+
+// Position IDs can be returned as quoted or numeric integers. Keep their
+// exact digits and leave identity unknown when the exchange omits the ID.
+func positionID(raw json.RawMessage) string {
+	var id json.Number
+	if json.Unmarshal(raw, &id) != nil || !validID(id.String()) {
+		return ""
+	}
+	return id.String()
 }
 
 // Some BingX responses wrap the same order in a named field.
@@ -220,7 +232,7 @@ func (a *apiClient) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.
 		}
 		seen[p.Symbol] = true
 		positions = append(positions, exec.Position{Symbol: "PERP.BINGX." + p.Symbol, Qty: qty, AvgPrice: avg,
-			Multiplier: math.Pow10(-*terms.QtyDigits), Leverage: p.Leverage, MarginUsed: margin})
+			Multiplier: math.Pow10(-*terms.QtyDigits), Leverage: p.Leverage, MarginUsed: margin, BrokerPositionID: positionID(p.ID)})
 	}
 	var orders []exec.Order
 	for _, o := range state.Orders {

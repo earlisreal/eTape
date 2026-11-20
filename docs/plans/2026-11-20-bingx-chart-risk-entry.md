@@ -2,6 +2,16 @@
 
 Approved on 2026-11-20.
 
+## Exchange verification
+
+BingX Virtual accepted a sized reduce-only market close with the wrong
+position ID on a one-way, isolated BTC-USDT position. The opening IOC's
+position ID matched the signed position snapshot, and the simulated position
+was closed after the test. The documented position-ID close acts on the whole
+position. Enabling Chart Risk Entry on either venue requires an exchange route
+that enforces both position ID and quantity.
+[BingX adapter notes](../external-apis.md#usdt-perpetual-exchanges)
+
 ## Goal
 
 Use Chart Risk Entry on a BingX perpetual chart with either BingX Virtual or

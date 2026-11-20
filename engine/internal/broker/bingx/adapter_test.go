@@ -38,8 +38,8 @@ func testSubmitObserveAndCancel(t *testing.T, env environment, host, currency st
 	}{
 		{"open long", exec.SideBuy, "BUY", "[]", false},
 		{"open short", exec.SideShort, "SELL", "[]", false},
-		{"close long", exec.SideSell, "SELL", `[{"symbol":"BTC-USDT","positionSide":"BOTH","isolated":true,"positionAmt":"0.005","availableAmt":"0.004","leverage":5}]`, true},
-		{"close short", exec.SideCover, "BUY", `[{"symbol":"BTC-USDT","positionSide":"BOTH","isolated":true,"positionAmt":"-0.005","availableAmt":"0.004","leverage":5}]`, true},
+		{"close long", exec.SideSell, "SELL", `[{"symbol":"BTC-USDT","positionId":"90071992547409955","positionSide":"BOTH","isolated":true,"positionAmt":"0.005","availableAmt":"0.004","avgPrice":"92000","initialMargin":"92","leverage":5}]`, true},
+		{"close short", exec.SideCover, "BUY", `[{"symbol":"BTC-USDT","positionId":90071992547409955,"positionSide":"BOTH","isolated":true,"positionAmt":"-0.005","availableAmt":"0.004","avgPrice":"92000","initialMargin":"92","leverage":5}]`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const submitted = "ET01ABCD12345678901111111111"
@@ -49,7 +49,7 @@ func testSubmitObserveAndCancel(t *testing.T, env environment, host, currency st
 			if c.env.base != host {
 				t.Fatalf("%s uses the wrong host: %s", env.label, c.env.base)
 			}
-			order := fmt.Sprintf(`{"orderId":%s,"clientOrderId":%q,"symbol":"BTC-USDT","side":%q,"reduceOnly":%t,"type":"LIMIT","status":"PARTIALLYFILLED","origQty":"0.0030","executedQty":"0.0020","time":%d}`,
+			order := fmt.Sprintf(`{"orderId":%s,"positionID":90071992547409955,"clientOrderId":%q,"symbol":"BTC-USDT","side":%q,"reduceOnly":%t,"type":"LIMIT","status":"PARTIALLYFILLED","origQty":"0.0030","executedQty":"0.0020","time":%d}`,
 				exactID, strings.ToLower(submitted), tc.direction, tc.reduce, current-100)
 			var posts, cancels atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +132,12 @@ func testSubmitObserveAndCancel(t *testing.T, env environment, host, currency st
 			if err != nil || account.Account.Currency != currency || account.Account.AvailableCash != 200 {
 				t.Fatalf("unexpected collateral: %+v, %v", account.Account, err)
 			}
+			if tc.reduce {
+				_, positions, _, err := c.Snapshot(t.Context())
+				if err != nil || len(positions) != 1 || positions[0].BrokerPositionID != "90071992547409955" {
+					t.Fatalf("snapshot did not preserve position identity: %+v, %v", positions, err)
+				}
+			}
 			req := exec.OrderRequest{Symbol: "PERP.BINGX.BTC-USDT", ClientOrderID: submitted,
 				Side: tc.side, Type: exec.TypeLimit, TIF: exec.TIFIOC, Qty: 30, LimitPrice: 92000,
 				Perpetual: &exec.PerpetualOrder{Multiplier: 0.0001, Leverage: 5}}
@@ -146,7 +152,7 @@ func testSubmitObserveAndCancel(t *testing.T, env environment, host, currency st
 				t.Fatalf("submit: %v, calls %d", err, posts.Load())
 			}
 			report, err := c.Observe(t.Context(), req)
-			if err != nil || report.BrokerOrderID != exactID || report.Status != exec.StatusAccepted ||
+			if err != nil || report.BrokerOrderID != exactID || report.PositionID != "90071992547409955" || report.Status != exec.StatusAccepted ||
 				len(report.Fills) != 2 || report.Fills[0].Qty != 10 || report.Fills[0].ID == report.Fills[1].ID {
 				t.Fatalf("unreconciled order: %+v, %v", report, err)
 			}
@@ -157,6 +163,16 @@ func testSubmitObserveAndCancel(t *testing.T, env environment, host, currency st
 				t.Fatalf("cancel: %v, calls %d", err, cancels.Load())
 			}
 		})
+	}
+}
+
+func TestPositionBoundCloseCannotFallBackToSymbol(t *testing.T) {
+	c := newAPI(virtual, creds.Pair{}, clock.NewFake(time.UnixMilli(1700000000000)))
+	send, err := c.Prepare(t.Context(), exec.OrderRequest{Symbol: "PERP.BINGX.BTC-USDT",
+		Side: exec.SideSell, Type: exec.TypeMarket, Qty: 1,
+		Perpetual: &exec.PerpetualOrder{PositionID: "90071992547409955"}})
+	if send != nil || err == nil || !strings.Contains(err.Error(), "position-bound quantity-limited") {
+		t.Fatalf("position-bound close must fail before exchange I/O: %v", err)
 	}
 }
 
