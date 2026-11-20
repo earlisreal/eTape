@@ -40,15 +40,18 @@ export function orderActionPending(marker: ChartOrderMarker): { kind: "replace" 
 export function chartOrderMarkers(orders: Iterable<Order>, venue: string, symbol: string, pinned: boolean): ChartOrderMarker[] {
   if (pinned || !venue || !symbol) return [];
   const out: ChartOrderMarker[] = [];
-  for (const order of orders) {
-    if (order.venue !== venue || order.symbol !== symbol || !isWorking(order.status)) continue;
+  const working = Array.from(orders).filter(order => order.venue === venue && order.symbol === symbol && isWorking(order.status));
+  const stops = new Set(working.filter(order => order.type === "STOP").map(order => order.id));
+  for (const order of working) {
     if (order.status === "SUBMITTED" && !order.held) continue;
     const perpetual = order.symbol.startsWith("PERP.");
     const held = order.held;
     const actionPending = order.action?.phase === "REQUESTED" || order.action?.phase === "UNKNOWN";
     const pretrigger = !held?.childClientId && !held?.cancelRequested && !held?.perpetualTriggered &&
       (held?.phase === "WAITING" || held?.phase === "ARMED");
-    if (order.pendingProtectionPrice && held) {
+    const protectionId = order.perpetualRisk?.stopId ?? order.perpetualRisk?.sharedStopId;
+    const showingAddPlan = !!order.perpetualRisk?.sharedStopId && order.executedQty === 0;
+    if (order.pendingProtectionPrice && held && (!protectionId || !stops.has(protectionId) || showingAddPlan)) {
       out.push({ order, price: order.pendingProtectionPrice, kind: "pending-protection",
         draggable: !!order.perpetualRisk && pretrigger && !actionPending, phase: held.phase });
     }

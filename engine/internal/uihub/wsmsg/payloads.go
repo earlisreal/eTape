@@ -149,6 +149,7 @@ type PerpetualRiskTerms struct {
 	AutoLeverage  bool         `json:"autoLeverage,omitempty"`
 	OpeningMaxQty int64        `json:"openingMaxQty,omitempty"`
 	EntryCushion  LimitCushion `json:"entryCushion"`
+	StopID        string       `json:"stopId,omitempty"`
 	SharedStopID  string       `json:"sharedStopId,omitempty"`
 	WholePosition bool         `json:"wholePosition,omitempty"`
 }
@@ -267,16 +268,15 @@ type SubmitPerpetualRiskEntryArgs struct {
 }
 
 type HeldOrder struct {
-	PerpetualTriggered  bool        `json:"perpetualTriggered,omitempty"`
-	PerpetualArmPending bool        `json:"perpetualArmPending,omitempty"`
-	Trail               *TrailState `json:"trail,omitempty"`
-	Phase               string      `json:"phase"`
-	DeadlineMs          int64       `json:"deadlineMs"`
-	ChildClientID       string      `json:"childClientId,omitempty"`
-	ChildBrokerID       string      `json:"childBrokerId,omitempty"`
-	PausedReason        string      `json:"pausedReason,omitempty"`
-	CancelRequested     bool        `json:"cancelRequested,omitempty"`
-	ResolvedQty         float64     `json:"resolvedQty,omitempty"`
+	PerpetualTriggered bool        `json:"perpetualTriggered,omitempty"`
+	Trail              *TrailState `json:"trail,omitempty"`
+	Phase              string      `json:"phase"`
+	DeadlineMs         int64       `json:"deadlineMs"`
+	ChildClientID      string      `json:"childClientId,omitempty"`
+	ChildBrokerID      string      `json:"childBrokerId,omitempty"`
+	PausedReason       string      `json:"pausedReason,omitempty"`
+	CancelRequested    bool        `json:"cancelRequested,omitempty"`
+	ResolvedQty        float64     `json:"resolvedQty,omitempty"`
 }
 
 type TrailSessions struct {

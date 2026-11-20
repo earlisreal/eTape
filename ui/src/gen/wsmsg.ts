@@ -243,6 +243,7 @@ export interface PerpetualRiskTerms {
   autoLeverage?: boolean;
   openingMaxQty?: number /* int64 */;
   entryCushion: LimitCushion;
+  stopId?: string;
   sharedStopId?: string;
   wholePosition?: boolean;
 }
@@ -347,7 +348,6 @@ export interface SubmitPerpetualRiskEntryArgs {
 }
 export interface HeldOrder {
   perpetualTriggered?: boolean;
-  perpetualArmPending?: boolean;
   trail?: TrailState;
   phase: string;
   deadlineMs: number /* int64 */;

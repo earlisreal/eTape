@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/netx"
@@ -55,6 +56,8 @@ type apiClient struct {
 	marginReads   *netx.TokenBucket
 	leverageReads *netx.TokenBucket
 	tierReads     *netx.TokenBucket
+	opening       perps.OpeningCache
+	riskAccount   atomic.Pointer[riskAccountSnapshot]
 }
 
 type contract struct {
@@ -107,6 +110,7 @@ func newAPI(env environment, cr creds.Pair, clk clock.Clock) *apiClient {
 func (a *Adapter) Capabilities() exec.Capabilities {
 	caps := a.Adapter.Capabilities()
 	caps.EngineHeldPerpetualRiskEntry = true
+	caps.WholePositionPerpetualRiskEntry = true
 	return caps
 }
 

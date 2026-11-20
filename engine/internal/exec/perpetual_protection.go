@@ -24,8 +24,8 @@ func (c *Core) ownsPerpetualPosition(o Order, p Position) bool {
 }
 
 // Called after the adapter has reconciled the entry and published a current
-// position snapshot. The IOC child must be terminal before a close can use
-// the journal's reservation on this contract.
+// position snapshot. A resting entry can have confirmed exposure while its
+// unfilled quantity still reserves the contract in the broker journal.
 func (c *Core) syncPerpetualProtection(ctx context.Context, v VenueID) {
 	b, ok := c.brokers[v].(PerpetualBroker)
 	if !ok || !b.Capabilities().EngineHeldPerpetualRiskEntry || !c.state.PositionsReady(v) || c.heldDemand == nil {
@@ -34,7 +34,7 @@ func (c *Core) syncPerpetualProtection(ctx context.Context, v VenueID) {
 	vs := c.state.Venue(v)
 	for _, entry := range vs.Orders {
 		o := entry.Perpetual
-		if o == nil || !o.LocalProtection || !o.IsRiskEntry() || entry.Working() || entry.ExecutedQty <= 0 ||
+		if o == nil || !o.LocalProtection || !o.IsRiskEntry() || entry.Working() && entry.TIF != TIFGTC || entry.ExecutedQty <= 0 ||
 			o.WholePosition && o.PositionID != "" && !o.LateAddClose ||
 			vs.Orders[o.ProtectionID].ID != "" || !c.ownsPerpetualPosition(entry, vs.Positions[entry.Symbol]) {
 			continue
@@ -75,11 +75,20 @@ func (c *Core) syncPerpetualProtection(ctx context.Context, v VenueID) {
 		}
 		p := vs.Positions[stop.Symbol]
 		if !c.ownsPerpetualPosition(stop, p) {
-			c.cancelWaitingPerpetualAdds(ctx, stop)
 			_ = c.handleCancel(ctx, CancelOrder{Venue: v, OrderID: stop.ID})
 			continue
 		}
-		if qty := math.Abs(p.Qty); qty < stop.LeavesQty || stop.Perpetual.WholePosition && qty > stop.LeavesQty {
+		qty := math.Abs(p.Qty)
+		if !stop.Perpetual.WholePosition {
+			qty = min(qty, stop.LeavesQty)
+			for _, entry := range vs.Orders {
+				if entry.TIF == TIFGTC && entry.Perpetual.IsRiskEntry() && entry.Perpetual.ProtectionID == stop.ID {
+					qty = min(math.Abs(p.Qty), entry.ExecutedQty)
+					break
+				}
+			}
+		}
+		if qty != stop.LeavesQty {
 			held := *stop.Held
 			held.ResolvedQty = qty
 			if err := c.appendAndFold(HeldOrderChanged{V: v, OID: stop.ID, Held: held, Ts: c.now()}, SrcReconcile); err != nil {
@@ -100,6 +109,14 @@ func (c *Core) checkPerpetualRiskStops(ctx context.Context) {
 		o := c.order(id)
 		if o.isPerpetualRiskStop() && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
 			c.activatePerpetualRiskStop(ctx, o)
+		}
+		if o.Perpetual.IsRiskEntry() && o.Perpetual.LocalProtection && o.TIF == TIFGTC && o.Held.ChildClientID != "" &&
+			!o.Held.CancelRequested && c.order(o.Perpetual.ProtectionID).ID == "" {
+			b := c.brokers[o.Venue].(PerpetualBroker)
+			if mark, fresh := b.FairPrice(o.Symbol); fresh && (o.Side == SideBuy && mark <= o.Perpetual.ProtectionPrice ||
+				o.Side == SideShort && mark >= o.Perpetual.ProtectionPrice) {
+				c.requestHeldVenueCancel(ctx, o, "protective price reached; canceling the resting entry")
+			}
 		}
 	}
 }
@@ -123,11 +140,13 @@ func (c *Core) activatePerpetualRiskStop(ctx context.Context, stop Order) {
 		}
 	}
 	qty := min(stop.LeavesQty, math.Abs(p.Qty))
+	if c.cancelPerpetualRiskEntries(ctx, stop) {
+		return
+	}
 	if stop.Perpetual.WholePosition {
-		c.cancelWaitingPerpetualAdds(ctx, stop)
 		for _, order := range c.state.Venue(stop.Venue).Orders {
 			if order.ID != stop.ID && order.Symbol == stop.Symbol && order.Working() && !order.isPerpetualRiskStop() {
-				return // finish reconciling any IOC fill or manual reduction first
+				return // finish reconciling the entry or any manual reduction first
 			}
 		}
 		qty = math.Abs(p.Qty)
@@ -152,16 +171,20 @@ func (c *Core) activatePerpetualRiskStop(ctx context.Context, stop Order) {
 	go c.postHeldChild(ctx, b, req)
 }
 
-func (c *Core) cancelWaitingPerpetualAdds(ctx context.Context, stop Order) {
-	if !stop.Perpetual.WholePosition {
-		return
-	}
+func (c *Core) cancelPerpetualRiskEntries(ctx context.Context, stop Order) bool {
+	awaitingCancel := false
 	for _, entry := range c.state.Venue(stop.Venue).Orders {
-		if p := entry.Perpetual; p != nil && p.WholePosition && p.IsRiskEntry() && p.ProtectionID == stop.ID &&
-			entry.Working() && entry.Held != nil && entry.Held.ChildClientID == "" {
+		if !entry.Working() || entry.Held == nil || !entry.Perpetual.IsRiskEntry() || entry.Perpetual.ProtectionID != stop.ID {
+			continue
+		}
+		if entry.Held.ChildClientID == "" {
 			_ = c.handleCancel(ctx, CancelOrder{Venue: stop.Venue, OrderID: entry.ID})
+		} else if entry.TIF == TIFGTC {
+			c.requestHeldVenueCancel(ctx, entry, "canceling the resting entry linked to this stop")
+			awaitingCancel = true
 		}
 	}
+	return awaitingCancel
 }
 
 func (c *Core) resumePerpetualRiskStop(ctx context.Context, o Order) CmdAck {

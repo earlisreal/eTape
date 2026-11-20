@@ -46,8 +46,6 @@ type Draft = {
     unknown: boolean;
     maxQty: number;
     route?: StopLimitRoutePreview;
-    opening?: PerpetualOpeningPreview;
-    openingRequest?: Promise<void>;
     error?: string;
 };
 export function ChartRiskEntry(props: Props): JSX.Element {
@@ -90,6 +88,9 @@ export function ChartRiskEntry(props: Props): JSX.Element {
         let frame: number | null = null;
         let hover: PointerEvent | null = null;
         let lastPoint: PointerEvent | null = null;
+        let opening: PerpetualOpeningPreview | undefined;
+        let warming = false;
+        let disposed = false;
         const perpetualSide = () => {
             const perp = draft?.template.perpetual;
             if (!perp || !draft) return undefined;
@@ -120,10 +121,10 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             ["bingx-vst", "bingx-live"].includes(executionVenue()?.broker ?? "");
         const livePerpetual = () => !!draft?.template.perpetual && executionVenue()?.env === "live" &&
             (executionVenue()?.broker === "mexc" || bingx());
-        const needsOpening = () => bingx() || livePerpetual();
+        const needsOpening = () => bingx() || (props.symbol.startsWith("PERP.MEXC.") && executionVenue()?.broker === "mexc");
         const openingLimit = () => {
             const side = perpetualSide();
-            return side === "BUY" ? draft?.opening?.long : side === "SHORT" ? draft?.opening?.short : undefined;
+            return side === "BUY" ? opening?.long : side === "SHORT" ? opening?.short : undefined;
         };
         const contract = () => latest.current.stores.quote.get(latest.current.symbol)?.contract;
         const snap = (value: number) => {
@@ -135,9 +136,11 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             return endpoint === "buy" ? short() ? "SHORT" : "BUY" : short() ? "COVER" : "SELL";
         };
         const pxText = (price: number) => draft?.template.perpetual ? String(price) : price.toFixed(price < 1 ? 4 : 2);
+        const positionQty = () => latest.current.stores.exec.positions()
+            .find(pos => pos.venue === venue && pos.symbol === props.symbol)?.qty ?? 0;
         const protection = () => {
             const p = latest.current;
-            const qty = p.stores.exec.positions().find(pos => pos.venue === venue && pos.symbol === p.symbol)?.qty ?? 0;
+            const qty = positionQty();
             if (p.symbol.startsWith("PERP.")) {
                 const working = p.stores.exec.orders().map(v => v.order)
                     .filter(order => order.venue === venue && order.symbol === p.symbol && isWorking(order.status));
@@ -157,12 +160,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (draft?.template.perpetual) {
                 const side = perpetualSide();
                 if (!side) return null;
-                const opening = needsOpening(), terms = openingLimit();
-                if (opening && !terms?.leverage || bingx() && !draft.opening?.notional) return null;
+                const terms = openingLimit();
+                if (needsOpening() && !terms?.leverage || bingx() && !opening?.notional) return null;
                 const template = { ...draft.template, perpetual: { ...draft.template.perpetual, side } };
-                const available = Math.min(a?.availableCash ?? 0, draft.opening?.notional ? draft.opening.collateral ?? 0 : Infinity);
+                const available = Math.min(a?.availableCash ?? 0, opening?.notional ? opening.collateral ?? 0 : Infinity);
                 return perpetualRiskSize(template, contract(), draft.buy ?? 0, draft.sell ?? 0, available,
-                    reviewedOnly && draft.complete && !pointer ? draft.maxQty : undefined, opening ? terms : undefined, draft.opening?.notional);
+                    reviewedOnly && draft.complete && !pointer ? draft.maxQty : undefined, terms, opening?.notional);
             }
             const context = protection();
             const stock = draft && riskEntrySize(riskEntryAddTemplate(draft.template, context.owner, context.stop),
@@ -181,21 +184,21 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 if (short() ? draft.sell <= draft.buy : draft.sell >= draft.buy)
                     return short() ? "Choose a stop above the short entry." : draft.template.perpetual ? "Choose a stop below the long entry." : "Sell trigger must be below buy trigger.";
                 if (needsOpening() && draft.template.perpetual) {
-                    if (!draft.opening) return "Checking isolated leverage and opening capacity…";
-                    if (draft.opening.reason) return draft.opening.reason;
+                    if (!opening) return "Waiting for the chart’s opening data.";
+                    if (opening.reason) return opening.reason;
                     const terms = openingLimit();
                     if (!terms?.leverage) return "Isolated leverage is unavailable for this direction.";
                     const { leverage, leverageCap, bingxExchangeLeverage } = draft.template.perpetual;
-                    if (bingx() && draft.opening.notional?.position.qty !== protection().qty)
+                    if (bingx() && opening.notional?.position.qty !== protection().qty)
                         return "BingX position changed. Review a new chart entry.";
-                    if ((leverageCap !== undefined || leverage === undefined) && (!bingx() || protection().qty)) {
+                    if (leverageCap !== undefined || leverage === undefined) {
                         const cap = leverageCap ?? defaultLeverageCap;
                         if (terms.leverage > cap && (!bingx() || !bingxExchangeLeverage))
                             return `Isolated leverage is ${terms.leverage}×, above this preset’s ${cap}× Auto cap.`;
                     } else if (leverageCap === undefined && leverage !== undefined && leverage !== terms.leverage) {
                         return `Isolated leverage is ${terms.leverage}× and this preset uses ${leverage}×. Match the settings before sending.`;
                     }
-                    if ((!bingx() || protection().qty) && terms.maxContracts < (contract()?.minimum ?? 1))
+                    if (terms.maxContracts < (contract()?.minimum ?? 1))
                         return "Isolated opening capacity is below the minimum size.";
                 }
                 const estimate = size();
@@ -299,9 +302,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     readout.textContent += `\nEst. initial margin ${(s.margin * qty / s.qty).toFixed(2)} ${currency}`;
                     if (bingx()) {
                         const base = Number(contract()?.multiplier ?? 0) * qty;
-                        const current = openingLimit()?.leverage;
                         readout.textContent += ` · ${base.toLocaleString("en-US", { maximumFractionDigits: 10 })} ${contract()?.base ?? "base units"}`;
-                        if (current && current !== s.leverage) readout.textContent += `\nLeverage ${current}× → ${s.leverage}× at arming`;
                     }
                 }
                 if (draft.template.auto && (perpetualSide() || (!draft.template.perpetual && draft.sell! < draft.buy!)))
@@ -342,7 +343,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                         const limit = side === "buy" ? s?.buyLimit : s?.sellLimit;
                         button.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${side === "buy" ? "BUY" : "SELL"} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
                         if (draft.template.perpetual)
-                            button.title = side === "buy" ? `${leg(side)} entry · IOC limit ${limit ?? "pending"} · Last trade · 24 hours` :
+                            button.title = side === "buy" ? `${leg(side)} entry · Last trade triggers a limit using ${short() ? "bid minus" : "ask plus"} cushion · 24 hours` :
                                 `${leg(side)} protective stop · Fair price · ${bingx() ? "Whole position · Held by eTape" : `Confirmed fills${isLivePerpetual ? " · Held by eTape" : ""}`}`;
                         button.setAttribute("aria-label", `${draft.template.perpetual ? leg(side) : side === "buy" ? "Buy" : "Sell"} trigger ${pxText(price)}; drag or use arrow keys to adjust`);
                         button.disabled = draft.busy || draft.unknown;
@@ -374,7 +375,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 const limit = endpoint === "buy" ? s?.buyLimit : s?.sellLimit;
                 host.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${endpoint === "buy" ? "BUY" : "SELL"} STOP-LIMIT · trigger ${candidate} · limit ${limit ?? "pending"}\nHeld by eTape · DAY ${deadline}\n${venue} · fees/execution risk excluded\nEsc cancel`;
                 if (draft.template.perpetual)
-                    host.title = endpoint === "buy" ? `${leg(endpoint)} entry · Last trade ${candidate} · IOC limit ${limit ?? "pending"}` :
+                    host.title = endpoint === "buy" ? `${leg(endpoint)} entry · Last trade ${candidate} · Limit uses ${short() ? "bid minus" : "ask plus"} cushion` :
                         `${leg(endpoint)} protective stop · Fair price ${candidate}`;
             }
             const status = rootRef.current.querySelector<HTMLElement>("[data-risk-status]");
@@ -393,22 +394,18 @@ export function ChartRiskEntry(props: Props): JSX.Element {
         };
         const schedule = () => { if (frame === null)
             frame = requestAnimationFrame(() => { frame = null; paint(); }); };
-        const readOpening = (current: Draft, symbol: string) => {
-            if (current.openingRequest) return current.openingRequest;
-            current.openingRequest = latest.current.sendQuery("QueryPerpetualOpening", { venue, symbol })
-                .catch(() => undefined)
-                .then(raw => {
-                    if (draft !== current) return;
-                    const terms = raw as PerpetualOpeningPreview | undefined;
-                    current.opening = terms?.long && terms.short ? terms :
-                        { long: { leverage: 0, maxContracts: 0 }, short: { leverage: 0, maxContracts: 0 }, reason: "Isolated risk terms unavailable." };
-                }).finally(() => {
-                    delete current.openingRequest;
-                    if (draft !== current) return;
-                    current.maxQty = size(false)?.qty ?? 0;
-                    paint();
-                });
-            return current.openingRequest;
+        const warmOpening = async () => {
+            if (disposed || warming || !props.active || !props.configLoaded || !hasRisk || !needsOpening()) return;
+            warming = true;
+            const requestedQty = positionQty();
+            const terms = await latest.current.sendQuery("QueryPerpetualOpening", { venue, symbol: props.symbol })
+                .catch(() => undefined) as PerpetualOpeningPreview | undefined;
+            warming = false;
+            if (disposed) return;
+            opening = terms?.long && terms.short ? terms : undefined;
+            if (draft?.complete && !draft.maxQty) draft.maxQty = size(false)?.qty ?? 0;
+            paint();
+            if (bingx() && positionQty() !== requestedQty) void warmOpening();
         };
         const submit = async () => {
             if (!draft?.complete || draft.busy || draft.unknown || draft.buy === undefined || draft.sell === undefined)
@@ -425,8 +422,6 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             try {
                 if (!current.template.perpetual)
                     current.route = await latest.current.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol, riskEntry: true }) as StopLimitRoutePreview;
-                else if (needsOpening() && (!current.opening || current.opening.reason))
-                    await readOpening(current, symbol);
             }
             catch {
                 notify("not sent: Engine preview unavailable.");
@@ -481,7 +476,6 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 else {
                     current.busy = false;
                     current.error = ack.reason || "Pair rejected.";
-                    if (needsOpening()) void readOpening(current, symbol);
                     paint();
                 }
             }
@@ -526,10 +520,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             p.facadeRef.current?.setPanZoomEnabled?.(false);
             paint();
             const current = draft;
-            if (current.template.perpetual) {
-                if (needsOpening()) void readOpening(current, p.symbol);
-                return;
-            }
+            if (current.template.perpetual) return;
             void p.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol: p.symbol, riskEntry: true }).then(raw => {
                 if (draft !== current)
                     return;
@@ -715,16 +706,30 @@ export function ChartRiskEntry(props: Props): JSX.Element {
         const resize = new ResizeObserver(schedule);
         resize.observe(host);
         props.layoutRef.current = paint;
-        const unsubscribe = latest.current.stores.exec.subscribe(schedule);
+        let observedPositionQty = positionQty();
+        const unsubscribe = latest.current.stores.exec.subscribe(() => {
+            if (bingx()) {
+                const qty = positionQty();
+                if (qty !== observedPositionQty) {
+                    observedPositionQty = qty;
+                    void warmOpening();
+                }
+            }
+            schedule();
+        });
         const unsubscribeTrails = latest.current.stores.exec.subscribeTrails(schedule);
         const timer = setInterval(() => { if (draft)
             paint(); }, 1000);
+        queueMicrotask(() => { void warmOpening(); });
+        const openingTimer = setInterval(() => { void warmOpening(); }, 3000);
         return () => {
+            disposed = true;
             clear();
             if (props.layoutRef.current === paint) props.layoutRef.current = () => {};
             if (frame !== null)
                 cancelAnimationFrame(frame);
             clearInterval(timer);
+            clearInterval(openingTimer);
             resize.disconnect();
             unsubscribe();
             unsubscribeTrails();
@@ -738,7 +743,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             window.removeEventListener("pointercancel", clear);
             rootRef.current?.removeEventListener("click", click);
         };
-    }, [props.active, props.group, props.symbol, props.contextKey, props.activeTool, props.config.templates, props.layoutRef, venue, push]);
+    }, [props.active, props.group, props.symbol, props.contextKey, props.activeTool, props.config.templates, props.configLoaded, props.layoutRef, venue, hasRisk, push]);
     return <div ref={rootRef} data-testid="chart-risk-entry" style={{ display: "none", position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none" }}>
     <div data-order-line data-risk-buy style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.up}` }}/>
     <div data-order-line data-risk-sell style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.down}` }}/>

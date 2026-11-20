@@ -121,6 +121,10 @@ func (c client) placeOrder(ctx context.Context, req exec.OrderRequest, rules ins
 }
 
 func (c client) prepareOrder(ctx context.Context, req exec.OrderRequest, rules instrument.ContractRules, fairPrice float64) (orderSubmission, error) {
+	return c.prepareOrderWithSnapshot(ctx, req, rules, fairPrice, nil, nil)
+}
+
+func (c client) prepareOrderWithSnapshot(ctx context.Context, req exec.OrderRequest, rules instrument.ContractRules, fairPrice float64, cached *riskAccountSnapshot, opening *exec.PerpetualOpeningTerms) (orderSubmission, error) {
 	id, ok := instrument.ParsePerpetual(req.Symbol)
 	if !ok || id.Exchange != "MEXC" || !validClientID(req.ClientOrderID) ||
 		req.Perpetual == nil || !rules.Valid() || !rules.ValidQuantity(req.Qty) ||
@@ -161,7 +165,7 @@ func (c client) prepareOrder(ctx context.Context, req exec.OrderRequest, rules i
 		return orderSubmission{}, errors.New("invalid MEXC Futures order price or type")
 	}
 	stop := req.Perpetual.ProtectionPrice
-	if stop != 0 {
+	if stop != 0 && !req.Perpetual.LocalProtection {
 		if input.ReduceOnly || input.Type != 3 || !rules.ValidPrice(stop) ||
 			direction == longPosition && (stop >= req.LimitPrice || stop >= fairPrice) ||
 			direction == shortPosition && (stop <= req.LimitPrice || stop <= fairPrice) {
@@ -170,9 +174,15 @@ func (c client) prepareOrder(ctx context.Context, req exec.OrderRequest, rules i
 		input.StopLoss, input.LossTrend = decimal(stop), fairTrigger
 	}
 
-	state, err := c.snapshot(ctx)
-	if err != nil {
-		return orderSubmission{}, fmt.Errorf("preflight MEXC Futures: %w", err)
+	var state accountState
+	if cached != nil {
+		state = cached.state
+	} else {
+		var err error
+		state, err = c.snapshot(ctx)
+		if err != nil {
+			return orderSubmission{}, fmt.Errorf("preflight MEXC Futures: %w", err)
+		}
 	}
 	if state.Mode != oneWay {
 		return orderSubmission{}, errors.New("MEXC Futures account must be in one-way mode")
@@ -208,7 +218,7 @@ func (c client) prepareOrder(ctx context.Context, req exec.OrderRequest, rules i
 		input.PositionID = current.ID
 	} else {
 		input.Leverage = req.Perpetual.Leverage
-		if err := c.checkOpening(ctx, req, rules, fairPrice, input, direction, state, current); err != nil {
+		if err := c.checkOpening(ctx, req, rules, fairPrice, input, direction, state, current, opening); err != nil {
 			return orderSubmission{}, err
 		}
 	}
@@ -275,14 +285,14 @@ func (c client) openingTerms(ctx context.Context, symbol string) (exec.Perpetual
 	return terms, nil
 }
 
-func (c client) checkOpening(ctx context.Context, req exec.OrderRequest, rules instrument.ContractRules, fairPrice float64, input orderSubmission, direction int, state accountState, current *position) error {
+func (c client) checkOpening(ctx context.Context, req exec.OrderRequest, rules instrument.ContractRules, fairPrice float64, input orderSubmission, direction int, state accountState, current *position, cached *exec.PerpetualOpeningTerms) error {
 	if !rules.TradingEnabled || input.Leverage < rules.MinLeverage || input.Leverage > rules.MaxLeverage ||
 		fairPrice <= 0 || math.IsInf(fairPrice, 0) || math.IsNaN(fairPrice) {
 		return errors.New("MEXC Futures contract, leverage or fair price unavailable")
 	}
 	held := 0.0
 	if current != nil {
-		if current.Side != direction || current.MarginMode != isolated || current.Leverage != input.Leverage || input.StopLoss != "" {
+		if current.Side != direction || current.MarginMode != isolated || current.Leverage != input.Leverage || input.StopLoss != "" || cached != nil {
 			return errors.New("resolve the current MEXC Futures position before this opening")
 		}
 		held, _ = quantity(current.Volume)
@@ -297,13 +307,16 @@ func (c client) checkOpening(ctx context.Context, req exec.OrderRequest, rules i
 			return errors.New("resolve MEXC Futures TP/SL before adding")
 		}
 	}
-	terms, err := c.openingTerms(ctx, input.Symbol)
-	if err != nil {
-		return err
+	if cached == nil {
+		terms, err := c.openingTerms(ctx, input.Symbol)
+		if err != nil {
+			return err
+		}
+		cached = &terms
 	}
-	limit := terms.Long
+	limit := cached.Long
 	if direction == shortPosition {
-		limit = terms.Short
+		limit = cached.Short
 	}
 	if limit.Leverage == 0 {
 		return errors.New("MEXC isolated leverage is unavailable for this direction")

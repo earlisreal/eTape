@@ -56,7 +56,6 @@ const config = { activeVenue: executionVenue, templates: [{ kind: "place", id: "
 let serial = 0;
 let nextCancelBehavior = "accepted";
 let pendingCancelResolve = null;
-let finishBingXArming = null;
 const sendCommand = async (name, args) => {
   if (name === "GetConfig") return { kind: "ack", corrId: "config", status: "accepted", value: config };
   if (name === "SetConfig") return { kind: "ack", corrId: "config", status: "accepted" };
@@ -70,20 +69,13 @@ const sendCommand = async (name, args) => {
     window.chartPanelProbe.lastRiskSubmitted = args;
     if (name === "SubmitPerpetualRiskEntry") {
       const entry = {
-        id: "sim-risk", venue: executionVenue, symbol: args.symbol, side: args.side, type: "STOP_LIMIT", tif: "IOC", session: "AUTO",
+        id: "sim-risk", venue: executionVenue, symbol: args.symbol, side: args.side, type: "STOP_LIMIT", tif: "GTC", session: "AUTO",
         qty: args.maxQty, limitPrice: args.trigger, stopPrice: args.trigger, pendingProtectionPrice: args.stop,
-        perpetualRisk: { budget: args.budget, leverage: args.leverage, autoLeverage: args.autoLeverage, entryCushion: args.cushion,
+        perpetualRisk: { budget: args.budget, leverage: args.leverage, autoLeverage: args.autoLeverage, entryCushion: args.cushion, stopId: "sim-protection",
           ...(bingxVenue ? { wholePosition: true, sharedStopId: args.sharedStopId } : {}) },
         status: "SUBMITTED", executedQty: 0, leavesQty: args.maxQty, avgFillPrice: 0, rejectReason: "", replacesId: "",
-        createdMs: Date.now(), updatedMs: Date.now(), held: { phase: "WAITING", deadlineMs: Date.now() + 3600000 },
+        createdMs: Date.now(), updatedMs: Date.now(), held: { phase: "ARMED", deadlineMs: Date.now() + 3600000 },
       };
-      if (bingxVenue) {
-        stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
-          ...entry, held: { ...entry.held, phase: "PAUSED", perpetualArmPending: true, pausedReason: "verifying BingX opening terms" },
-        } });
-        await new Promise(resolve => { finishBingXArming = resolve; });
-        finishBingXArming = null;
-      }
       stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: entry });
     }
     return { kind: "ack", corrId: "risk", status: "accepted", orderId: "sim-risk" };
@@ -145,7 +137,7 @@ const chartBars = axisFlicker ? Array.from({ length: 90 }, (_, i) => {
 const sendQuery = async (name, args) => {
   if (name === "QueryPerpetualOpening" && bingxVenue) {
     const qty = stores.exec.positions()[0]?.qty ?? 0;
-    const leverage = qty ? 8 : 3;
+    const leverage = 3;
     const side = { leverage, maxLeverage: 8, maxContracts: 1000 };
     return { long: side, short: side, collateral: 300, notional: {
       mark: 4.51, minimumValue: 2, tiers: [{ maximum: 1_000_000, rate: .005, deduction: 0 }],
@@ -256,8 +248,6 @@ function ConfigReadyProbe() {
       }, startRisk() {
         stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { ...stores.exec.accounts()[0], tsMs: Date.now() } });
         return initiateChartRiskEntry(riskTemplate);
-      }, finishBingXArming() {
-        finishBingXArming?.();
       }, settleMexcEntry(filled) {
         const entry = stores.exec.liveOrder("sim-risk");
         stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {

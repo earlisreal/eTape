@@ -13,7 +13,8 @@ import (
 
 type mexcRiskBroker struct {
 	*heldTestBroker
-	fair float64
+	fair     float64
+	capacity int64
 }
 
 func (mexcRiskBroker) Capabilities() Capabilities {
@@ -26,7 +27,14 @@ func (mexcRiskBroker) ContractRules(symbol string) (instrument.ContractRules, bo
 }
 func (b *mexcRiskBroker) FairPrice(string) (float64, bool) { return b.fair, b.fair > 0 }
 func (*mexcRiskBroker) PendingOrderIDs() []string          { return nil }
-func (*mexcRiskBroker) OpeningTerms(context.Context, string) (PerpetualOpeningTerms, error) {
+func (b *mexcRiskBroker) OpeningTerms(context.Context, string) (PerpetualOpeningTerms, error) {
+	return b.CachedOpeningTerms("")
+}
+func (b *mexcRiskBroker) CachedOpeningTerms(string) (PerpetualOpeningTerms, error) {
+	if b.capacity > 0 {
+		limit := PerpetualOpeningLimit{Leverage: 5, MaxContracts: b.capacity}
+		return PerpetualOpeningTerms{Long: limit, Short: limit}, nil
+	}
 	return PerpetualOpeningTerms{
 		Long:  PerpetualOpeningLimit{Leverage: 5, MaxContracts: 2},
 		Short: PerpetualOpeningLimit{Leverage: 4, MaxContracts: 3},
@@ -150,7 +158,7 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 		t.Run(side.String(), func(t *testing.T) {
 			ctx := t.Context()
 			clk := clock.NewFake(time.Date(2026, 11, 21, 1, 0, 0, 0, time.UTC))
-			broker := &mexcRiskBroker{heldTestBroker: newHeldTestBroker(), fair: 100_000}
+			broker := &mexcRiskBroker{heldTestBroker: newHeldTestBroker(), fair: 100_000, capacity: 10}
 			demand := &heldDemandStub{}
 			core := NewCore(CoreConfig{Venues: []VenueID{venue}, Clock: clk, Store: &heldTestStore{}, IDGen: NewOrderIDGen(clk, rand.New(rand.NewSource(1))),
 				Gate:    GateConfig{Venue: map[VenueID]VenueLimits{venue: {}}},
@@ -164,8 +172,7 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 				trigger, stop, crossed = 99_000, 99_500, 98_999
 			}
 			cmd := SubmitPerpetualRiskEntry{Venue: venue, Symbol: symbol, Side: side, Trigger: trigger, Stop: stop,
-				Leverage: 5, Cushion: LimitCushion{Value: 1, Unit: "$"}, Budget: 10, MaxQty: 3,
-				openingLimit: PerpetualOpeningLimit{Leverage: 5, MaxContracts: 10}}
+				Leverage: 5, Cushion: LimitCushion{Value: 1, Unit: "$"}, Budget: 10, MaxQty: 3}
 			if ack := core.handlePerpetualRiskEntry(ctx, cmd); ack.Accepted || !strings.Contains(ack.Reason, "enable Stop-Limit") {
 				t.Fatalf("entry without live acknowledgement: %+v", ack)
 			}
@@ -185,7 +192,7 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 				t.Fatalf("could not move entry trigger: %+v", amended)
 			}
 			if o := core.order(edit.OrderID); o.StopPrice != trigger || o.LimitPrice != trigger+step || o.LeavesQty != 4 {
-				t.Fatalf("entry trigger, IOC limit or quantity did not update: %+v", o)
+				t.Fatalf("entry trigger, reviewed limit or quantity did not update: %+v", o)
 			}
 			edit.PendingProtection, edit.StopPrice, edit.Qty = true, stop, 3
 			if stale := core.handleReplace(ctx, edit); stale.Accepted {
@@ -204,6 +211,8 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 				t.Fatalf("pending protection did not preserve entry trigger and resize: %+v", o)
 			}
 			edit.ExpectedProtectionPrice = stop
+			book := TrailBook{Symbol: symbol, Bid: trigger - 1, Ask: trigger + 1, ReceiptMs: core.now()}
+			core.handlePerpetualBook(ctx, book)
 			clk.Advance(time.Millisecond)
 			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: 100_000, Seq: 1, TsMs: core.now(), RecvTsMs: core.now()})
 			if o := core.order(ack.OrderID); o.Held.Phase != HeldArmed || o.Held.ChildClientID != "" {
@@ -228,18 +237,19 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 			}
 			broker.fair = trigger
 			clk.Advance(time.Millisecond)
-			core.handleEligiblePrint(ctx, EligiblePrint{Symbol: symbol, Price: crossed, Seq: 4, TsMs: core.now(), RecvTsMs: core.now()})
+			book.ReceiptMs = core.now()
+			core.handlePerpetualBook(ctx, book)
 			select {
 			case req := <-broker.submits:
-				if req.Venue != venue || req.ClientOrderID != ack.OrderID || req.Type != TypeLimit || req.TIF != TIFIOC ||
-					req.Side != side || req.Qty != 3 || req.LimitPrice != trigger+step || req.Perpetual.ProtectionPrice != 0 || req.Perpetual.Leverage != 5 {
-					t.Fatalf("wrong live IOC request: %+v", req)
+				if req.Venue != venue || req.ClientOrderID != ack.OrderID || req.Type != TypeLimit || req.TIF != TIFGTC ||
+					req.Side != side || req.Qty != 3 || req.LimitPrice != trigger+2*step || req.Perpetual.ProtectionPrice != stop || req.Perpetual.Leverage != 5 {
+					t.Fatalf("wrong live limit request: %+v", req)
 				}
 			case <-time.After(time.Second):
 				t.Fatal("live risk entry did not activate")
 			}
 			if racing := core.handleReplace(ctx, edit); racing.Accepted {
-				t.Fatal("pending stop edit accepted after IOC dispatch")
+				t.Fatal("pending stop edit accepted after limit dispatch")
 			}
 			report := PerpetualObservation{Venue: venue, OrderID: ack.OrderID, BrokerOrderID: "123", Status: StatusAccepted,
 				Fills: []PerpetualFill{{ID: "1", Qty: 2, Price: trigger, TsMs: core.now()}}, Persisted: make(chan bool, 1)}
@@ -250,7 +260,7 @@ func TestMEXCLiveChartRiskEntry(t *testing.T) {
 			report.Status, report.PositionID = StatusCanceled, "777"
 			core.handleBrokerEvent(ctx, report)
 			if o := core.order(ack.OrderID); !<-report.Persisted || o.Status != StatusCanceled || o.ExecutedQty != 2 {
-				t.Fatalf("IOC remainder did not reconcile: %+v", o)
+				t.Fatalf("limit remainder did not reconcile: %+v", o)
 			}
 			if _, held := demand.held[ack.OrderID]; held {
 				t.Fatal("terminal child kept its ticker lease")

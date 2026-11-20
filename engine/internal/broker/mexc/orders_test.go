@@ -94,6 +94,35 @@ func tradingRules() instrument.ContractRules {
 		Minimum: 1, Maximum: 1000, MinLeverage: 1, MaxLeverage: 10, TakerFee: "0.0005", TradingEnabled: true}
 }
 
+func TestMEXCChartRiskLimitUsesCachedOpeningTerms(t *testing.T) {
+	c := fixture(t, func(w http.ResponseWriter, r *http.Request, body []byte) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/private/order/create" {
+			t.Errorf("protected limit made an extra request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var input orderSubmission
+		if err := json.Unmarshal(body, &input); err != nil || input.Type != 1 || input.Price != "100100" || input.StopLoss != "" {
+			t.Errorf("wrong MEXC resting limit body: %+v, %v", input, err)
+		}
+		sendResult(w, `{"orderId":"`+fixtureOrderID+`","ts":`+fixtureTime+`}`)
+	})
+	rules := tradingRules()
+	state := &riskAccountSnapshot{state: accountState{Balance: accountAsset{Available: "100"}, Mode: oneWay}}
+	terms := &exec.PerpetualOpeningTerms{Long: exec.PerpetualOpeningLimit{Leverage: 5, MaxContracts: 20}}
+	req := exec.OrderRequest{Symbol: "PERP.MEXC.BTC_USDT", ClientOrderID: "chart-entry", Side: exec.SideBuy,
+		Type: exec.TypeLimit, Qty: 2, TIF: exec.TIFGTC, LimitPrice: 100100,
+		Perpetual: &exec.PerpetualOrder{Multiplier: rules.ContractSize(), Leverage: 5, LocalProtection: true,
+			ProtectionPrice: 99_500, ProtectionID: "stop", RiskBudget: 1}}
+	input, err := c.prepareOrderWithSnapshot(t.Context(), req, rules, 100000, state, terms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt, err := c.sendOrder(t.Context(), input); err != nil || receipt.ID != fixtureOrderID {
+		t.Fatalf("MEXC did not accept the prepared limit: %+v, %v", receipt, err)
+	}
+}
+
 func TestPlaceOrderSetsMEXCOneWaySideAndProtection(t *testing.T) {
 	for _, route := range []struct {
 		name               string

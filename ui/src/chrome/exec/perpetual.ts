@@ -44,14 +44,12 @@ export function perpetualRiskSize(
   if (notionalRisk && openingLimit) {
     const ceiling = autoLeverage ? (p.bingxExchangeLeverage ? Infinity : p.leverageCap ?? defaultLeverageCap) : leverage;
     const held = notionalRisk.position;
-    let upper = Math.min(ceiling, openingLimit.maxLeverage ?? 0, contract.maxLeverage);
-    let lower = autoLeverage ? contract.minLeverage : leverage;
+    if (openingLimit.leverage < contract.minLeverage || openingLimit.leverage > Math.min(ceiling, openingLimit.maxLeverage ?? 0, contract.maxLeverage)) return null;
+    leverage = openingLimit.leverage;
     if (held.qty) {
       const heldBuffer = Math.max(Number(contract.priceTick), held.avgPrice * 0.001);
       const clears = long ? stop - heldBuffer > held.liquidationPrice : held.liquidationPrice > stop + heldBuffer;
-      if (!clears || held.liquidationPrice < 0 || held.margin <= 0 || long !== (held.qty > 0) ||
-          held.leverage !== openingLimit.leverage || held.leverage < lower || held.leverage > upper) return null;
-      upper = lower = held.leverage;
+      if (!clears || held.liquidationPrice < 0 || held.margin <= 0 || long !== (held.qty > 0) || held.leverage !== openingLimit.leverage) return null;
     }
     const direction = long ? 1 : -1;
     const mark = stop - direction * Math.max(Number(contract.priceTick), limit * 0.001);
@@ -62,30 +60,27 @@ export function perpetualRiskSize(
     const step = contract.quantityStep;
     const maximum = notionalRisk.tiers.at(-1)?.maximum;
     if (mark <= 0 || step < 1 || !maximum) return null;
-    for (let candidate = upper; candidate >= lower; candidate--) {
-      const capacity = candidate === openingLimit.leverage ? openingLimit.maxContracts : Infinity;
-      const affordable = collateral / (marginPrice * unit / candidate + fees);
-      let lots = Math.floor(Math.min(target, capacity, affordable) / step) * step;
-      if (!Number.isSafeInteger(lots) || lots < minQty || lots <= qty) continue;
-      const passes = (size: number) => {
-        const base = size * unit;
-        const value = (currentSize + base) * mark;
-        const tier = notionalRisk.tiers.find(t => value <= t.maximum);
-        const equity = currentEquity + base * (limit / candidate + direction * (mark - limit) - limit * fee);
-        return !!tier && (currentSize + base) * marginPrice <= maximum &&
-          equity > Math.max(0, value * tier.rate - tier.deduction) + value * fee;
-      };
-      if (!passes(lots)) {
-        let left = 0, right = lots / step;
-        while (left < right) {
-          const middle = left + Math.floor((right - left + 1) / 2);
-          if (passes(middle * step)) left = middle;
-          else right = middle - 1;
-        }
-        lots = left * step;
+    const affordable = collateral / (marginPrice * unit / leverage + fees);
+    let lots = Math.floor(Math.min(target, openingLimit.maxContracts, affordable) / step) * step;
+    if (!Number.isSafeInteger(lots) || lots < minQty) return null;
+    const passes = (size: number) => {
+      const base = size * unit;
+      const value = (currentSize + base) * mark;
+      const tier = notionalRisk.tiers.find(t => value <= t.maximum);
+      const equity = currentEquity + base * (limit / leverage + direction * (mark - limit) - limit * fee);
+      return !!tier && (currentSize + base) * marginPrice <= maximum &&
+        equity > Math.max(0, value * tier.rate - tier.deduction) + value * fee;
+    };
+    if (!passes(lots)) {
+      let left = 0, right = lots / step;
+      while (left < right) {
+        const middle = left + Math.floor((right - left + 1) / 2);
+        if (passes(middle * step)) left = middle;
+        else right = middle - 1;
       }
-      if (lots >= minQty && lots > qty) { qty = lots; leverage = candidate; }
+      lots = left * step;
     }
+    qty = lots >= minQty ? lots : 0;
   } else if (autoLeverage) {
     // Match ContractRules.AutoRiskSize at the buffered mark beyond the stop.
     const cap = Math.min(p.leverageCap ?? defaultLeverageCap, contract.maxLeverage);

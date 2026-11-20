@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/perps"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/instrument"
 )
@@ -107,14 +107,31 @@ func (a *apiClient) maintenanceTiers(ctx context.Context, symbol string) ([]inst
 	return tiers, nil
 }
 
-func (a *apiClient) riskOpening(ctx context.Context, symbol string, item contract, state accountState) (exec.PerpetualOpeningTerms, error) {
-	var terms exec.PerpetualOpeningTerms
-	if slices.ContainsFunc(state.Orders, func(o order) bool { return o.Symbol == symbol }) {
+func (a *apiClient) cachedRiskOpening(symbol string) (exec.PerpetualOpeningTerms, error) {
+	now := a.clock.Now()
+	terms, err := a.opening.Current(symbol, now)
+	if err != nil {
+		return terms, err
+	}
+	id, ok := instrument.ParsePerpetual(symbol)
+	if !ok || id.Exchange != "BINGX" {
+		return terms, errors.New("select a BingX contract")
+	}
+	item, ok := a.contract(id.Native)
+	if !ok || item.Close != "true" {
+		return terms, errors.New("BingX contract is unavailable for protected trading")
+	}
+	snapshot := a.riskAccount.Load()
+	if snapshot == nil || now.Sub(snapshot.at) >= perps.OpeningSnapshotMaxAge {
+		return terms, errors.New("fresh BingX account data required")
+	}
+	state := snapshot.state
+	if slices.ContainsFunc(state.Orders, func(o order) bool { return o.Symbol == id.Native }) {
 		return terms, errors.New("resolve working BingX orders for this contract first")
 	}
 	var held instrument.RiskPosition
 	for _, row := range state.Positions {
-		if row.Symbol != symbol {
+		if row.Symbol != id.Native {
 			continue
 		}
 		qty, ok := positionLots(row, *item.QtyDigits)
@@ -135,6 +152,27 @@ func (a *apiClient) riskOpening(ctx context.Context, symbol string, item contrac
 		terms.PositionID = id
 		held = instrument.RiskPosition{Qty: qty, AvgPrice: average, Margin: margin, LiquidationPrice: liq, Leverage: row.Leverage}
 	}
+	mark, fresh := a.FairPrice(symbol)
+	if !fresh {
+		return terms, errors.New("fresh BingX mark price required")
+	}
+	notional := *terms.Notional
+	notional.Mark, notional.Position = mark, held
+	terms.Notional, terms.Collateral = &notional, state.Account.AvailableCash
+	return terms, nil
+}
+
+func (a *apiClient) readRiskSettings(ctx context.Context, symbol string) (exec.PerpetualOpeningTerms, error) {
+	var terms exec.PerpetualOpeningTerms
+	id, ok := instrument.ParsePerpetual(symbol)
+	if !ok || id.Exchange != "BINGX" {
+		return terms, errors.New("select a BingX contract")
+	}
+	item, ok := a.contract(id.Native)
+	if !ok || item.Close != "true" {
+		return terms, errors.New("BingX contract is unavailable for protected trading")
+	}
+	symbol = id.Native
 	minimum, err := item.MinimumValue.Float64()
 	if err != nil || !(minimum >= 0 && minimum < math.Inf(1)) {
 		return terms, errors.New("BingX minimum order value is unavailable")
@@ -161,42 +199,25 @@ func (a *apiClient) riskOpening(ctx context.Context, symbol string, item contrac
 	if !longOK || !shortOK || limits.Long < 1 || limits.Short < 1 || limits.LongMax < 1 || limits.ShortMax < 1 {
 		return terms, errors.New("BingX leverage or opening capacity is unavailable")
 	}
-	// Read the dispatch mark after the other checks so it is current at submission.
-	mark, err := a.markPrice(ctx, symbol)
-	if err != nil {
-		return terms, err
-	}
 	terms.Long = exec.PerpetualOpeningLimit{Leverage: limits.Long, MaxContracts: longQty, MaxLeverage: limits.LongMax}
 	terms.Short = exec.PerpetualOpeningLimit{Leverage: limits.Short, MaxContracts: shortQty, MaxLeverage: limits.ShortMax}
-	terms.Notional = &instrument.NotionalRisk{Mark: mark, MinimumValue: minimum, Tiers: tiers, Position: held}
-	terms.Collateral = state.Account.AvailableCash
+	terms.Notional = &instrument.NotionalRisk{MinimumValue: minimum, Tiers: tiers}
 	return terms, nil
 }
 
 func (a *Adapter) OpeningTerms(ctx context.Context, symbol string) (exec.PerpetualOpeningTerms, error) {
-	return a.api.readRiskOpening(ctx, symbol)
+	if _, ok := a.ContractRules(symbol); !ok {
+		return exec.PerpetualOpeningTerms{}, errors.New("BingX contract terms are unavailable")
+	}
+	a.api.opening.Refresh(ctx, symbol, a.api.clock.Now(), a.api.readRiskSettings)
+	return a.CachedOpeningTerms(symbol)
 }
 
-func (a *apiClient) readRiskOpening(ctx context.Context, symbol string) (exec.PerpetualOpeningTerms, error) {
-	id, ok := instrument.ParsePerpetual(symbol)
-	if !ok || id.Exchange != "BINGX" {
-		return exec.PerpetualOpeningTerms{}, errors.New("select a BingX contract")
-	}
-	if err := a.refreshCatalog(ctx); err != nil {
-		return exec.PerpetualOpeningTerms{}, err
-	}
-	item, ok := a.contract(id.Native)
-	if !ok || item.Close != "true" {
-		return exec.PerpetualOpeningTerms{}, errors.New("BingX contract is unavailable for protected trading")
-	}
-	state, err := a.account(ctx)
-	if err != nil {
-		return exec.PerpetualOpeningTerms{}, err
-	}
-	return a.riskOpening(ctx, id.Native, item, state)
+func (a *Adapter) CachedOpeningTerms(symbol string) (exec.PerpetualOpeningTerms, error) {
+	return a.api.cachedRiskOpening(symbol)
 }
 
-func (a *apiClient) checkRiskOpening(req exec.OrderRequest, rules instrument.ContractRules, terms exec.PerpetualOpeningTerms, dispatch bool) error {
+func (a *apiClient) checkRiskOpening(req exec.OrderRequest, rules instrument.ContractRules, terms exec.PerpetualOpeningTerms) error {
 	p := req.Perpetual
 	long := req.Side == exec.SideBuy
 	side := terms.Long
@@ -210,7 +231,7 @@ func (a *apiClient) checkRiskOpening(req exec.OrderRequest, rules instrument.Con
 	if p.Leverage != side.Leverage || p.Leverage > side.MaxLeverage {
 		return errors.New("BingX isolated leverage differs from the reviewed setting")
 	}
-	if dispatch && (long && terms.Notional.Mark <= p.ProtectionPrice || !long && terms.Notional.Mark >= p.ProtectionPrice) {
+	if long && terms.Notional.Mark <= p.ProtectionPrice || !long && terms.Notional.Mark >= p.ProtectionPrice {
 		return errors.New("BingX mark price has already reached the protective stop")
 	}
 	qty, _ := rules.SizeNotionalRisk(*terms.Notional, p.RiskBudget, terms.Collateral, req.LimitPrice, p.ProtectionPrice,
@@ -219,53 +240,4 @@ func (a *apiClient) checkRiskOpening(req exec.OrderRequest, rules instrument.Con
 		return errors.New("BingX capacity, collateral or liquidation clearance changed; review the entry")
 	}
 	return nil
-}
-
-func (a *Adapter) ArmPerpetualRisk(ctx context.Context, req exec.OrderRequest) (int64, error) {
-	var capacity int64
-	err := a.WithIdleContract(req.Symbol, func() error {
-		p := req.Perpetual
-		if p == nil || !p.WholePosition || !p.LocalProtection || !p.IsRiskEntry() || req.Side != exec.SideBuy && req.Side != exec.SideShort {
-			return errors.New("invalid BingX protected entry")
-		}
-		terms, err := a.OpeningTerms(ctx, req.Symbol)
-		if err != nil {
-			return err
-		}
-		rules, ok := a.ContractRules(req.Symbol)
-		if !ok || terms.PositionID != p.PositionID {
-			return errors.New("BingX position or contract changed; review the entry")
-		}
-		side := terms.Long
-		if req.Side == exec.SideShort {
-			side = terms.Short
-		}
-		if side.Leverage != p.Leverage {
-			if p.PositionID != "" || !p.AutoLeverage || p.Leverage < 1 || p.Leverage > side.MaxLeverage {
-				return errors.New("use the verified BingX leverage for this entry")
-			}
-			qty, _ := rules.SizeNotionalRisk(*terms.Notional, p.RiskBudget, terms.Collateral, req.LimitPrice, p.ProtectionPrice,
-				p.Leverage, p.Leverage, side.Leverage, side.MaxContracts, int64(req.Qty), req.Side == exec.SideBuy)
-			if float64(qty) != req.Qty {
-				return errors.New("BingX entry no longer fits the reviewed leverage")
-			}
-			id, _ := instrument.ParsePerpetual(req.Symbol)
-			var response json.RawMessage
-			writeErr := a.api.request(ctx, http.MethodPost, leveragePath, url.Values{"symbol": {id.Native}, "side": {"BOTH"}, "leverage": {strconv.Itoa(p.Leverage)}}, true, &response)
-			terms, err = a.OpeningTerms(ctx, req.Symbol)
-			if err != nil || terms.Long.Leverage != p.Leverage || terms.Short.Leverage != p.Leverage {
-				return fmt.Errorf("BingX leverage change could not be verified: %w", errors.Join(writeErr, err, errors.New("check the contract's current leverage")))
-			}
-			side = terms.Long
-			if req.Side == exec.SideShort {
-				side = terms.Short
-			}
-		}
-		if err := a.api.checkRiskOpening(req, rules, terms, false); err != nil {
-			return err
-		}
-		capacity = side.MaxContracts
-		return nil
-	})
-	return capacity, err
 }

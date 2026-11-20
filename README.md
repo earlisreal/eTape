@@ -274,12 +274,23 @@ budget and the **Leverage cap** for Auto leverage (10× by default on new
 presets). Focus the contract's linked chart and select the entry trigger followed
 by the protective stop. With Auto direction, drag or click down for a long and
 up for a short. The preview shows the side, contracts, estimated loss, selected
-leverage and initial margin. Auto leverage chooses the lowest leverage that
-supports the risk-sized entry and keeps estimated liquidation beyond the stop
-with a buffer. If margin or risk tiers limit the entry, the preview shows the
-smaller size. eTape waits for the last trade to trigger a price-capped IOC. The
-simulator holds a fair-price stop for the filled contracts. Paper positions and
-stops are stored alongside the local eTape database for restart recovery.
+leverage and initial margin. In the MEXC simulator, Auto leverage chooses the
+lowest leverage that supports the risk-sized entry with liquidation clearance.
+Live and BingX Virtual size at the contract's configured isolated leverage
+within the preset cap. The chart loads live opening terms in the background.
+Press Enter to arm, or enable **Auto-send Chart Risk Entry** to arm when you
+finish drawing.
+
+A long triggers when the last trade reaches or exceeds the entry line. A short
+triggers when it reaches or drops below the line. An already-crossed trigger
+can send immediately. At the trigger, eTape uses a fresh ask plus the entry
+cushion for a long or a fresh bid minus the cushion for a short. It rounds to
+the exchange tick, reduces quantity if needed to stay within the reviewed risk
+budget, and sends a regular good-til-canceled limit. The setup expires after
+24 hours and eTape requests cancellation of any working remainder. Confirmed
+fills receive mark-price protection, and a protective crossing cancels the
+remaining entry before the close. Paper positions and stops are stored in
+the local eTape ledger.
 On MEXC and BingX, drag either pending chart line or use the price pill's
 arrow keys. The entry and stop must stay in the original long or short
 direction. eTape recalculates contract quantity using the original risk budget
@@ -313,13 +324,12 @@ MEXC Live Chart Risk Entry** and enable Stop-Limit for the account. On a linked
 MEXC chart, select that live venue and use an Auto, Perpetual long or Perpetual
 short preset from a flat position with no working orders. The reviewed leverage
 must match the effective isolated leverage on MEXC. The chart preview shows
-**LIVE · eTape-held fair-price stop**. The last-trade trigger sends an IOC
-limit entry. A breakout long can have its stop between the current fair price
-and the entry trigger. At activation, the entry pauses if fair price is already
-at or through the stop. The chart shows the planned stop price and
-**Account → Open Orders** lists the SELL or COVER stop as **Pending fill**.
-Pending prices lock when the IOC is sent. After the entry settles, eTape sizes
-the stop from confirmed fills and binds it to the MEXC position. A fair-price
+**LIVE · eTape-held fair-price stop**. A breakout long can have its stop
+between the current fair price and the entry trigger. At activation, the
+entry pauses if fair price is already at or through the stop. The planned
+SELL or COVER stop appears as **Pending fill** until MEXC confirms a fill
+and the matching position. The entry prices lock on dispatch, and subsequent
+fills update the position-bound stop. A fair-price
 crossing sends a reduce-only market close. eTape needs to stay running and receive fresh market and account
 data. Use **Account → Open Orders → Resume** after restarting or after a feed
 or broker disconnect pauses the stop. Review Account for pending, paused or
@@ -329,13 +339,11 @@ stop removes it.
 For **BingX Chart Risk Entry**, select BingX Virtual or BingX Live in the linked
 Order Ticket. Live requires **Settings → Orders & hotkeys → Review BingX Live
 Chart Risk Entry → Enable Stop-Limit**. Start flat with no working orders. The
-preview shows lots, base quantity, risk, initial margin and leverage. From
-flat, Auto sizes to the risk budget and chooses the highest eligible leverage
-for that size within the preset cap and liquidation buffer. Enable
-**Use BingX exchange leverage ceiling** to use the verified exchange limit as
-the cap. The chart shows **Verifying** while eTape checks the opening terms
-and applies or confirms leverage. Once armed, a qualifying last trade triggers
-the price-capped IOC entry. eTape rechecks opening terms before sending it.
+preview shows lots, base quantity, risk, initial margin and the configured
+isolated leverage. **Use BingX exchange leverage ceiling** lets the configured
+leverage reach the exchange's cap. Change leverage on BingX before drawing
+if you want a different setting. The signed opening settings refresh in
+the background, and arming and sending the limit use local data.
 
 Use Chart Risk Entry again on the same side to add with its own risk budget at
 the position's current leverage. Keep or tighten the shared stop. A tighter

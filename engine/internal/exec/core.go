@@ -98,10 +98,9 @@ func (SetActiveVenue) isCommand()                {}
 // CmdAck is the synchronous accepted|blocked ack; order outcomes arrive later as
 // Updates.
 type CmdAck struct {
-	Accepted     bool
-	Reason       string
-	OrderID      string
-	perpetualArm *OrderRequest
+	Accepted bool
+	Reason   string
+	OrderID  string
 }
 
 type cmdReq struct {
@@ -152,6 +151,8 @@ type Core struct {
 	lastPrintSeq        map[string]int64
 	lastPrintDay        map[string]int64
 	lastEligible        map[string]EligiblePrint
+	perpetualBooks      map[string]TrailBook
+	perpetualQuoteWait  map[string]bool
 	protectionPrices    map[string]*protectionPrice
 	protectionPending   map[string]pendingProtection
 	protectionBooks     map[string]bool
@@ -227,6 +228,8 @@ func NewCore(cfg CoreConfig) *Core {
 		lastPrintSeq:           make(map[string]int64),
 		lastPrintDay:           make(map[string]int64),
 		lastEligible:           make(map[string]EligiblePrint),
+		perpetualBooks:         make(map[string]TrailBook),
+		perpetualQuoteWait:     make(map[string]bool),
 		positionExecIDs:        make(map[string]bool),
 		protectionChecks:       make(map[VenueID]*protectionCheck),
 		protectionRevision:     make(map[VenueID]uint64),
@@ -272,20 +275,6 @@ func (c *Core) Do(cmd Command) CmdAck {
 // DoContext is the shutdown-safe form used by runtime observers that may be
 // called while the top-level engine context is being canceled.
 func (c *Core) DoContext(ctx context.Context, cmd Command) CmdAck {
-	if entry, ok := cmd.(SubmitPerpetualRiskEntry); ok {
-		if broker := c.brokers[entry.Venue]; broker != nil && broker.Capabilities().EngineHeldPerpetualRiskEntry {
-			terms, err := c.PreviewPerpetualOpening(ctx, entry.Venue, entry.Symbol)
-			if err != nil {
-				return CmdAck{Reason: err.Error()}
-			}
-			entry.openingLimit = terms.Long
-			if entry.Side == SideShort {
-				entry.openingLimit = terms.Short
-			}
-			entry.openingTerms = terms
-			cmd = entry
-		}
-	}
 	reply := make(chan CmdAck, 1)
 	select {
 	case c.cmds <- cmdReq{cmd: cmd, reply: reply}:
@@ -565,7 +554,7 @@ func (c *Core) Recover(ctx context.Context) error {
 			}
 		}
 		switch h.Phase {
-		case HeldWaiting, HeldArmed:
+		case HeldWaiting, HeldArmed, HeldWaitingQuote:
 			h.Phase, h.PausedReason = HeldPaused, "engine restarted; resume manually"
 		case HeldActivating:
 			if foundBrokerOrders[id] {
@@ -769,12 +758,7 @@ func (c *Core) Run(ctx context.Context) error {
 			c.shutdownHeldOrders()
 			return ctx.Err()
 		case req := <-c.cmds:
-			ack := c.handleCmd(ctx, req.cmd)
-			if ack.perpetualArm != nil {
-				go c.armWholePositionEntry(ctx, *ack.perpetualArm, req.reply)
-			} else {
-				req.reply <- ack
-			}
+			req.reply <- c.handleCmd(ctx, req.cmd)
 			c.refreshProtectionWarnings(ctx)
 		case be := <-c.bevents:
 			c.handleBrokerEvent(ctx, be)
@@ -789,7 +773,11 @@ func (c *Core) Run(ctx context.Context) error {
 			if p.Candle != nil {
 				c.handleTrailCandle(*p.Candle)
 			} else if p.Book != nil {
-				c.handleTrailBook(ctx, *p.Book)
+				if instrument.IsPerpetual(p.Book.Symbol) {
+					c.handlePerpetualBook(ctx, *p.Book)
+				} else {
+					c.handleTrailBook(ctx, *p.Book)
+				}
 			} else {
 				c.handleEligiblePrint(ctx, p.Print)
 			}
@@ -805,6 +793,7 @@ func (c *Core) Run(ctx context.Context) error {
 			req.reply <- preview
 		case <-heldTimer.C():
 			c.expireHeldOrders(ctx)
+			c.refreshHeldPerpetualOpening(ctx)
 			c.checkPerpetualRiskStops(ctx)
 			c.refreshProtectionWarnings(ctx)
 		case <-priceTimer:
@@ -1018,8 +1007,6 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 		return c.handleRiskEntry(ctx, cm)
 	case SubmitPerpetualRiskEntry:
 		return c.handlePerpetualRiskEntry(ctx, cm)
-	case finishPerpetualArm:
-		return c.finishWholePositionArm(ctx, cm)
 	case SubmitOrder:
 		return c.handleSubmit(ctx, cm)
 	case CancelOrder:
@@ -1348,6 +1335,9 @@ func (c *Core) handleCancel(ctx context.Context, cm CancelOrder) CmdAck {
 		if o.Held.CancelRequested || o.Held.Phase == HeldCancelRequested {
 			return CmdAck{Accepted: false, Reason: "cancel already requested", OrderID: o.ID}
 		}
+		if o.isPerpetualRiskStop() {
+			c.cancelPerpetualRiskEntries(ctx, o)
+		}
 		switch o.Held.Phase {
 		case HeldWaiting, HeldArmed, HeldPaused, HeldWaitingQuote:
 			if o.Held.Trail != nil {
@@ -1646,6 +1636,8 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		}
 		if err != nil {
 			c.syslog("exec.perpetual", err.Error())
+		} else {
+			c.syncPerpetualProtection(ctx, observed.Venue)
 		}
 		observed.Persisted <- err == nil
 		return
@@ -1683,7 +1675,7 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 			return
 		}
 		h := *before.Held
-		if e.Deferred && before.isPerpetualRiskStop() && before.Perpetual.WholePosition {
+		if e.Deferred && before.isPerpetualRiskStop() {
 			if h.CancelRequested {
 				_ = c.appendAndFold(OrderCanceled{V: e.V, OID: e.OID, Ts: c.now()}, SrcLocal)
 				c.releaseHeld(e.OID)
@@ -1691,7 +1683,7 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 			}
 			h.Phase, h.ChildClientID, h.PausedReason = HeldWaiting, "", e.Reason
 			if err := c.appendAndFold(HeldOrderChanged{V: e.V, OID: e.OID, Held: h, Ts: c.now()}, SrcLocal); err != nil {
-				c.syslog("exec.held", "persist deferred BingX close: "+err.Error())
+				c.syslog("exec.held", "persist deferred perpetual close: "+err.Error())
 			}
 			return
 		}

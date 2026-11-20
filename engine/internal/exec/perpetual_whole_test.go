@@ -15,38 +15,41 @@ const bingxTestSymbol = "PERP.BINGX.BTC-USDT"
 
 type bingxRiskFixture struct {
 	*mexcRiskBroker
-	terms      PerpetualOpeningTerms
-	armStarted chan struct{}
-	armFinish  chan struct{}
+	terms       PerpetualOpeningTerms
+	readStarted chan struct{}
+	readFinish  chan struct{}
 }
 
 func (b *bingxRiskFixture) ContractRules(symbol string) (instrument.ContractRules, bool) {
 	rules, _ := b.mexcRiskBroker.ContractRules("PERP.MEXC.BTC_USDT")
 	return rules, symbol == bingxTestSymbol
 }
-func (b *bingxRiskFixture) OpeningTerms(context.Context, string) (PerpetualOpeningTerms, error) {
+func (*bingxRiskFixture) Capabilities() Capabilities {
+	return Capabilities{EngineHeldPerpetualRiskEntry: true, WholePositionPerpetualRiskEntry: true, ReconciledPerpetual: true}
+}
+func (b *bingxRiskFixture) OpeningTerms(ctx context.Context, _ string) (PerpetualOpeningTerms, error) {
+	if b.readStarted != nil {
+		b.readStarted <- struct{}{}
+		select {
+		case <-b.readFinish:
+		case <-ctx.Done():
+			return PerpetualOpeningTerms{}, ctx.Err()
+		}
+	}
+	return b.terms, nil
+}
+func (b *bingxRiskFixture) CachedOpeningTerms(string) (PerpetualOpeningTerms, error) {
 	return b.terms, nil
 }
 func (*bingxRiskFixture) AccountIdentity() string { return "virtual-account" }
-func (b *bingxRiskFixture) ArmPerpetualRisk(ctx context.Context, _ OrderRequest) (int64, error) {
-	if b.armStarted != nil {
-		close(b.armStarted)
-		select {
-		case <-b.armFinish:
-		case <-ctx.Done():
-			return 0, ctx.Err()
-		}
-	}
-	return b.terms.Long.MaxContracts, nil
-}
 
-func TestBingXArmingDoesNotBlockDisarm(t *testing.T) {
+func TestBingXArmsWithoutBrokerPreflight(t *testing.T) {
 	const venue = VenueID("bingx-vst")
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	clk := clock.NewFake(time.Date(2026, 11, 20, 20, 0, 0, 0, time.UTC))
 	broker := &bingxRiskFixture{mexcRiskBroker: &mexcRiskBroker{heldTestBroker: newHeldTestBroker(), fair: 100_000},
-		armStarted: make(chan struct{}), armFinish: make(chan struct{}),
+		readStarted: make(chan struct{}, 2), readFinish: make(chan struct{}),
 		terms: PerpetualOpeningTerms{Collateral: 1000, Long: PerpetualOpeningLimit{Leverage: 5, MaxLeverage: 10, MaxContracts: 20},
 			Notional: &instrument.NotionalRisk{Mark: 100_000, Tiers: []instrument.NotionalTier{{Maximum: 1_000_000, Rate: 0.005}}}}}
 	core := NewCore(CoreConfig{Venues: []VenueID{venue}, Clock: clk, Store: &heldTestStore{},
@@ -56,35 +59,85 @@ func TestBingXArmingDoesNotBlockDisarm(t *testing.T) {
 	core.state.SetMasterArmed(true)
 	core.state.SetPositionsReady(venue, true)
 	core.state.ReconcileAccount(AccountSnapshot{Venue: venue, AvailableCash: 1000, TsMs: clk.Now().UnixMilli()})
+	core.handleEligiblePrint(ctx, EligiblePrint{Symbol: bingxTestSymbol, Price: 100_000, Seq: 1, TsMs: core.now(), RecvTsMs: core.now()})
+	core.handlePerpetualBook(ctx, TrailBook{Symbol: bingxTestSymbol, Bid: 100_003, Ask: 100_004, ReceiptMs: core.now()})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		_ = core.Run(ctx)
 	}()
 	defer func() { cancel(); <-done }()
+	// Keep a settings refresh in flight while the chart command is sent.
+	go func() { _, _ = core.PreviewPerpetualOpening(ctx, venue, bingxTestSymbol) }()
+	select {
+	case <-broker.readStarted:
+	case <-ctx.Done():
+		t.Fatal("background refresh did not start")
+	}
+	defer close(broker.readFinish)
 	reply := make(chan CmdAck, 1)
 	go func() {
 		reply <- core.DoContext(ctx, SubmitPerpetualRiskEntry{Venue: venue, Symbol: bingxTestSymbol, Side: SideBuy,
-			Trigger: 100_500, Stop: 99_500, Budget: 10, MaxQty: 2, Leverage: 5})
+			Trigger: 99_900, Stop: 99_500, Budget: 1.08, MaxQty: 2, Leverage: 5, Cushion: LimitCushion{Value: 2, Unit: "$"}})
 	}()
 	select {
-	case <-broker.armStarted:
+	case <-broker.readStarted:
+		t.Fatal("sending the chart entry waited for broker preflight")
 	case ack := <-reply:
-		t.Fatalf("entry never started arming: %+v", ack)
-	case <-ctx.Done():
-		t.Fatal("entry did not begin arming")
-	}
-	if ack := core.DoContext(ctx, Disarm{}); !ack.Accepted {
-		t.Fatalf("could not disarm while verifying leverage: %+v", ack)
-	}
-	close(broker.armFinish)
-	select {
-	case ack := <-reply:
-		if ack.Accepted || ack.OrderID == "" {
-			t.Fatalf("completed preflight resurrected a canceled entry: %+v", ack)
+		if !ack.Accepted || ack.OrderID == "" {
+			t.Fatalf("chart entry did not arm: %+v", ack)
+		}
+		select {
+		case child := <-broker.submits:
+			if child.ClientOrderID != ack.OrderID || child.Type != TypeLimit || child.TIF != TIFGTC || child.LimitPrice != 100_006 || child.Qty != 1 {
+				t.Fatalf("buy trigger under the current price did not send a regular ask-plus-cushion limit: %+v", child)
+			}
+		case <-ctx.Done():
+			t.Fatal("entry did not send from the existing trade and quote")
 		}
 	case <-ctx.Done():
-		t.Fatal("arming did not finish")
+		t.Fatal("chart entry did not arm")
+	}
+}
+
+func TestRestingPerpetualEntryMustCancelBeforeProtectiveClose(t *testing.T) {
+	const venue = VenueID("bingx-vst")
+	ctx := t.Context()
+	clk := clock.NewFake(time.Date(2026, 11, 20, 20, 0, 0, 0, time.UTC))
+	broker := &bingxRiskFixture{mexcRiskBroker: &mexcRiskBroker{heldTestBroker: newHeldTestBroker(), fair: 98_000}}
+	core := NewCore(CoreConfig{Venues: []VenueID{venue}, Clock: clk, Store: &heldTestStore{}, Brokers: map[VenueID]Broker{venue: broker}})
+	core.heldDemand = &heldDemandStub{}
+	const positionID = "position"
+	core.state.SetPositionsReady(venue, true)
+	core.state.Venue(venue).Positions[bingxTestSymbol] = Position{Qty: 2, BrokerPositionID: positionID}
+	entry := Order{ID: "entry", Venue: venue, Symbol: bingxTestSymbol, Side: SideBuy, Type: TypeStopLimit, TIF: TIFGTC,
+		Qty: 4, ExecutedQty: 2, LeavesQty: 2, Status: StatusPartiallyFilled,
+		Perpetual: &PerpetualOrder{ProtectionID: "stop", ProtectionPrice: 99_000, RiskBudget: 10},
+		Held:      &HeldOrder{Phase: HeldWorking, ChildClientID: "entry", ChildBrokerID: "exchange-entry"}}
+	stop := Order{ID: "stop", Venue: venue, Symbol: bingxTestSymbol, Side: SideSell, Type: TypeStop, Qty: 2,
+		StopPrice: 99_000, Status: StatusSubmitted,
+		Perpetual: &PerpetualOrder{Multiplier: .001, PositionID: positionID, AccountIdentity: broker.AccountIdentity(), WholePosition: true, LocalProtection: true},
+		Held:      &HeldOrder{Phase: HeldArmed}}
+	for _, o := range []Order{entry, stop} {
+		if err := core.appendAndFold(OrderSubmitted{Order: o}, SrcLocal); err != nil {
+			t.Fatal(err)
+		}
+	}
+	core.activatePerpetualRiskStop(ctx, core.order(stop.ID))
+	if !core.order(entry.ID).Held.CancelRequested || core.order(stop.ID).Held.ChildClientID != "" {
+		t.Fatal("stop failed to reserve the close until the resting entry is canceled")
+	}
+	if err := core.appendAndFold(OrderCanceled{V: venue, OID: entry.ID, Ts: core.now()}, SrcReconcile); err != nil {
+		t.Fatal(err)
+	}
+	core.activatePerpetualRiskStop(ctx, core.order(stop.ID))
+	select {
+	case child := <-broker.submits:
+		if child.ClientOrderID != stop.ID || child.Type != TypeMarket || child.Qty != 2 || child.Perpetual.PositionID != positionID {
+			t.Fatalf("wrong close after the entry remainder canceled: %+v", child)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("protective close did not send after confirmed cancellation")
 	}
 }
 
@@ -120,8 +173,7 @@ func TestBingXChartRiskEntrySharesWholePosition(t *testing.T) {
 				AvgPrice: 100_000, Leverage: 5, IsolatedMargin: 80, LiquidationPrice: 100_000 - test.sign*15_000}
 			terms := PerpetualOpeningLimit{Leverage: 5, MaxContracts: 100, MaxLeverage: 10}
 			prepare := func(command SubmitPerpetualRiskEntry, p Position) CmdAck {
-				command.openingLimit = terms
-				command.openingTerms = PerpetualOpeningTerms{PositionID: p.BrokerPositionID, Collateral: 1000,
+				broker.terms = PerpetualOpeningTerms{PositionID: p.BrokerPositionID, Collateral: 1000, Long: terms, Short: terms,
 					Notional: &instrument.NotionalRisk{Mark: broker.fair, MinimumValue: 2,
 						Tiers: []instrument.NotionalTier{{Maximum: 1_000_000, Rate: 0.005}},
 						Position: instrument.RiskPosition{Qty: p.Qty, AvgPrice: p.AvgPrice, Margin: p.IsolatedMargin,
@@ -131,11 +183,8 @@ func TestBingXChartRiskEntrySharesWholePosition(t *testing.T) {
 			waiting := func(command SubmitPerpetualRiskEntry, p Position) Order {
 				t.Helper()
 				ack := prepare(command, p)
-				if ack.perpetualArm == nil || core.order(ack.OrderID).Held.Phase != HeldPaused {
-					t.Fatalf("entry was not staged for signed arming: %+v", ack)
-				}
-				if armed := core.finishWholePositionArm(ctx, finishPerpetualArm{orderID: ack.OrderID, capacity: 100}); !armed.Accepted {
-					t.Fatalf("entry did not arm: %+v", armed)
+				if !ack.Accepted || core.order(ack.OrderID).Held.PerpetualArmPending {
+					t.Fatalf("entry did not arm without preflight: %+v", ack)
 				}
 				return core.order(ack.OrderID)
 			}
@@ -152,15 +201,20 @@ func TestBingXChartRiskEntrySharesWholePosition(t *testing.T) {
 			var sequence int64
 			trigger := func(o Order) {
 				t.Helper()
-				broker.fair = o.StopPrice
-				clk.Advance(time.Millisecond)
-				sequence++
-				core.handleEligiblePrint(ctx, EligiblePrint{Symbol: o.Symbol, Price: o.StopPrice, Seq: sequence,
-					TsMs: core.now(), RecvTsMs: core.now()})
+				if o.Held.ChildClientID == "" {
+					broker.fair = o.StopPrice
+					clk.Advance(time.Millisecond)
+					sequence++
+					broker.terms.Notional.Mark = broker.fair
+					book := TrailBook{Symbol: o.Symbol, Bid: o.StopPrice - 1, Ask: o.StopPrice + 1, ReceiptMs: core.now()}
+					core.handlePerpetualBook(ctx, book)
+					core.handleEligiblePrint(ctx, EligiblePrint{Symbol: o.Symbol, Price: o.StopPrice, Seq: sequence,
+						TsMs: core.now(), RecvTsMs: core.now()})
+				}
 				request := submission()
-				if request.ClientOrderID != o.ID || request.Type != TypeLimit || request.TIF != TIFIOC ||
+				if request.ClientOrderID != o.ID || request.Type != TypeLimit || request.TIF != TIFGTC || request.LimitPrice != o.StopPrice+test.sign ||
 					!request.Perpetual.WholePosition || request.Perpetual.ProtectionID != o.Perpetual.ProtectionID {
-					t.Fatalf("wrong protected IOC: %+v", request)
+					t.Fatalf("wrong protected limit: %+v", request)
 				}
 			}
 			reconcile := func(o Order, status OrderStatus, id string, quantity float64, fills ...PerpetualFill) {
@@ -175,27 +229,32 @@ func TestBingXChartRiskEntrySharesWholePosition(t *testing.T) {
 			entry := SubmitPerpetualRiskEntry{Venue: test.venue, Symbol: bingxTestSymbol, Side: test.open, Leverage: 5,
 				Trigger: 100_500 - 500*(1-test.sign), Stop: 100_000 - test.sign*200, Budget: 20, MaxQty: 4}
 			if identity[test.venue] != "" {
-				if ack := prepare(entry, Position{}); ack.perpetualArm != nil || ack.Reason == "" {
+				if ack := prepare(entry, Position{}); ack.Accepted || ack.Reason == "" {
 					t.Fatal("live chart entry bypassed account acknowledgement")
 				}
 				core.heldLiveAck[test.venue] = identity[test.venue]
 			}
 			root := waiting(entry, Position{})
 			trigger(root)
-			reconcile(root, StatusFilled, position.BrokerPositionID, 0, PerpetualFill{ID: "root", Qty: 4, Price: 100_000, TsMs: core.now()})
-			position.Qty = 4 * test.sign
+			firstFill := PerpetualFill{ID: "root", Qty: 2, Price: 100_000, TsMs: core.now()}
+			reconcile(root, StatusAccepted, position.BrokerPositionID, 0, firstFill)
+			position.Qty = 2 * test.sign
 			snapshot(position)
 			stopID := root.Perpetual.ProtectionID
 			stop := core.order(stopID)
-			if stop.Qty != 4 || !stop.isPerpetualRiskStop() || stop.Side != test.close || stop.StopPrice != entry.Stop {
-				t.Fatalf("incorrect initial stop: %+v", stop)
+			if stop.Qty != 2 || !stop.isPerpetualRiskStop() || stop.Side != test.close || stop.StopPrice != entry.Stop {
+				t.Fatalf("working limit did not protect the first partial fill: %+v", stop)
 			}
+			reconcile(root, StatusFilled, position.BrokerPositionID, 0, firstFill,
+				PerpetualFill{ID: "root-final", Qty: 2, Price: 100_000, TsMs: core.now()})
+			position.Qty = 4 * test.sign
+			snapshot(position)
 
 			add := entry
 			add.SharedStopID, add.Trigger, add.Stop, add.MaxQty = stopID, 100_700-700*(1-test.sign), 100_000-test.sign*100, 2
 			looser := add
 			looser.Stop = entry.Stop - test.sign*50
-			if reject := prepare(looser, position); reject.perpetualArm != nil {
+			if reject := prepare(looser, position); reject.Accepted {
 				t.Fatal("a linked add loosened the shared stop")
 			}
 			zero := waiting(add, position)
@@ -205,7 +264,7 @@ func TestBingXChartRiskEntrySharesWholePosition(t *testing.T) {
 				t.Fatal("an unfilled add changed the stop")
 			}
 			linked := waiting(add, position)
-			if repeated := prepare(add, position); repeated.perpetualArm != nil {
+			if repeated := prepare(add, position); repeated.Accepted {
 				t.Fatal("armed multiple adds on one contract")
 			}
 			trigger(linked)

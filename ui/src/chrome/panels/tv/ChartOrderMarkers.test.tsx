@@ -46,20 +46,21 @@ beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("ChartOrderMarkers", () => {
-  it("shows BingX arming as verification and keeps the label for actual pauses", () => {
+  it("shows one protective marker after a partial fill on a resting BingX limit", () => {
     const venue = "bingx-vst";
     const symbol = "PERP.BINGX.BTC-USDT";
-    const held = { phase: "PAUSED" as const, deadlineMs: 9999999999999 };
-    const entry = { ...base, venue, symbol, type: "STOP_LIMIT" as const, stopPrice: 100,
-      pendingProtectionPrice: 90, held: { ...held, perpetualArmPending: true, pausedReason: "verifying BingX opening terms" } };
-    const paused = { ...base, venue, symbol, id: "o2", type: "STOP" as const, stopPrice: 110,
-      wholePositionProtection: true, held: { ...held, pausedReason: "perpetual feed interrupted; resume manually" } };
-    const { changeContext } = mount([entry, paused]);
+    const entry: Order = { ...base, venue, symbol, type: "STOP_LIMIT", tif: "GTC", stopPrice: 100,
+      status: "PARTIALLY_FILLED", executedQty: 4, leavesQty: 6, pendingProtectionPrice: 90,
+      perpetualRisk: { stopId: "o2", budget: 100, leverage: 5, entryCushion: { value: 0, unit: "$" } },
+      held: { phase: "WORKING", childClientId: base.id, deadlineMs: 9999999999999 } };
+    const stop: Order = { ...base, venue, symbol, id: "o2", type: "STOP", side: "SELL", stopPrice: 90,
+      qty: 4, leavesQty: 4, wholePositionProtection: true, held: { phase: "WAITING", deadlineMs: 0 } };
+    const { changeContext } = mount([entry, stop]);
     changeContext(symbol, venue);
 
-    expect(screen.getAllByText("VERIFYING")).toHaveLength(2);
-    expect(screen.getByText("PAUSED")).toBeTruthy();
-    expect(screen.getByTestId("order-label-o2").title).toContain("perpetual feed interrupted; resume manually");
+    expect(screen.queryByTestId("pending-protection-o1")).toBeNull();
+    expect(screen.getByTestId("order-label-o1").title).toContain("BUY LIMIT");
+    expect(screen.getByTestId("order-label-o2").title).toContain("SELL 4 lots");
   });
 
   it("clears the risk-preview warning after five seconds without modifying the order", () => {

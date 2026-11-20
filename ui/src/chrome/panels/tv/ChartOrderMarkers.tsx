@@ -193,8 +193,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     const type = marker.kind === "limit" ? "LIMIT" : marker.kind === "limit-if-touched" ? "LIT" : "STOP-LIMIT";
     const add=marker.order.riskEntry?.sharedEntryId && !marker.order.riskEntry.stopApplied?`\nShared stop ${priceText(marker.order.riskEntry.addStopPrice??0)} or higher on first fill`:"";
     const held = marker.order.held;
-    const phase = held?.perpetualArmPending ? "Verifying BingX opening terms" :
-      `${marker.phase || marker.order.status}${held?.pausedReason ? ` · ${held.pausedReason}` : ""}`;
+    const phase = `${marker.phase || marker.order.status}${held?.pausedReason ? ` · ${held.pausedReason}` : ""}`;
     return `${quantity}\n${marker.order.side} ${type} · limit ${markerPriceText(marker, limit)}\n${held && marker.kind !== "limit" ? "Held by eTape · " : ""}${marker.order.riskEntry ? "Risk Entry · " : marker.order.riskEntryId ? "Linked Protection · " : ""}${phase}${add}`;
   };
 
@@ -518,12 +517,12 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const first = group.markers[0];
       const color = sideText(first) === "B" ? props.chrome.up : props.chrome.down;
       const action = group.pending ?? orderActionPending(first) ?? pending.get(markerId(first));
-      const verifying = first.order.held?.perpetualArmPending;
-      const paused = first.phase === "PAUSED" && !verifying;
+      const paused = first.phase === "PAUSED";
       const opacity = paused || action?.kind === "cancel" ? 0.48 : 1;
       const phaseWarning = first.phase === "ACTIVATING" || first.phase === "UNKNOWN" || first.phase === "CANCEL_REQUESTED";
       const status = action ? action.outcome === "unknown" ? "UNKNOWN — verify Orders" : action.kind === "cancel" ? "CANCEL REQUESTED" : "MODIFY REQUESTED"
-        : verifying ? "VERIFYING" : phaseWarning || paused ? first.phase : riskProposal(first, first.price).aboveBudget ? "ABOVE ORIGINAL BUDGET" : "";
+        : first.phase === "WAITING_QUOTE" && first.order.perpetualRisk ? "WAITING FOR QUOTE"
+          : phaseWarning || paused ? first.phase : riskProposal(first, first.price).aboveBudget ? "ABOVE ORIGINAL BUDGET" : "";
       const ids = group.markers.map(markerId);
       const id = markerId(first);
       const plannedStop = first.kind === "pending-protection";

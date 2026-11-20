@@ -24,8 +24,11 @@ func (a *apiClient) Prepare(ctx context.Context, req exec.OrderRequest) (func(co
 	if req.Perpetual != nil && req.Perpetual.PositionID != "" && !req.Perpetual.WholePosition {
 		return nil, errors.New("BingX position-bound quantity-limited closes are not verified")
 	}
-	if err := a.refreshCatalog(ctx); err != nil {
-		return nil, err
+	protected := req.Perpetual != nil && req.Perpetual.WholePosition
+	if !protected {
+		if err := a.refreshCatalog(ctx); err != nil {
+			return nil, err
+		}
 	}
 	terms, ok := a.Rules(req.Symbol)
 	if !ok || req.Perpetual == nil || !terms.ValidQuantity(req.Qty) || terms.ContractSize() != req.Perpetual.Multiplier {
@@ -60,53 +63,20 @@ func (a *apiClient) Prepare(ctx context.Context, req exec.OrderRequest) (func(co
 	default:
 		return nil, fmt.Errorf("%s supports market and limit orders", a.env.label)
 	}
-	state, err := a.account(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var held, available float64
-	var leverage int
-	for _, p := range state.Positions {
-		if p.Symbol != id.Native {
-			continue
-		}
-		qty, valid := positionLots(p, *item.QtyDigits)
-		avail, validAvailable := lots(p.Available, *item.QtyDigits)
-		if !valid || qty != 0 && (held != 0 || !validAvailable || !p.Isolated) {
-			return nil, fmt.Errorf("%s requires one isolated position per contract", a.env.label)
-		}
-		if qty != 0 {
-			held, available, leverage = qty, math.Abs(avail), p.Leverage
-		}
-	}
-	if req.Perpetual.WholePosition {
-		if reduce || !req.Perpetual.LocalProtection || !req.Perpetual.IsRiskEntry() || req.Type != exec.TypeLimit || req.TIF != exec.TIFIOC {
+	if protected {
+		if reduce || !req.Perpetual.LocalProtection || !req.Perpetual.IsRiskEntry() || req.Type != exec.TypeLimit ||
+			(req.TIF != exec.TIFGTC && req.TIF != exec.TIFIOC) {
 			return nil, errors.New("invalid BingX Chart Risk Entry child")
 		}
-		opening, err := a.riskOpening(ctx, id.Native, item, state)
+		opening, err := a.cachedRiskOpening(req.Symbol)
 		if err != nil {
 			return nil, err
 		}
-		if err := a.checkRiskOpening(req, terms, opening, true); err != nil {
+		if err := a.checkRiskOpening(req, terms, opening); err != nil {
 			return nil, err
 		}
-	} else if reduce {
-		if item.Close != "true" || held == 0 || buy != (held < 0) || req.Qty > min(math.Abs(held), available) {
-			return nil, fmt.Errorf("%s close exceeds the confirmed isolated position available to reduce", a.env.label)
-		}
-	} else {
-		if !terms.TradingEnabled || held != 0 && (buy != (held > 0) || leverage != req.Perpetual.Leverage) {
-			return nil, fmt.Errorf("resolve the current isolated %s position before opening", a.env.label)
-		}
-		for _, order := range state.Orders {
-			if order.Symbol == id.Native {
-				return nil, fmt.Errorf("resolve working %s orders for this contract first", a.env.label)
-			}
-		}
-		qty, _ := q.Float64()
-		if err := a.checkOpening(ctx, id.Native, buy, qty, req, state.Account.AvailableCash, item); err != nil {
-			return nil, err
-		}
+	} else if err := a.checkTicketOrder(ctx, req, terms, item, buy, reduce, params.Get("quantity")); err != nil {
+		return nil, err
 	}
 	return func(ctx context.Context) error {
 		var response order
@@ -126,6 +96,44 @@ func (a *apiClient) Prepare(ctx context.Context, req exec.OrderRequest) (func(co
 		}
 		return nil
 	}, nil
+}
+
+func (a *apiClient) checkTicketOrder(ctx context.Context, req exec.OrderRequest, terms instrument.ContractRules, item contract, buy, reduce bool, quantity string) error {
+	state, err := a.account(ctx)
+	if err != nil {
+		return err
+	}
+	var held, available float64
+	var leverage int
+	for _, p := range state.Positions {
+		if p.Symbol != item.Symbol {
+			continue
+		}
+		qty, valid := positionLots(p, *item.QtyDigits)
+		avail, validAvailable := lots(p.Available, *item.QtyDigits)
+		if !valid || qty != 0 && (held != 0 || !validAvailable || !p.Isolated) {
+			return fmt.Errorf("%s requires one isolated position per contract", a.env.label)
+		}
+		if qty != 0 {
+			held, available, leverage = qty, math.Abs(avail), p.Leverage
+		}
+	}
+	if reduce {
+		if item.Close != "true" || held == 0 || buy != (held < 0) || req.Qty > min(math.Abs(held), available) {
+			return fmt.Errorf("%s close exceeds the confirmed isolated position available to reduce", a.env.label)
+		}
+		return nil
+	}
+	if !terms.TradingEnabled || held != 0 && (buy != (held > 0) || leverage != req.Perpetual.Leverage) {
+		return fmt.Errorf("resolve the current isolated %s position before opening", a.env.label)
+	}
+	for _, order := range state.Orders {
+		if order.Symbol == item.Symbol {
+			return fmt.Errorf("resolve working %s orders for this contract first", a.env.label)
+		}
+	}
+	qty, _ := strconv.ParseFloat(quantity, 64)
+	return a.checkOpening(ctx, item.Symbol, buy, qty, req, state.Account.AvailableCash, item)
 }
 
 func (a *apiClient) checkOpening(ctx context.Context, symbol string, buy bool, qty float64, req exec.OrderRequest, available float64, item contract) error {

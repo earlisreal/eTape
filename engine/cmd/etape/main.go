@@ -1330,6 +1330,13 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 			for _, s := range sinks {
 				s.SetBook(bk.Symbol, bk)
 			}
+			if instrument.IsPerpetual(bk.Symbol) {
+				quote := exec.TrailBook{Symbol: bk.Symbol, ReceiptMs: bk.TsMs}
+				if len(bk.Bids) > 0 && len(bk.Asks) > 0 {
+					quote.Bid, quote.Ask = bk.Bids[0].Price, bk.Asks[0].Price
+				}
+				execCore.FeedTrailBook(ctx, quote)
+			}
 		case e := <-core.ExecutionEvents():
 			if p := e.Print; p != nil {
 				execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, ReceiptMs: p.ReceiptMs, Seq: p.Seq, Gap: p.Gap})

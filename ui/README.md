@@ -39,8 +39,8 @@ limit from the selected account for the entry direction. Auto sizes at that
 leverage when it fits the preset cap and liquidation buffer. A fixed leverage
 preset must match MEXC. Change the contract's isolated leverage on MEXC if the
 chart flags a mismatch or cap. The linked chart and Account show the planned sell or cover
-stop as pending while the entry is working. After the IOC and position
-reconcile, the engine-held stop appears for the filled quantity. Account lets
+stop as pending until a fill and its position reconcile. The engine-held stop
+then covers the confirmed quantity, including while the limit remainder rests. Account lets
 you resume paused MEXC orders.
 
 The Windows title-bar favicon stays transparent and uses the original small-icon
@@ -162,16 +162,20 @@ the second click. Auto uses a fixed risk amount in USD, USDT or VST or a percent
 of cash or collateral. New perpetual presets default to **Auto** under
 **Perpetual leverage**. Choose a cap, or select **Fixed** to enter the isolated
 leverage yourself. Existing fixed-leverage presets retain their values. The
-preview includes estimated loss, leverage and initial margin. BingX Auto can
-use the exchange leverage ceiling. The preview shows any planned change to
-the contract's setting before arming.
+preview includes estimated loss, leverage and initial margin at the drawn
+trigger. BingX Auto uses the configured isolated leverage and can use the
+exchange ceiling as its cap. The chart warms signed opening terms before the
+gesture. With **Auto-send Chart Risk Entry** enabled, completing the drawing
+arms the entry immediately when its opening data is ready.
 The selected Protection Mode applies to stocks. Only brief setup instructions and actionable
 warnings float over the bottom Volume area. The two axis chips expose planned
 shares, execution limits, custody, expiry and Enter/Escape shortcuts on hover.
 On MEXC or BingX, drag either pending line or use Up/Down on its price pill to resize the
 entry. BUY pairs with a lower SELL stop and SHORT pairs with a higher COVER stop.
-Either pending cancel button cancels the setup before the IOC is sent. Once the
-venue confirms a fill, the separate protective stop can be moved on its own.
+Either pending cancel button cancels the setup before the limit is sent.
+At the trigger, the order uses ask plus cushion for BUY or bid minus cushion
+for SHORT. After a confirmed fill, the separate protective stop can be moved
+on its own.
 On a fully protected Chart Risk Entry long position, the same two points create
 an add with its own risk budget and one shared stop. The SELL must keep or raise
 the current stop and remain below BUY. Preview shows existing + added = total

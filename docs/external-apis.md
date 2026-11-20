@@ -156,13 +156,13 @@ ID and reduce-only flag. It reads executions by exchange order ID and verifies
 their total against the order queried by external ID. The Settings check reads
 positions, working orders and active TP/SL. MEXC Live openings are blocked when
 the USD daily-loss cap is active, pending transfer-aware USD account valuation.
-Chart Risk Entry reads private risk limits at preview, admission, and IOC
-preflight. It sizes at the account's isolated leverage in Auto mode and checks
-the saved preset cap and liquidation buffer. It sends a price-capped IOC entry
-and holds the fair-price stop in eTape. MEXC code 6002 records a definitive
-position-opening rejection. The durable order journal reconciles fills by external ID after a lost
-response or restart. After the entry settles, the engine binds protection to the
-confirmed position ID and size. The reduce-only market close rechecks that ID
+Chart Risk Entry refreshes private risk limits in the background and sizes at
+the configured isolated leverage. It applies the preset cap and liquidation
+buffer in Auto mode. The triggered GTC limit uses a fresh quote and the cached
+signed terms. MEXC code 6002 records a definitive opening rejection. The
+durable order journal reconciles fills by external ID after a lost response or
+restart. The first confirmed fill and matching position bind the fair-price
+stop to the position ID. The reduce-only market close rechecks that ID
 against the live position before submission. [MEXC signing](https://www.mexc.com/api-docs/futures/integration-guide)
 · [Order placement](https://www.mexc.com/api-docs/futures/account-and-trading-endpoints/place-order)
 · [Account risk limits](https://www.mexc.com/api-docs/futures/account-and-trading-endpoints/get-risk-limits)
@@ -206,10 +206,10 @@ BingX Chart Risk Entry reads isolated margin, leverage and capacity, and
 notional maintenance tiers from each account's environment. Signed position
 rows supply the actual isolated `margin`, `liquidationPrice` and exact
 `positionId`. The side capacity applies at the configured leverage. eTape
-checks it again after changing leverage on a flat contract and before IOC
-submission. The margin-mode, leverage and maintenance-tier reads run in
-parallel with separate per-endpoint pacing. Both venues use the public BingX
-mark for the held stop. The
+refreshes it in the background alongside margin mode and maintenance tiers,
+with separate per-endpoint pacing. The signed account snapshot and public
+BingX mark supply current position and price inputs. Chart entry dispatch
+uses cached settings and posts a standard GTC limit at the buffered bid or ask.
 Virtual and Live BTC-USDT marks agreed within five basis points in the rollout
 check.
 

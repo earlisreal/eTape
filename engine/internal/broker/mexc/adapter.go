@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/perps"
@@ -24,8 +25,15 @@ type Live struct {
 
 type liveAPI struct {
 	client
-	market *market.Client
-	quotes sync.Map
+	market      *market.Client
+	quotes      sync.Map
+	opening     perps.OpeningCache
+	riskAccount atomic.Pointer[riskAccountSnapshot]
+}
+
+type riskAccountSnapshot struct {
+	state accountState
+	at    time.Time
 }
 
 const openingForbidden = "MEXC forbids opening this position (6002). Contact MEXC support"
@@ -37,11 +45,18 @@ func (a *Live) Capabilities() exec.Capabilities {
 }
 
 func (a *Live) OpeningTerms(ctx context.Context, symbol string) (exec.PerpetualOpeningTerms, error) {
-	id, ok := instrument.ParsePerpetual(symbol)
-	if !ok || id.Exchange != market.Exchange {
-		return exec.PerpetualOpeningTerms{}, errors.New("invalid MEXC Futures contract")
-	}
-	return a.api.openingTerms(ctx, id.Native)
+	a.api.opening.Refresh(ctx, symbol, a.api.clock.Now(), func(ctx context.Context, symbol string) (exec.PerpetualOpeningTerms, error) {
+		id, ok := instrument.ParsePerpetual(symbol)
+		if !ok || id.Exchange != market.Exchange {
+			return exec.PerpetualOpeningTerms{}, errors.New("invalid MEXC Futures contract")
+		}
+		return a.api.openingTerms(ctx, id.Native)
+	})
+	return a.CachedOpeningTerms(symbol)
+}
+
+func (a *Live) CachedOpeningTerms(symbol string) (exec.PerpetualOpeningTerms, error) {
+	return a.api.opening.Current(symbol, a.api.clock.Now())
 }
 
 func (a *Live) RecoverPerpetualRejection(id, symbol, reported string) (string, error) {
@@ -97,11 +112,38 @@ func (a *liveAPI) Prepare(ctx context.Context, req exec.OrderRequest) (func(cont
 	if !current {
 		fair = 0
 	}
-	input, err := a.prepareOrder(ctx, req, rules, fair)
+	var cached *riskAccountSnapshot
+	var opening *exec.PerpetualOpeningTerms
+	if req.Perpetual != nil && req.Perpetual.LocalProtection && req.Type == exec.TypeLimit {
+		now := a.clock.Now()
+		cached = a.riskAccount.Load()
+		if cached == nil || now.Sub(cached.at) >= perps.OpeningSnapshotMaxAge {
+			return nil, errors.New("fresh MEXC account data required")
+		}
+		terms, err := a.opening.Current(req.Symbol, now)
+		if err != nil {
+			return nil, err
+		}
+		opening = &terms
+	}
+	input, err := a.prepareOrderWithSnapshot(ctx, req, rules, fair, cached, opening)
 	if err != nil {
 		return nil, err
 	}
 	return func(ctx context.Context) error {
+		if cached != nil {
+			current, fresh := a.FairPrice(req.Symbol)
+			stop := req.Perpetual.ProtectionPrice
+			if !fresh || req.Side == exec.SideBuy && current <= stop || req.Side == exec.SideShort && current >= stop {
+				return exec.PerpetualSubmitDeclined{Cause: errors.New("MEXC fair price reached the protective stop or became stale")}
+			}
+			balance, _ := cached.state.Balance.Available.Float64()
+			if req.Qty*rules.ContractSize()*max(current, req.LimitPrice)*(1/float64(input.Leverage)+2*rules.FeeRate()) > balance {
+				return exec.PerpetualSubmitDeclined{Cause: errors.New("insufficient MEXC Futures USDT collateral")}
+			}
+			_, err := a.sendOrder(ctx, input)
+			return err
+		}
 		// Preflight uses the larger of fair and limit price for collateral.
 		if current, fresh := a.FairPrice(req.Symbol); !input.ReduceOnly && (!fresh || current > max(fair, req.LimitPrice)) {
 			return exec.PerpetualSubmitDeclined{Cause: errors.New("MEXC fair price changed; review the order")}
@@ -143,6 +185,7 @@ func (a *liveAPI) Cancel(ctx context.Context, req exec.OrderRequest) error {
 }
 
 func (a *liveAPI) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
+	started := a.clock.Now()
 	state, err := a.snapshot(ctx)
 	if err != nil {
 		return exec.AccountSnapshot{}, nil, nil, err
@@ -216,5 +259,6 @@ func (a *liveAPI) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Po
 			Side: sides[raw.Side], Status: exec.StatusAccepted, Type: exec.TypeLimit, Qty: qty, ExecutedQty: filled,
 			LeavesQty: qty - filled, LimitPrice: price, UpdatedMs: raw.UpdatedMs})
 	}
+	a.riskAccount.Store(&riskAccountSnapshot{state: state, at: started})
 	return account, positions, orders, nil
 }

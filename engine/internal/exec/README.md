@@ -6,10 +6,12 @@ The perpetual Simulator has its own durable USDT ledger. Quantities on the
 execution contract are native contracts. The venue validates the contract tick,
 quantity step, direction, margin and leverage, and caps reductions at current
 exposure. For Chart Risk Entry, the core persists the entry intent before
-listening for a perpetual trade, revalidates against fair price, and activates
-one price-capped IOC. The simulator records the filled exposure and native-style
-stop together. It evaluates stops against fair price, resizes coverage with
-manual reductions, and restores it on startup. Working orders and open positions
+listening for a perpetual trade and revalidates against fair price. The entry
+sends one GTC limit from the latest ask plus cushion or bid minus cushion.
+After a partial fill the simulator records the filled exposure and stop
+together. It evaluates stops against fair price, cancels the resting remainder
+on the stop crossing, resizes coverage with fills and reductions, and restores
+the ledger on startup. Working orders and open positions
 retain their market-data demand independently of open panels. Equity Chart Risk
 Entry continues to use its session-based lifecycle.
 
@@ -25,23 +27,26 @@ or unsupported tier data blocks Auto sizing.
 MEXC paper and live expose both pending trigger prices. Amendments check both
 observed prices and the pretrigger phase, then persist the new entry terms in
 one event. The original budget, cushion recipe, leverage and direction govern
-the amended size. Both trigger prices lock on IOC dispatch. An edit to the
+the amended size. Both trigger prices lock on limit dispatch. An edit to the
 active stop preserves the confirmed coverage; the simulator saves the new
 price under its ledger lock and live verifies the original MEXC position ID.
 
 ## MEXC Live Chart Risk Entry
 
-The held entry uses an eligible MEXC trade and submits an IOC limit order.
-Before the trigger, the stop is checked against the planned entry trigger.
-The preview reads the selected account's isolated leverage and quantity limit
-for the contract and direction. Admission rechecks those terms before arming.
-Auto sizes at the reviewed account leverage within the preset cap and
-liquidation buffer. Fixed leverage requires an exact match.
-Pending chart edits keep the verified opening size ceiling. IOC preflight
-rechecks the latest exchange limits before sending.
-When the entry triggers, eTape pauses it if fair price has crossed the stop. After
-the adapter reconciles the IOC and the open position, eTape creates a separate
-fair-price stop for the confirmed quantity. Its venue, account identity and
+An eligible trade triggers a regular GTC limit at the buffered bid or ask.
+A fresh trade already at or past the trigger qualifies at arming. The engine
+waits for a fresh two-sided book after a crossing if needed. Contract settings
+refresh in the background for linked charts and armed entries. Admission and
+dispatch use cached signed account data and current market prices. Auto sizes
+at the configured isolated leverage within the preset cap and liquidation
+buffer. Fixed leverage requires an exact match. At dispatch, sizing uses the
+actual limit and can reduce the reviewed quantity.
+
+When the entry triggers, eTape pauses it if fair price has crossed the stop.
+The first reconciled fill and matching position create a separate fair-price
+stop. The stop grows with confirmed fills and shrinks with reductions.
+A protective crossing requests cancellation of any remaining entry and waits
+for its final fills before closing the position. Its venue, account identity and
 MEXC position ID bind the stop to that position cycle. Price checks run from
 the engine's timer and after broker reconciliation.
 
@@ -50,25 +55,26 @@ close while the engine is disarmed. A restart or disconnect that pauses the
 order requires Resume in Account. An ambiguous exchange response stays pending
 until reconciliation. MEXC code 6002 is a definitive opening rejection, including
 when the engine recovers the recorded 6002 response from an earlier run.
-A terminal close with remaining exposure produces an
-Account warning. Manual reductions shrink the remaining stop quantity and a
-flat or changed position retires the untriggered stop.
+A terminal close with remaining exposure produces an Account warning. A
+flat or changed position retires the untriggered stop and requests cancellation
+of the linked remainder.
 
 ## BingX Chart Risk Entry
 
-BingX Virtual and Live hold a price-capped IOC entry in eTape. Entry requires
-signed one-way, isolated contract terms. The risk model includes taker fees on
-both legs and estimates liquidation clearance using BingX's maintenance tiers
-and isolated margin. From flat, Auto maximizes risk-sized lots first, then
-selects the highest eligible leverage. Arming reserves the contract while it
-verifies or applies the leverage, and IOC dispatch checks the signed terms
-again. Adds use the confirmed position's leverage and a separate budget.
+BingX Virtual and Live use the same last-trade trigger and buffered bid/ask
+GTC limit. Signed one-way account data comes from ordinary reconciliation.
+Isolated margin mode, leverage, capacity and maintenance tiers are refreshed
+in the background. Entry arming and dispatch use those snapshots, the current
+mark, and the contract's configured leverage. The risk model includes taker
+fees on both legs and liquidation clearance. Adds use the original
+position's leverage and a separate budget.
 
-A signed IOC fill and matching signed position identify the original Position
+A signed fill and matching signed position identify the original Position
 Cycle. One engine-held mark-price stop covers that entire position. Same-side
 fills grow its displayed size, and partial reductions shrink it. A linked add
 persists its tighter stop price on the first confirmed fill. A crossing
-cancels unsubmitted adds and waits for outstanding managed orders to reconcile.
+cancels unsubmitted adds and resting entry remainders, then waits for the
+managed orders to reconcile.
 The journal sends one market close by exact position ID, then reconciles the
 broker-generated order ID and fill size. A missing reply leaves the submitted
 close pending while that position remains open. A signed snapshot that proves

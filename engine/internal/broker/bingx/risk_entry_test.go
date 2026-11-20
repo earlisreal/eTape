@@ -14,6 +14,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/creds"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 )
 
 func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
@@ -21,11 +22,10 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 		t.Run(env.label, func(t *testing.T) {
 			const symbol, positionID, closeOrderID, entryOrderID = "PERP.BINGX.BTC-USDT", "90071992547409955", "90071992547409957", "90071992547409959"
 			const now = 1795041491205
-			var leverage, leverageWrites, positionState, closeWrites atomic.Int32
-			var dispatchCheck, closeCheck atomic.Bool
+			var positionState, closeWrites, entryWrites atomic.Int32
+			var warmCheck, dispatchCheck, closeCheck atomic.Bool
 			var riskReads atomic.Int32
 			allRiskReads := make(chan struct{})
-			leverage.Store(5)
 			journal := filepath.Join(t.TempDir(), "journal.json")
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				q := r.URL.Query()
@@ -35,7 +35,7 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 				var msg string
 				switch r.URL.Path {
 				case "/openApi/swap/v2/trade/marginType", leveragePath, "/openApi/swap/v1/maintMarginRatio":
-					if dispatchCheck.Load() && r.Method == http.MethodGet {
+					if warmCheck.Load() && r.Method == http.MethodGet {
 						if riskReads.Add(1) == 3 {
 							close(allRiskReads)
 						}
@@ -45,6 +45,9 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 							return
 						}
 					}
+				}
+				if dispatchCheck.Load() && (r.Method != http.MethodPost || r.URL.Path != "/openApi/swap/v2/trade/order") {
+					t.Errorf("protected limit dispatch made an extra request: %s %s", r.Method, r.URL.Path)
 				}
 				if closeCheck.Load() && (r.URL.Path == "/openApi/swap/v3/user/balance" || r.URL.Path == "/openApi/swap/v2/trade/openOrders") {
 					t.Errorf("position-bound close unnecessarily waited for %s", r.URL.Path)
@@ -63,25 +66,17 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 					}
 					msg = "[]"
 					if positionState.Load() != 0 {
-						msg = fmt.Sprintf(`[{"symbol":"BTC-USDT","positionId":%s,"positionSide":"BOTH","isolated":true,"positionAmt":"0.0004","availableAmt":"0.0004","avgPrice":"100000","initialMargin":"6","margin":"7","liquidationPrice":"87500","leverage":%d}]`, id, leverage.Load())
+						msg = fmt.Sprintf(`[{"symbol":"BTC-USDT","positionId":%s,"positionSide":"BOTH","isolated":true,"positionAmt":"0.0004","availableAmt":"0.0004","avgPrice":"100000","initialMargin":"6","margin":"7","liquidationPrice":"87500","leverage":5}]`, id)
 					}
 				case "/openApi/swap/v2/trade/openOrders":
 					msg = `{"orders":[]}`
 				case "/openApi/swap/v2/trade/marginType":
 					msg = `{"marginType":"ISOLATED"}`
 				case leveragePath:
-					if r.Method == http.MethodPost {
-						if q.Get("side") != "BOTH" || q.Get("leverage") != "8" || positionState.Load() != 0 {
-							t.Error("flat one-way leverage change used incorrect terms")
-						}
-						leverage.Store(8)
-						leverageWrites.Add(1)
-						msg = `{}`
-					} else {
-						msg = fmt.Sprintf(`{"longLeverage":%d,"shortLeverage":%d,"maxLongLeverage":125,"maxShortLeverage":100,"availableLongVol":"0.0008","availableShortVol":"0.0008"}`, leverage.Load(), leverage.Load())
+					if r.Method != http.MethodGet {
+						t.Error("protected limit changed exchange leverage")
 					}
-				case "/openApi/swap/v2/quote/premiumIndex":
-					msg = `{"symbol":"BTC-USDT","markPrice":"100000"}`
+					msg = `{"longLeverage":5,"shortLeverage":5,"maxLongLeverage":125,"maxShortLeverage":100,"availableLongVol":"0.0008","availableShortVol":"0.0008"}`
 				case "/openApi/swap/v1/maintMarginRatio":
 					msg = `[{"symbol":"BTC-USDT","minPositionVal":"0","maxPositionVal":"10000","maintMarginRatio":"0.005","maintAmount":"0"}]`
 				case closePositionPath:
@@ -95,6 +90,14 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 					}
 					msg = fmt.Sprintf(`{"orderId":%s,"positionId":%q}`, closeOrderID, positionID)
 				case "/openApi/swap/v2/trade/order":
+					if q.Get("clientOrderId") == "held-entry" && r.Method == http.MethodPost {
+						if q.Get("timeInForce") != "GTC" || q.Get("price") != "100100" || q.Get("type") != "LIMIT" {
+							t.Errorf("expected a regular limit order: %v", q)
+						}
+						entryWrites.Add(1)
+						msg = fmt.Sprintf(`{"orderId":%s,"clientOrderId":"held-entry","symbol":"BTC-USDT"}`, entryOrderID)
+						break
+					}
 					if q.Get("clientOrderId") == "held-entry" && r.Method == http.MethodGet {
 						msg = fmt.Sprintf(`{"orderId":%s,"clientOrderId":"held-entry","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"FILLED","origQty":"0.0002","executedQty":"0.0002","time":%d}`, entryOrderID, now-100)
 						break
@@ -135,25 +138,35 @@ func TestChartRiskEntryLeverageAndPositionClose(t *testing.T) {
 			}
 			a.api.env.base = server.URL
 			ctx := t.Context()
-			entry := exec.OrderRequest{Venue: "venue", Symbol: symbol, Qty: 2, Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFIOC, LimitPrice: 100_100,
-				Perpetual: &exec.PerpetualOrder{Leverage: 8, Multiplier: 0.0001, ProtectionPrice: 98_000, ProtectionID: "held-stop",
-					RiskBudget: 2, WholePosition: true, LocalProtection: true, AutoLeverage: true}}
-			if limit, err := a.ArmPerpetualRisk(ctx, entry); err != nil || limit != 8 || leverageWrites.Load() != 1 {
-				t.Fatalf("Auto leverage was not set and verified: %d, %v", limit, err)
+			if _, _, _, err := a.Snapshot(ctx); err != nil {
+				t.Fatal(err)
 			}
+			a.SetFairQuote(feed.Quote{Symbol: symbol, TsMs: now, Mark: 100_000})
+			warmCheck.Store(true)
+			terms, err := a.OpeningTerms(ctx, symbol)
+			if err != nil || terms.Long.Leverage != 5 || terms.Long.MaxContracts != 8 {
+				t.Fatalf("background refresh did not load the signed opening settings: %+v, %v", terms, err)
+			}
+			warmCheck.Store(false)
 			positionState.Store(1)
-			entry.Perpetual.PositionID = positionID
-			if limit, err := a.ArmPerpetualRisk(ctx, entry); err != nil || limit != 8 || leverageWrites.Load() != 1 {
-				t.Fatalf("add did not use the confirmed position leverage: %d, %v", limit, err)
+			if _, _, _, err := a.Snapshot(ctx); err != nil {
+				t.Fatal(err)
 			}
-			entry.ClientOrderID = "held-entry"
+			entry := exec.OrderRequest{Venue: "venue", Symbol: symbol, ClientOrderID: "held-entry", Qty: 2, Side: exec.SideBuy,
+				Type: exec.TypeLimit, TIF: exec.TIFGTC, LimitPrice: 100_100,
+				Perpetual: &exec.PerpetualOrder{Leverage: 5, Multiplier: 0.0001, ProtectionPrice: 98_000, ProtectionID: "held-stop",
+					PositionID: positionID, RiskBudget: 2, WholePosition: true, LocalProtection: true, AutoLeverage: true}}
 			dispatchCheck.Store(true)
-			if _, err := a.api.Prepare(ctx, entry); err != nil {
-				t.Fatalf("independent IOC risk checks could not run together: %v", err)
+			send, err := a.api.Prepare(ctx, entry)
+			if err != nil {
+				t.Fatalf("protected limit could not use cached settings and account data: %v", err)
+			}
+			if err := send(ctx); err != nil || entryWrites.Load() != 1 {
+				t.Fatalf("protected limit was not sent: %v", err)
 			}
 			dispatchCheck.Store(false)
 			if report, err := a.api.Observe(ctx, entry); err != nil || report.PositionID != positionID || report.Status != exec.StatusFilled {
-				t.Fatalf("signed order history did not identify the IOC's position: %+v, %v", report, err)
+				t.Fatalf("signed order history did not identify the limit order's position: %+v, %v", report, err)
 			}
 
 			close := exec.OrderRequest{Venue: "venue", Symbol: symbol, ClientOrderID: "held-stop", Side: exec.SideSell, Type: exec.TypeMarket, Qty: 2,

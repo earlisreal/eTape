@@ -29,6 +29,8 @@ type Capabilities struct {
 	ReconciledPerpetual bool
 	// EngineHeldPerpetualRiskEntry supports position-bound reduce-only closes.
 	EngineHeldPerpetualRiskEntry bool
+	// WholePositionPerpetualRiskEntry also supports adds and a shared stop.
+	WholePositionPerpetualRiskEntry bool
 }
 
 // Broker is the per-venue adapter contract. One instance per configured venue;
@@ -73,11 +75,7 @@ type PerpetualOpeningTerms struct {
 
 type perpetualOpeningTermReader interface {
 	OpeningTerms(context.Context, string) (PerpetualOpeningTerms, error)
-}
-
-type wholePositionRiskBroker interface {
-	AccountIdentity() string
-	ArmPerpetualRisk(context.Context, OrderRequest) (int64, error)
+	CachedOpeningTerms(string) (PerpetualOpeningTerms, error)
 }
 
 // BrokerEvent is anything a Broker pushes: order-lifecycle events (which also

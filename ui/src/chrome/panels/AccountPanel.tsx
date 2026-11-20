@@ -96,7 +96,6 @@ function chipVariant(ds: DisplayStatus): ChipVariant | null {
 
 function orderCustodyLabel(order: Pick<Order, "type" | "held" | "action" | "symbol" | "wholePositionProtection" | "perpetualRisk">, todayMs: number): string | null {
   if(order.held?.trail)return `eTape ${order.held.trail.config.mode} trail · ${order.held.phase}${order.held.pausedReason?` · ${order.held.pausedReason}`:""} · run-bound · expires ${formatEtDateTime(order.held.deadlineMs,todayMs)} ET`;
-  if (order.held?.perpetualArmPending) return "Verifying BingX opening terms";
   if (order.held && (order.wholePositionProtection || order.type === "STOP" && order.symbol.startsWith("PERP.MEXC."))) {
     const basis = order.wholePositionProtection ? "mark-price" : "fair-price";
     return `eTape-held ${basis} stop · ${order.held.phase}${order.held.pausedReason ? ` · ${order.held.pausedReason}` : ""}`;
@@ -231,7 +230,11 @@ function OrdersTable({
     return () => window.clearTimeout(timer);
   }, []);
   const views = sortRows(stores.exec.orders().filter((v) => v.order.venue === venue && (v.optimistic || isWorking(v.order.status))), openSort, ORDERS_SORT_ACCESSORS)
-    .map((view) => ({ ...view, pendingStop: pendingPerpetualStop(view.order) }));
+    .map((view) => {
+      const stopId = view.order.perpetualRisk?.stopId;
+      const stop = stopId ? stores.exec.liveOrder(stopId) : undefined;
+      return { ...view, pendingStop: stop && isWorking(stop.status) ? undefined : pendingPerpetualStop(view.order) };
+    });
   const openCount = views.length + views.filter((view) => view.pendingStop).length;
   const closedRows = sortRows(stores.exec.closedOrders().filter((o) => o.venue === venue && isTerminal(o.status)), closedSort, CLOSED_SORT_ACCESSORS);
   const openHasDates = views.some(({ order }) => formatEtDateTime(order.createdMs, todayMs).includes(" "));
@@ -315,7 +318,7 @@ function OrdersTable({
                 {custody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{custody}</div>}</td>
               <td data-column="actions">{order.held?.trail && !order.held.trail.retired && !order.held.trail.triggered && ["WAITING","ARMED"].includes(order.held.phase) && <button type="button" aria-label="Edit trail" onClick={()=>{const current=stores.exec.liveOrder(order.id)??order;setTrailEdit({order:current,config:current.held!.trail!.config});}}>Edit</button>}{order.held?.trail && !order.held.trail.retired && order.held.phase==="PAUSED" && <button type="button" aria-label="Resume trail" onClick={()=>void oc.resumeHeld(order.venue,order.id)}>Resume</button>}
                 {(order.symbol.startsWith("PERP.MEXC.") || order.wholePositionProtection || order.perpetualRisk?.wholePosition) &&
-                  order.held?.phase === "PAUSED" && !order.held.perpetualArmPending &&
+                  order.held?.phase === "PAUSED" &&
                   <button type="button" aria-label={order.symbol.startsWith("PERP.MEXC.") ? "Resume held MEXC order" : "Resume held BingX order"} onClick={() => void oc.resumeHeld(order.venue, order.id)}>Resume</button>}
                 {(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
                 style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton> : null}</td>

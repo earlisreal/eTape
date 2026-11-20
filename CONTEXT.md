@@ -252,7 +252,7 @@ An entry sized to a loss budget from two chart-selected prices, with a linked pr
 _Avoid_: Risk confirmation, bracket (when referring to this entry tool)
 
 **Auto Leverage**:
-The perpetual Chart Risk Entry preset option that lets eTape choose isolated leverage for the planned size, within its leverage ceiling and the required clearance between the stop and estimated liquidation.
+The perpetual Chart Risk Entry preset option that sizes within a leverage ceiling and a required clearance between the stop and estimated liquidation. The MEXC simulator selects the leverage. MEXC Live and BingX use the contract's configured isolated leverage.
 _Avoid_: Auto direction
 
 **Protection Mode**:
@@ -316,7 +316,7 @@ A stop-sell size expressed as a percentage of the latest broker-confirmed long p
 _Avoid_: Planned buy quantity, linked entry sizing
 
 **Limit Cushion**:
-The non-negative distance from a conditional order's trigger price to its resulting limit price, added for BUY/COVER and subtracted for SELL/SHORT.
+The non-negative distance applied to set an execution limit, added for BUY/COVER and subtracted for SELL/SHORT. A perpetual Chart Risk Entry applies it to the ask for a buy or the bid for a short when the entry triggers. Stock Chart Risk Entry applies it to the corresponding trigger price.
 _Avoid_: Price offset, slippage
 
 **Quote Offset**:

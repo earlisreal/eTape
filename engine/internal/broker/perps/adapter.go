@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"sync"
 	"time"
@@ -58,7 +59,6 @@ type Adapter struct {
 
 	mu      sync.Mutex
 	journal journal
-	arming  map[string]bool
 }
 
 func New(venue exec.VenueID, clk clock.Clock, path, identity string, api API) (*Adapter, error) {
@@ -66,7 +66,7 @@ func New(venue exec.VenueID, clk clock.Clock, path, identity string, api API) (*
 		return nil, errors.New("incomplete perpetual venue configuration")
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
-	a := &Adapter{venue: venue, clock: clk, path: path, api: api, event: make(chan exec.BrokerEvent, 32), arming: make(map[string]bool),
+	a := &Adapter{venue: venue, clock: clk, path: path, api: api, event: make(chan exec.BrokerEvent, 32),
 		journal: journal{Identity: hash, Pending: make(map[string]pending)}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -120,29 +120,6 @@ func (a *Adapter) PendingOrderIDs() []string {
 // AccountIdentity binds protection to the same adapter account across recovery.
 func (a *Adapter) AccountIdentity() string { return a.journal.Identity }
 
-// WithIdleContract serializes an arming preflight with order submission.
-func (a *Adapter) WithIdleContract(symbol string, fn func() error) error {
-	a.mu.Lock()
-	if a.arming[symbol] {
-		a.mu.Unlock()
-		return exec.ErrPerpetualContractBusy
-	}
-	for _, p := range a.journal.Pending {
-		if p.Request.Symbol == symbol {
-			a.mu.Unlock()
-			return exec.ErrPerpetualContractBusy
-		}
-	}
-	a.arming[symbol] = true
-	a.mu.Unlock()
-	defer func() {
-		a.mu.Lock()
-		delete(a.arming, symbol)
-		a.mu.Unlock()
-	}()
-	return fn()
-}
-
 // RecordRejection restores a previously observed definitive submit rejection.
 // The poller still waits for the persisted terminal engine event.
 func (a *Adapter) RecordRejection(id, symbol, reason string) (bool, error) {
@@ -171,11 +148,8 @@ func (a *Adapter) SubmitOrder(ctx context.Context, req exec.OrderRequest) (exec.
 		return exec.OrderAck{}, exec.PerpetualSubmitDeclined{Cause: err}
 	}
 	if req.Venue != a.venue || req.ClientOrderID == "" || req.Perpetual == nil ||
-		req.Perpetual.ProtectionPrice != 0 && (!req.Perpetual.WholePosition || !req.Perpetual.LocalProtection || !req.Perpetual.IsRiskEntry()) {
+		req.Perpetual.ProtectionPrice != 0 && (!req.Perpetual.LocalProtection || !req.Perpetual.IsRiskEntry()) {
 		return reject(errors.New("unsupported perpetual order"))
-	}
-	if a.arming[req.Symbol] {
-		return reject(exec.ErrPerpetualContractBusy)
 	}
 	for id, order := range a.journal.Pending {
 		if id == req.ClientOrderID {
@@ -284,17 +258,13 @@ func (*Adapter) ResetBalance(context.Context, float64) error {
 }
 
 func (a *Adapter) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.snapshot(ctx)
-}
-
-func (a *Adapter) snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
 	account, positions, orders, err := a.api.Snapshot(ctx)
 	if err != nil {
 		return account, nil, nil, err
 	}
+	a.mu.Lock()
 	account, positions, orders = a.filterSnapshot(account, positions, orders)
+	a.mu.Unlock()
 	return account, positions, orders, nil
 }
 
@@ -349,11 +319,13 @@ func (a *Adapter) Run(ctx context.Context) {
 }
 
 func (a *Adapter) poll(ctx context.Context, connected bool) bool {
-	// Release the network lock before enqueueing or awaiting the engine.
-	// A recovery snapshot can run before the engine starts consuming events.
+	// Polls never hold the journal lock across network reads. A new order can
+	// dispatch while a snapshot or a previous order's observation is in flight.
 	a.mu.Lock()
-	reports := make([]exec.PerpetualObservation, 0, len(a.journal.Pending))
-	for id, p := range a.journal.Pending {
+	pendingOrders := maps.Clone(a.journal.Pending)
+	a.mu.Unlock()
+	reports := make([]exec.PerpetualObservation, 0, len(pendingOrders))
+	for id, p := range pendingOrders {
 		report := exec.PerpetualObservation{Venue: a.venue, OrderID: id, Rejection: p.Rejection}
 		if p.Rejection == "" {
 			var err error
@@ -365,8 +337,7 @@ func (a *Adapter) poll(ctx context.Context, connected bool) bool {
 		}
 		reports = append(reports, report)
 	}
-	account, positions, orders, err := a.snapshot(ctx)
-	a.mu.Unlock()
+	account, positions, orders, err := a.Snapshot(ctx)
 	for _, report := range reports {
 		a.persistObservation(ctx, report)
 		if ctx.Err() != nil {

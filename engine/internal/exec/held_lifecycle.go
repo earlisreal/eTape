@@ -36,7 +36,7 @@ func (c *Core) shutdownHeldOrders() {
 			o = c.order(o.ID)
 		}
 		switch o.Held.Phase {
-		case HeldWaiting, HeldArmed:
+		case HeldWaiting, HeldArmed, HeldWaitingQuote:
 			c.changeHeld(o, HeldPaused, "engine shutdown; resume manually", false)
 			summary.Paused++
 		case HeldActivating:
@@ -99,9 +99,11 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 	if p.Gap && p.Symbol != "" && instrument.IsPerpetual(p.Symbol) {
 		delete(c.lastEligible, p.Symbol)
 		delete(c.lastPrintSeq, p.Symbol)
+		delete(c.perpetualBooks, p.Symbol)
+		delete(c.perpetualQuoteWait, p.Symbol)
 		for _, id := range c.heldOrderIDs() {
 			o := c.order(id)
-			if o.Symbol == p.Symbol && o.Perpetual != nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
+			if o.Symbol == p.Symbol && o.Perpetual != nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed || o.Held.Phase == HeldWaitingQuote) {
 				c.changeHeld(o, HeldPaused, "perpetual feed interrupted; resume manually", false)
 			}
 		}
@@ -213,7 +215,7 @@ func (c *Core) order(id string) Order {
 }
 
 func (c *Core) changeHeld(o Order, phase HeldPhase, reason string, cancelRequested bool) {
-	if o.Held == nil {
+	if o.Held == nil || (o.Held.Phase == phase && o.Held.PausedReason == reason && o.Held.CancelRequested == cancelRequested) {
 		return
 	}
 	h := *o.Held
@@ -322,15 +324,18 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 	if o.Perpetual != nil {
 		p := *o.Perpetual
 		child.Perpetual = &p
+		if p.IsRiskEntry() && child.TIF == TIFGTC && !c.pricePerpetualRiskChild(o, &child) {
+			return
+		}
 		if err := c.validatePerpetual(&child, o.ID); err != nil {
 			if err == errPerpetualFairPrice {
+				if p.IsRiskEntry() && child.TIF == TIFGTC {
+					c.waitForPerpetualQuote(o, "waiting for a fresh fair price")
+				}
 				return // Wait for a fresh trade with usable fair-price evidence.
 			}
 			c.changeHeld(o, HeldPaused, err.Error(), false)
 			return
-		}
-		if p.LocalProtection && !p.WholePosition {
-			child.Perpetual = &PerpetualOrder{Leverage: p.Leverage, Multiplier: p.Multiplier}
 		}
 	}
 	if o.DeferredPositionPct > 0 && (o.Held.Trail == nil || o.Held.ResolvedQty == 0) {
@@ -384,7 +389,13 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 		h.ResolvedQty = child.Qty
 	}
 	h.ChildClientID = o.ID
-	if err := c.appendAndFold(HeldOrderChanged{V: o.Venue, OID: o.ID, Held: h, Ts: c.now()}, SrcLocal); err != nil {
+	var event Event = HeldOrderChanged{V: o.Venue, OID: o.ID, Held: h, Ts: c.now()}
+	if o.Perpetual.IsRiskEntry() && child.TIF == TIFGTC {
+		o.Held, o.Perpetual, o.UpdatedMs = &h, child.Perpetual, c.now()
+		o.LimitPrice, o.Qty, o.LeavesQty = child.LimitPrice, child.Qty, child.Qty
+		event = RiskEntryChanged{Entry: o}
+	}
+	if err := c.appendAndFold(event, SrcLocal); err != nil {
 		c.syslog("exec.held", "persist activation intent "+o.ID+": "+err.Error())
 		return
 	}
@@ -396,7 +407,7 @@ func (c *Core) postHeldChild(ctx context.Context, b Broker, req OrderRequest) {
 		return
 	}
 	if _, err := b.SubmitOrder(ctx, req); err != nil {
-		if req.Perpetual != nil && req.Perpetual.WholePosition && req.Type == TypeMarket && errors.Is(err, ErrPerpetualContractBusy) {
+		if req.Perpetual != nil && req.Perpetual.PositionID != "" && req.Type == TypeMarket && errors.Is(err, ErrPerpetualContractBusy) {
 			select {
 			case c.bevents <- HeldActivationOutcome{V: req.Venue, OID: req.ClientOrderID, Reason: err.Error(), Deferred: true}:
 			case <-ctx.Done():
@@ -449,7 +460,7 @@ func (c *Core) expireHeldOrders(ctx context.Context) {
 			c.retireTrail(ctx, o, "session deadline reached")
 			continue
 		}
-		if o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed || o.Held.Phase == HeldPaused {
+		if o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed || o.Held.Phase == HeldPaused || o.Held.Phase == HeldWaitingQuote {
 			c.expireHeld(o)
 			continue
 		}
@@ -521,7 +532,7 @@ func (c *Core) requestHeldVenueCancel(ctx context.Context, o Order, reason strin
 func (c *Core) pauseHeldVenue(venue VenueID, reason string) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
-		if o.Venue == venue && o.Held != nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
+		if o.Venue == venue && o.Held != nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed || o.Perpetual != nil && o.Held.Phase == HeldWaitingQuote) {
 			c.changeHeld(o, HeldPaused, reason, false)
 		}
 	}
@@ -564,6 +575,10 @@ func (c *Core) disarmHeld(ctx context.Context, venue VenueID, cancelPretrigger b
 			}
 		case HeldActivating:
 			c.requestHeldVenueCancel(ctx, o, "disarm cancel pending")
+		case HeldWorking:
+			if o.TIF == TIFGTC && o.Perpetual.IsRiskEntry() {
+				c.requestHeldVenueCancel(ctx, o, "disarm cancel pending")
+			}
 		}
 	}
 }

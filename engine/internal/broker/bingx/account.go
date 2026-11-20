@@ -9,9 +9,15 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
 )
+
+type riskAccountSnapshot struct {
+	state accountState
+	at    time.Time
+}
 
 type position struct {
 	ID             json.RawMessage `json:"positionId"`
@@ -210,6 +216,7 @@ func side(buy, reduce bool) exec.Side {
 }
 
 func (a *apiClient) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
+	started := a.clock.Now()
 	if err := a.refreshCatalog(ctx); err != nil {
 		return exec.AccountSnapshot{}, nil, nil, err
 	}
@@ -272,5 +279,6 @@ func (a *apiClient) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.
 			Side: side(o.Side == "BUY", o.ReduceOnly), Status: exec.StatusAccepted, Type: exec.TypeLimit,
 			Qty: qty, ExecutedQty: filled, LeavesQty: qty - filled, LimitPrice: price, CreatedMs: o.Time})
 	}
+	a.riskAccount.Store(&riskAccountSnapshot{state: state, at: started})
 	return state.Account, positions, orders, nil
 }

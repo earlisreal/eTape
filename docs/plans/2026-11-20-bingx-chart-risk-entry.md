@@ -1,6 +1,8 @@
 # BingX Chart Risk Entry
 
-Approved for BingX Virtual and BingX Live.
+Approved for BingX Virtual and BingX Live. This plan records the original IOC
+rollout. The current workflow uses cached opening terms and regular limits.
+[Current execution guide](../../engine/internal/exec/README.md#bingx-chart-risk-entry)
 
 ## Goal
 

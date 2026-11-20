@@ -220,7 +220,9 @@ func (b *PerpetualSimulator) SubmitOrder(_ context.Context, req exec.OrderReques
 				buys(req.Side) && quote.Mark <= options.ProtectionPrice || !buys(req.Side) && quote.Mark >= options.ProtectionPrice {
 				return reject("perpetual protection is incompatible with the position or fair price")
 			}
-			req.TIF = exec.TIFIOC
+			if !options.IsRiskEntry() {
+				req.TIF = exec.TIFIOC
+			}
 		}
 		price := req.LimitPrice
 		if req.Type == exec.TypeMarket {
@@ -374,6 +376,20 @@ func (b *PerpetualSimulator) match(next *perpetualLedger, id string, book *feed.
 	if opening(o.Side) && (!rules.Valid() || !rules.TradingEnabled || (p.Position.Qty != 0 && (p.Position.Qty > 0) != buys(o.Side))) {
 		return b.cancel(next, o)
 	}
+	if opening(o.Side) && o.TIF == exec.TIFGTC && o.Perpetual.IsRiskEntry() {
+		stop := next.Orders[o.Perpetual.ProtectionID]
+		price := o.Perpetual.ProtectionPrice
+		if stop.ID != "" {
+			if !stop.Working() || stop.Type != exec.TypeStop {
+				return b.cancel(next, o)
+			}
+			price = stop.StopPrice
+		}
+		q := b.fair[o.Symbol]
+		if buys(o.Side) && q.Mark <= price || !buys(o.Side) && q.Mark >= price {
+			return b.cancel(next, o)
+		}
+	}
 	attempt := o
 	if !opening(o.Side) {
 		if !reduces(o.Side, p.Position.Qty) {
@@ -455,12 +471,16 @@ func (b *PerpetualSimulator) fill(next *perpetualLedger, o exec.Order, qty, pric
 		if p.Position.Qty < 0 {
 			stop.Side = exec.SideCover
 		}
+		if active := next.Orders[stop.ID]; active.ID != "" {
+			stop.StopPrice, stop.CreatedMs = active.StopPrice, active.CreatedMs
+		}
 		next.Orders[stop.ID] = stop
 		events = append(events, exec.OrderSubmitted{Order: stop})
 	} else if p.Position.Qty == 0 {
 		delete(next.Positions, o.Symbol)
 		for _, remaining := range next.Orders {
-			if remaining.Symbol == o.Symbol && remaining.Working() && !opening(remaining.Side) {
+			if remaining.Symbol == o.Symbol && remaining.Working() && (!opening(remaining.Side) ||
+				p.ProtectionID != "" && remaining.Perpetual.IsRiskEntry() && remaining.Perpetual.ProtectionID == p.ProtectionID) {
 				events = append(events, b.cancel(next, remaining)...)
 			}
 		}

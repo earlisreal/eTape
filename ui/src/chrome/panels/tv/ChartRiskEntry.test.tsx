@@ -54,6 +54,7 @@ it.each([["sim", "BUY"], ["sim", "SHORT"], ["mexc-live", "BUY"], ["mexc-live", "
     const preset: RiskEntryTemplate = { ...template, perpetual: { side, leverage: 5 }, value: 1 };
     const { host, sendCommand, sendQuery, stores } = mount(false, preset, mexcSymbol, venue === "mexc-live");
     seedMexcContract(stores);
+    if (venue === "mexc-live") await waitFor(() => expect(sendQuery).toHaveBeenCalledTimes(1));
     initiateChartRiskEntry(preset);
     fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 100, clientY: side === "BUY" ? 220 : 180 });
@@ -64,11 +65,10 @@ it.each([["sim", "BUY"], ["sim", "SHORT"], ["mexc-live", "BUY"], ["mexc-live", "
         await waitFor(() => expect(host.querySelector("[data-risk-readout]")?.textContent).toContain("45 contracts"));
     }
     fireEvent.keyDown(window, { key: "Enter" });
-    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.objectContaining({
+    expect(sendCommand).toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.objectContaining({
         venue, symbol: mexcSymbol, side, trigger: 10, stop: side === "BUY" ? 9.8 : 10.2, leverage: 5, maxQty: 45,
-    })));
-    if (venue === "mexc-live") expect(sendQuery).toHaveBeenCalledWith("QueryPerpetualOpening", { venue, symbol: mexcSymbol });
-    else expect(sendQuery).not.toHaveBeenCalled();
+    }));
+    expect(sendQuery).toHaveBeenCalledTimes(venue === "mexc-live" ? 1 : 0);
 });
 
 it.each(["BUY", "SHORT"] as const)("uses the MEXC isolated terms for a live %s", async side => {

@@ -4,24 +4,16 @@ import (
 	"context"
 	"errors"
 	"math"
-	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/instrument"
 )
-
-type finishPerpetualArm struct {
-	orderID  string
-	capacity int64
-	err      error
-}
-
-func (finishPerpetualArm) isCommand() {}
 
 func (c *Core) perpetualRiskIdentity(venue VenueID) string {
 	if identity := c.heldLiveIdentity[venue]; identity != "" {
 		return identity
 	}
-	if b, ok := c.brokers[venue].(wholePositionRiskBroker); ok && !c.gate.UnvaluedLive[venue] {
+	if b, ok := c.brokers[venue].(interface{ AccountIdentity() string }); ok &&
+		c.brokers[venue].Capabilities().WholePositionPerpetualRiskEntry && !c.gate.UnvaluedLive[venue] {
 		return b.AccountIdentity()
 	}
 	return ""
@@ -34,9 +26,7 @@ func (c *Core) perpetualRiskAcknowledged(venue VenueID) bool {
 	return !c.gate.UnvaluedLive[venue]
 }
 
-func (c *Core) handleWholePositionRiskEntry(ctx context.Context, cm SubmitPerpetualRiskEntry, rules instrument.ContractRules, limit, budget, collateral float64) CmdAck {
-	opening := cm.openingTerms
-	side := cm.openingLimit
+func (c *Core) handleWholePositionRiskEntry(ctx context.Context, cm SubmitPerpetualRiskEntry, rules instrument.ContractRules, limit, budget, collateral float64, opening PerpetualOpeningTerms, side PerpetualOpeningLimit) CmdAck {
 	if opening.Notional == nil || side.Leverage < 1 || side.MaxLeverage < 1 {
 		return CmdAck{Reason: "BingX isolated opening terms are unavailable"}
 	}
@@ -45,14 +35,11 @@ func (c *Core) handleWholePositionRiskEntry(ctx context.Context, cm SubmitPerpet
 		(position.Qty != 0) != (cm.SharedStopID != "") {
 		return CmdAck{Reason: "BingX position changed; reconcile and review the chart entry"}
 	}
-	first := cm.Leverage
-	if cm.AutoLeverage && position.Qty == 0 {
-		first = rules.MinLeverage
-	} else if cm.Leverage != side.Leverage {
+	if cm.Leverage != side.Leverage || cm.Leverage > side.MaxLeverage {
 		return CmdAck{Reason: "use the verified BingX isolated leverage for this entry"}
 	}
 	qty, leverage := rules.SizeNotionalRisk(*opening.Notional, budget, collateral, limit, cm.Stop,
-		first, min(cm.Leverage, side.MaxLeverage), side.Leverage, side.MaxContracts, int64(cm.MaxQty), cm.Side == SideBuy)
+		cm.Leverage, cm.Leverage, side.Leverage, side.MaxContracts, int64(cm.MaxQty), cm.Side == SideBuy)
 	if qty == 0 || leverage != cm.Leverage {
 		return CmdAck{Reason: "BingX size or liquidation clearance changed; review the entry"}
 	}
@@ -63,7 +50,7 @@ func (c *Core) handleWholePositionRiskEntry(ctx context.Context, cm SubmitPerpet
 	options := &PerpetualOrder{Leverage: leverage, Multiplier: rules.ContractSize(), ProtectionPrice: cm.Stop, ProtectionID: protectionID,
 		RiskBudget: budget, AutoLeverage: cm.AutoLeverage, EntryCushion: &cm.Cushion, OpeningMaxQty: qty,
 		LocalProtection: true, WholePosition: true, PositionID: opening.PositionID, AccountIdentity: c.perpetualRiskIdentity(cm.Venue), Notional: opening.Notional}
-	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeStopLimit, TIF: TIFIOC, Session: SessionAuto,
+	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeStopLimit, TIF: TIFGTC, Session: SessionAuto,
 		Qty: float64(qty), StopPrice: cm.Trigger, LimitPrice: limit, ClientOrderID: c.idgen.Next(), Perpetual: options}
 	if err := c.validatePerpetual(&req, ""); err != nil {
 		return CmdAck{Reason: err.Error()}
@@ -71,20 +58,7 @@ func (c *Core) handleWholePositionRiskEntry(ctx context.Context, cm SubmitPerpet
 	if ok, reason := Evaluate(c.state, c.gate, req, c.marks); !ok {
 		return CmdAck{Reason: reason}
 	}
-	if c.heldDemand == nil {
-		return CmdAck{Reason: "perpetual market demand is unavailable"}
-	}
-	if err := c.heldDemand.Acquire(ctx, req.ClientOrderID, req.Symbol); err != nil {
-		return CmdAck{Reason: err.Error()}
-	}
-	o := newOrderFromRequest(req, c.now())
-	o.Held = &HeldOrder{Phase: HeldPaused, DeadlineMs: c.clk.Now().Add(24 * time.Hour).UnixMilli(),
-		PausedReason: "verifying BingX opening terms", PerpetualArmPending: true}
-	if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcLocal); err != nil {
-		c.releaseHeld(o.ID)
-		return CmdAck{Reason: err.Error()}
-	}
-	return CmdAck{OrderID: o.ID, perpetualArm: &req}
+	return c.armPerpetualEntry(ctx, req)
 }
 
 func (c *Core) validateWholePositionEntry(req OrderRequest, rules instrument.ContractRules) error {
@@ -119,52 +93,6 @@ func (c *Core) validateWholePositionEntry(req OrderRequest, rules instrument.Con
 		return errors.New("BingX position, margin or liquidation clearance changed; review the entry")
 	}
 	return nil
-}
-
-func (c *Core) armWholePositionEntry(ctx context.Context, req OrderRequest, reply chan<- CmdAck) {
-	armCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	b := c.brokers[req.Venue].(wholePositionRiskBroker)
-	capacity, err := b.ArmPerpetualRisk(armCtx, req)
-	reply <- c.DoContext(ctx, finishPerpetualArm{orderID: req.ClientOrderID, capacity: capacity, err: err})
-}
-
-func (c *Core) finishWholePositionArm(ctx context.Context, cm finishPerpetualArm) CmdAck {
-	o := c.order(cm.orderID)
-	if !o.Working() || o.Held == nil || !o.Held.PerpetualArmPending {
-		return CmdAck{OrderID: cm.orderID, Reason: "the BingX entry changed while arming"}
-	}
-	deny := func(reason string) CmdAck {
-		if err := c.appendAndFold(OrderRejected{V: o.Venue, OID: o.ID, Ts: c.now(), Reason: reason}, SrcLocal); err != nil {
-			return CmdAck{OrderID: o.ID, Reason: err.Error()}
-		}
-		c.releaseHeld(o.ID)
-		return CmdAck{OrderID: o.ID, Reason: reason}
-	}
-	if cm.err != nil {
-		return deny(cm.err.Error())
-	}
-	if !c.perpetualRiskAccountFresh(o.Venue) || float64(cm.capacity) < o.Qty {
-		return deny("fresh BingX account and opening capacity required")
-	}
-	p := *o.Perpetual
-	p.OpeningMaxQty = min(p.OpeningMaxQty, cm.capacity)
-	req := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: o.Type, TIF: o.TIF, Session: o.Session,
-		Qty: o.Qty, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice, ClientOrderID: o.ID, Perpetual: &p}
-	if err := c.validatePerpetual(&req, o.ID); err != nil {
-		return deny(err.Error())
-	}
-	if ok, reason := c.heldGate(req, o.ID); !ok {
-		return deny(reason)
-	}
-	held := *o.Held
-	held.Phase, held.PausedReason, held.PerpetualArmPending = HeldWaiting, "", false
-	o.Held, o.Perpetual, o.UpdatedMs = &held, &p, c.now()
-	if err := c.appendAndFold(RiskEntryChanged{Entry: o}, SrcLocal); err != nil {
-		return CmdAck{OrderID: o.ID, Reason: err.Error()}
-	}
-	c.checkPerpetualEntryTrigger(ctx, o)
-	return CmdAck{OrderID: o.ID, Accepted: true}
 }
 
 func (c *Core) applyPerpetualAddFill(entry Order) error {
