@@ -176,8 +176,10 @@ exits add the reduce-only flag. The adapter converts integer lots to exact base
 quantities and verifies one-way mode, the account position, collateral, mark and
 the configured isolated leverage before opening. Both venues use the public
 BingX feed for charts and depth. The BingX Live credential test reads balance,
-position mode, positions and working orders. The generic Binance and BingX
-Futures API checks use their production read-only endpoints. [BingX API environments](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/base-urls.md)
+position mode, positions and working orders. eTape accepts both the documented
+JSON boolean and the quoted position-mode flag returned by BingX Live. The
+generic Binance and BingX Futures API checks use their production read-only
+endpoints. [BingX API environments](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/base-urls.md)
 · [Swap orders and fills](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md)
 
 The authenticated adapters save pending submissions next to the local database

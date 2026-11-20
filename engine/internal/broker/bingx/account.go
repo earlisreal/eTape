@@ -94,16 +94,34 @@ type accountState struct {
 	Orders    []order
 }
 
+// PositionMode accepts the documented boolean and the string returned by BingX Live.
+type PositionMode struct {
+	DualSidePosition json.RawMessage `json:"dualSidePosition"`
+}
+
+func (m PositionMode) OneWay() (bool, error) {
+	switch string(m.DualSidePosition) {
+	case `false`, `"false"`:
+		return true, nil
+	case `true`, `"true"`:
+		return false, nil
+	default:
+		return false, errors.New("unknown position mode in the BingX Futures API response")
+	}
+}
+
 func (a *apiClient) account(ctx context.Context) (accountState, error) {
 	const read = http.MethodGet
 	var state accountState
-	var dual struct {
-		Enabled *bool `json:"dualSidePosition"`
-	}
-	if err := a.request(ctx, read, "/openApi/swap/v1/positionSide/dual", nil, true, &dual); err != nil {
+	var mode PositionMode
+	if err := a.request(ctx, read, "/openApi/swap/v1/positionSide/dual", nil, true, &mode); err != nil {
 		return state, err
 	}
-	if dual.Enabled == nil || *dual.Enabled {
+	oneWay, err := mode.OneWay()
+	if err != nil {
+		return state, err
+	}
+	if !oneWay {
 		return state, fmt.Errorf("set %s to one-way position mode", a.env.label)
 	}
 	var balances []struct {

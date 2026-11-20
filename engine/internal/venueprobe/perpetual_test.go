@@ -25,6 +25,8 @@ func TestPerpetualProbesSignReadOnlyAccountRequests(t *testing.T) {
 		{binanceProbe, "Binance", `[{"asset":"USDT","availableBalance":"100"}]`, `{"dualSidePosition":false}`, true},
 		{bingXProbe, "BingX", `{"code":0,"data":[{"asset":"USDT","availableMargin":"100"}]}`,
 			`{"code":0,"data":{"dualSidePosition":true}}`, false},
+		{bingXProbe, "BingX quoted one-way", `{"code":0,"data":[{"asset":"USDT","availableMargin":"100"}]}`,
+			`{"code":0,"data":{"dualSidePosition":"false"}}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			config := tc.config

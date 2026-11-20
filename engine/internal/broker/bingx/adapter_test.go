@@ -73,6 +73,9 @@ func testSubmitObserveAndCancel(t *testing.T, env environment, host, currency st
 					msg = fmt.Sprintf(`[{"asset":"%s","availableMargin":"200","equity":"210","usedMargin":"10"}]`, currency)
 				case "/openApi/swap/v1/positionSide/dual":
 					msg = `{"dualSidePosition":false}`
+					if env == live {
+						msg = `{"dualSidePosition":"false"}`
+					}
 				case "/openApi/swap/v2/user/positions":
 					msg = tc.position
 				case "/openApi/swap/v2/trade/openOrders":
@@ -154,6 +157,23 @@ func testSubmitObserveAndCancel(t *testing.T, env environment, host, currency st
 				t.Fatalf("cancel: %v, calls %d", err, cancels.Load())
 			}
 		})
+	}
+}
+
+func TestAccountRejectsQuotedHedgeMode(t *testing.T) {
+	c := newAPI(live, creds.Pair{KeyID: "key", SecretKey: "secret"}, clock.NewFake(time.UnixMilli(1700000000000)))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/openApi/swap/v1/positionSide/dual" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"code":0,"data":{"dualSidePosition":"true"}}`)
+	}))
+	defer server.Close()
+	c.env.base = server.URL
+	if _, err := c.account(t.Context()); err == nil || err.Error() != "set BingX Live to one-way position mode" {
+		t.Fatalf("account check in hedge mode = %v", err)
 	}
 }
 

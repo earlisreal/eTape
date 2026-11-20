@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/bingx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/creds"
 )
@@ -55,6 +56,13 @@ func (p perpetualProbe) inspect(ctx context.Context, clk clock.Clock, cr creds.P
 	}
 	if !found {
 		return false, errors.New("no USDT collateral account in the Futures API response")
+	}
+	if p.enveloped {
+		var mode bingx.PositionMode
+		if err := p.read(ctx, h, clk, cr, p.modePath, &mode); err != nil {
+			return false, fmt.Errorf("read Futures position mode: %w", err)
+		}
+		return mode.OneWay()
 	}
 	var mode struct {
 		Hedge *bool `json:"dualSidePosition"`
