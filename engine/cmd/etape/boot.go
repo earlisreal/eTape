@@ -29,6 +29,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/locates"
 	"github.com/earlisreal/eTape/engine/internal/stockinfo"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
+	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -192,6 +193,38 @@ type stockInfoAssetReader interface {
 
 type alpacaStockInfoReader struct {
 	adapter *alpaca.Adapter
+}
+
+func alpacaStockMarginReader(vbs []venueBroker) func(context.Context, wsmsg.QueryAlpacaStockMarginArgs) wsmsg.AlpacaStockMargin {
+	var selected *alpaca.Adapter
+	source := "paper"
+	for _, venue := range vbs {
+		adapter, ok := venue.Broker.(*alpaca.Adapter)
+		if !ok {
+			continue
+		}
+		if venue.Env == "live" {
+			selected, source = adapter, "live"
+			break
+		}
+		if selected == nil {
+			selected = adapter
+		}
+	}
+	if selected == nil {
+		return nil
+	}
+	return func(ctx context.Context, args wsmsg.QueryAlpacaStockMarginArgs) wsmsg.AlpacaStockMargin {
+		margin := selected.StockMargin(ctx, args.Symbol, args.Refresh)
+		value := wsmsg.AlpacaStockMargin{Source: source, Long: margin.Long, Short: margin.Short, Stale: margin.Stale}
+		if !margin.FetchedAt.IsZero() {
+			value.FetchedAtMs = margin.FetchedAt.UnixMilli()
+		}
+		if !margin.NextCheck.IsZero() {
+			value.NextCheckMs = margin.NextCheck.UnixMilli()
+		}
+		return value
+	}
 }
 
 func (r alpacaStockInfoReader) AssetStatus(symbol string) (stockinfo.AssetStatus, bool) {

@@ -818,6 +818,20 @@ type StopLimitRoutePreview struct {
 	OrderType               OrderType    `json:"orderType,omitempty"`
 }
 
+type QueryAlpacaStockMarginArgs struct {
+	Symbol  string `json:"symbol"`
+	Refresh bool   `json:"refresh"`
+}
+
+type AlpacaStockMargin struct {
+	Source      string  `json:"source"`
+	Long        *string `json:"long" tstype:"string | null,required"`
+	Short       *string `json:"short" tstype:"string | null,required"`
+	FetchedAtMs int64   `json:"fetchedAtMs"`
+	NextCheckMs int64   `json:"nextCheckMs"`
+	Stale       bool    `json:"stale"`
+}
+
 type QueryVenueInstrumentEligibilityArgs struct {
 	Venue  string `json:"venue"`
 	Symbol string `json:"symbol"`

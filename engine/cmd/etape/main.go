@@ -630,6 +630,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		VolumeProfiles:     volumeProfiles,
 		AccountDemand:      demands,
 		Eligibility:        venueEligibilityRegistry(vbs),
+		AlpacaStockMargin:  alpacaStockMarginReader(vbs),
 		FocusMainWorkspace: focusMainWorkspace,
 	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo, locateProviders)
 	alerts, alertErr := pricealert.New(pricealert.Options{Clock: uihubClk, Repository: st,

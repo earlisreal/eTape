@@ -30,8 +30,9 @@ is introduced.
 - **Alpaca:** paper/live REST and trade-update WebSocket execution, plus
   read-only asset eligibility/borrow metadata used by Stock Info. Each
   configured Alpaca adapter loads its active asset directory concurrently at engine
-  startup with `GET /v2/assets?status=active`, without blocking pollers; Stock Info uses in-memory
-  lookups for the rest of the process. Paper credentials may also provide
+  startup with `GET /v2/assets?status=active`, without blocking pollers. Stock
+  Info revalidates the displayed symbol's margin percentages via
+  `GET /v2/assets/{symbol}` after 15 minutes. Paper credentials may also provide
   daily and one-minute history; live credentials are not reused for history.
   Alpaca SIP raw daily history also supplies the Scanner's process-local
   up-to-50-day REL VOL baselines when configured; IEX and unavailable clients

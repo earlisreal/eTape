@@ -4,6 +4,7 @@ import { useTheme } from "../ThemeProvider";
 import { formatTapeTime, formatPrice, QUOTE_DECIMALS } from "../../render/format";
 import type { Palette } from "../../render/palette";
 import { openNewsWindow } from "../windows";
+import type { AlpacaStockMargin, QueryAlpacaStockMarginArgs } from "../../wire/contract";
 
 // Mirrors the engine default; classification stays exclusively in the engine.
 const CATALYST_MIN_SCORE = 50;
@@ -53,7 +54,7 @@ function textOrDash(value: string, palette: Palette): JSX.Element {
     : <span className="mono" style={{ color: palette.textMuted }}>—</span>;
 }
 
-export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, symbol: symbolProp, onConfigChange }: PanelProps): JSX.Element {
+export function StockInfoPanel({ config, stores, commands, linkGroups, group: groupProp, symbol: symbolProp, onConfigChange }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const snap = useSyncExternalStore((cb) => stores.news.subscribe(cb), () => stores.news.getSnapshot());
   const detailSnap = useSyncExternalStore((cb) => stores.stockDetail.subscribe(cb), () => stores.stockDetail.getSnapshot());
@@ -87,6 +88,36 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, s
     () => (symbol ? stores.stockDetail.detailFor(symbol) : undefined),
     [detailSnap, symbol, stores.stockDetail],
   );
+  const [marginResult, setMarginResult] = useState<{ symbol: string; value: AlpacaStockMargin }>();
+  const margin = marginResult?.symbol === symbol ? marginResult?.value : undefined;
+  useEffect(() => {
+    if (!symbol?.startsWith("US.")) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const query = async (refresh: boolean) => {
+      const args: QueryAlpacaStockMarginArgs = { symbol, refresh };
+      try {
+        const value = await commands.sendQuery("QueryAlpacaStockMargin", args) as AlpacaStockMargin | undefined;
+        if (cancelled) return;
+        if (value?.source !== "live" && value?.source !== "paper") {
+          setMarginResult(undefined);
+          return;
+        }
+        setMarginResult({ symbol, value });
+        if (!detailsCollapsed) {
+          timer = setTimeout(() => void query(true), Math.max(refresh ? 1_000 : 0, value.nextCheckMs - Date.now()));
+        }
+      } catch {
+        if (!cancelled) timer = setTimeout(() => void query(refresh), 60_000);
+      }
+    };
+    void query(false);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [commands, detailsCollapsed, symbol]);
+  const marginSource = margin?.source === "live" ? "Alpaca Live" : "Alpaca Paper";
   return (
     <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
       {/* Reserved slot for high-salience halt banners (v2 feed) — empty in v1. */}
@@ -100,7 +131,15 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, s
 
       {symbol && (
         detail === undefined ? (
-          <div style={{ padding: 12, color: palette.textMuted }}>No fundamentals yet for {symbol}.</div>
+          <div style={{ padding: 12, color: palette.textMuted, display: "flex", justifyContent: "space-between" }}>
+            No fundamentals yet for {symbol}.
+            {margin && (
+              <button type="button" onClick={toggleDetails} aria-expanded={!detailsCollapsed} aria-label="Toggle fundamentals"
+                style={{ background: "transparent", border: "none", cursor: "pointer", color: palette.textMuted, fontSize: 11 }}>
+                {detailsCollapsed ? "▸" : "▾"}
+              </button>
+            )}
+          </div>
         ) : (
           <>
             {detailsCollapsed ? (
@@ -171,6 +210,22 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, s
             )}
           </>
         )
+      )}
+      {!detailsCollapsed && margin && (
+        <div style={{ padding: "4px 8px", fontSize: 11, display: "flex", flexWrap: "wrap", gap: "2px 8px" }}>
+          {margin.long == null && margin.short == null ? (
+            <span style={{ color: palette.textMuted }}>{marginSource} margin unavailable</span>
+          ) : (
+            <>
+              <span style={{ color: palette.textMuted }}>{marginSource} margin</span>
+              <span className="mono">Long {margin.long == null ? "—" : `${margin.long}%`}</span>
+              <span className="mono">Short {margin.short == null ? "—" : `${margin.short}%`}</span>
+              {margin.stale && margin.fetchedAtMs > 0 && (
+                <span style={{ color: palette.textMuted }}>Updated {new Date(margin.fetchedAtMs).toLocaleString()}</span>
+              )}
+            </>
+          )}
+        </div>
       )}
       {symbol && <div style={{ borderBottom: `1px solid ${palette.borderStrong}` }} />}
 

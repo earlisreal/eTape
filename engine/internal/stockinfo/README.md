@@ -23,6 +23,15 @@ same metadata without focus-triggered requests or REST quota use.
 The snapshot is session-static and remains unavailable when the startup load
 fails or a symbol is not present.
 
+Expanded Stock Info displays Alpaca's reported long and short margin percentages
+for its selected US stock, even in pinned panels and when another execution venue
+is selected. The source is the first configured Alpaca Live adapter, or the first
+Alpaca Paper adapter in paper-only setups. The WebSocket query can read the
+startup cache before fundamentals arrive. While displayed, a symbol becomes
+eligible for a shared background refresh after 15 minutes. Failed refreshes
+retain the previous percentages and their timestamp, with a one-minute retry
+delay. The display is informational and independent of account buying power.
+
 Yahoo profile metadata is controlled by `[stockinfo].yahoo_metadata` (enabled
 by default). It is fetched in the background at most once per symbol per day,
 with a one-hour retry delay after failures. Rate-limit admission may wait for

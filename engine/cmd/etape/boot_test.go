@@ -15,6 +15,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
+	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
 func TestBuildGateConfigMapsVenueAndGlobal(t *testing.T) {
@@ -339,6 +340,27 @@ func TestFirstAlpacaAdapterAndAssetReaderFindsAlpaca(t *testing.T) {
 	}
 	if _, ok := reader.AssetStatus("US.AAPL"); ok {
 		t.Fatal("unloaded Alpaca asset directory must not resolve a symbol")
+	}
+}
+
+func TestAlpacaStockMarginSourcePrefersLive(t *testing.T) {
+	cr := creds.File{"alpaca": {KeyID: "key", SecretKey: "secret"}}
+	cfg := config.Config{Venues: []config.Venue{
+		{ID: "paper", Broker: "alpaca", Credentials: "alpaca", Env: "paper"},
+		{ID: "live", Broker: "alpaca", Credentials: "alpaca", Env: "live"},
+	}}
+	vbs, err := buildBrokers(cfg, cr, clock.System{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alpacaStockMarginReader(nil) != nil {
+		t.Fatal("unexpected margin source without Alpaca venues")
+	}
+	args := wsmsg.QueryAlpacaStockMarginArgs{Symbol: "US.AAPL"}
+	for count, want := range map[int]string{1: "paper", 2: "live"} {
+		if got := alpacaStockMarginReader(vbs[:count])(context.Background(), args); got.Source != want || got.Long != nil || got.Short != nil {
+			t.Fatalf("source with %d configured venues: %+v, want %s with no data", count, got, want)
+		}
 	}
 }
 

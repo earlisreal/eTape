@@ -16,6 +16,12 @@ snapshot is treated as session-static until the next restart. The generic
 capability excludes borrow status and remains informational only: it is not
 real-time borrow availability, account authorization, or order approval.
 
+The directory also seeds Stock Info's long and short margin percentages from
+the decimal-string asset fields. Stock Info revalidates stale percentages with
+`GET /v2/assets/{symbol}` through the same REST limiter, coalescing concurrent
+reads per symbol. The refreshed margin cache leaves the startup eligibility
+and borrow metadata intact.
+
 `*Adapter` also implements the optional `locates.Provider` capability. Quote,
 create, list, and get requests use `/v1/locates*`, retain decimal fee strings,
 require a positive `limit_price`, and share the existing Alpaca REST auth and

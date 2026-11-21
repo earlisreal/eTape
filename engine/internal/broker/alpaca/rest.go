@@ -93,6 +93,8 @@ type alpacaError struct {
 }
 
 type assetResponse struct {
+	MarginLong   *string `json:"margin_requirement_long"`
+	MarginShort  *string `json:"margin_requirement_short"`
 	Symbol       string  `json:"symbol"`
 	BorrowStatus *string `json:"borrow_status"`
 	Shortable    *bool   `json:"shortable"`

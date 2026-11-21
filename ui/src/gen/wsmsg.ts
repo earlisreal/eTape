@@ -866,6 +866,18 @@ export interface StopLimitRoutePreview {
   reason?: string;
   orderType?: OrderType;
 }
+export interface QueryAlpacaStockMarginArgs {
+  symbol: string;
+  refresh: boolean;
+}
+export interface AlpacaStockMargin {
+  source: string;
+  long: string | null;
+  short: string | null;
+  fetchedAtMs: number /* int64 */;
+  nextCheckMs: number /* int64 */;
+  stale: boolean;
+}
 export interface QueryVenueInstrumentEligibilityArgs {
   venue: string;
   symbol: string;

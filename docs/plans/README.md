@@ -4,6 +4,7 @@ Create one focused Markdown file per approved change. Name `YYYY-MM-DD-short-fea
 
 Implemented:
 
+- [Alpaca margin in Stock Info](2026-11-21-alpaca-stock-info-margin.md)
 - [BingX Chart Risk Entry](2026-11-20-bingx-chart-risk-entry.md)
 - [BingX private order updates](2026-11-20-bingx-fill-websocket.md)
 - [DOM Ladder stripes for Engine-Held Stop-Limits](2026-11-13-dom-ladder-engine-held-stop-limit.md)

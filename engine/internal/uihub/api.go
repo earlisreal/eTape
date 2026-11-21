@@ -82,6 +82,7 @@ type Config struct {
 	VolumeProfiles                 *tickstore.ProfileReader
 	AccountDemand                  *exec.AccountDemandRegistry
 	Eligibility                    EligibilityRegistry
+	AlpacaStockMargin              func(context.Context, wsmsg.QueryAlpacaStockMarginArgs) wsmsg.AlpacaStockMargin
 	OnConfigSet                    func(key, value string)
 	FocusMainWorkspace             func() bool
 }
@@ -136,6 +137,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	qry.perpetual, _ = ex.(perpetualOpeningPreviewer)
 	qry.locates = locateRegistry
 	qry.eligibility = cfg.Eligibility
+	qry.alpacaStockMargin = cfg.AlpacaStockMargin
 	srv := NewServer(h, cmd, qry, ServerConfig{DistDir: cfg.DistDir, OutBuf: cfg.OutBuf})
 	return h, srv
 }

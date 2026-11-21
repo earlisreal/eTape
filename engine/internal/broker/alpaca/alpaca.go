@@ -67,6 +67,7 @@ type Config struct {
 // locate workflow. marginable and tradable are also asset-level flags, not
 // account or risk authorization.
 type AssetStatus struct {
+	margin       StockMargin
 	BorrowStatus *string
 	Shortable    *bool
 	Marginable   *bool
@@ -91,6 +92,7 @@ type Adapter struct {
 
 	assetMu        sync.RWMutex
 	assetsBySymbol map[string]AssetStatus
+	marginChecks   map[string]*stockMarginCheck
 
 	// runCtx is the context Run(ctx) was invoked with. It is only ever read
 	// from the wsClient's callbacks, which are only ever invoked from the
@@ -263,12 +265,14 @@ func (a *Adapter) LoadActiveAssets(ctx context.Context) (int, error) {
 	}
 
 	next := make(map[string]AssetStatus, len(assets))
+	fetchedAt := a.clk.Now()
 	for _, asset := range assets {
 		symbol := assetCacheKey(asset.Symbol)
 		if symbol == "" {
 			continue
 		}
 		next[symbol] = AssetStatus{
+			margin:       asset.stockMargin(fetchedAt),
 			BorrowStatus: asset.BorrowStatus,
 			Shortable:    asset.Shortable,
 			Marginable:   asset.Marginable,

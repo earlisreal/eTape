@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -40,12 +41,13 @@ type queries struct {
 	charts interface {
 		QueryChartWindow(wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult
 	}
-	clk           clock.Clock
-	locates       LocateRegistry
-	preview       eligiblePrintPreviewer
-	perpetual     perpetualOpeningPreviewer
-	profileReader *tickstore.ProfileReader
-	profileSlots  chan struct{}
+	clk               clock.Clock
+	locates           LocateRegistry
+	preview           eligiblePrintPreviewer
+	perpetual         perpetualOpeningPreviewer
+	profileReader     *tickstore.ProfileReader
+	profileSlots      chan struct{}
+	alpacaStockMargin func(context.Context, wsmsg.QueryAlpacaStockMarginArgs) wsmsg.AlpacaStockMargin
 
 	eligibility         EligibilityRegistry
 	eligibilityMu       sync.Mutex
@@ -101,15 +103,23 @@ func (q *queries) handleAsync(ctx context.Context, name string, args json.RawMes
 
 func isAsyncQuery(name string) bool {
 	switch name {
-	case "QueryVolumeProfile", "QueryStopLimitRoute", "QueryPerpetualOpening", "QueryVenueInstrumentEligibility", "QueryLocateEligibility", "QueryLocateQuotes", "QueryLocates", "QueryLocate":
+	case "QueryVolumeProfile", "QueryStopLimitRoute", "QueryPerpetualOpening", "QueryVenueInstrumentEligibility", "QueryLocateEligibility", "QueryLocateQuotes", "QueryLocates", "QueryLocate", "QueryAlpacaStockMargin":
 		return true
 	default:
 		return false
 	}
 }
 
+var alpacaMarginSymbol = regexp.MustCompile(`^US\.[A-Z0-9][A-Z0-9.-]{0,19}$`)
+
 func (q *queries) handleContext(ctx context.Context, name string, args json.RawMessage) any {
 	switch name {
+	case "QueryAlpacaStockMargin":
+		var a wsmsg.QueryAlpacaStockMarginArgs
+		if q.alpacaStockMargin == nil || json.Unmarshal(args, &a) != nil || !alpacaMarginSymbol.MatchString(a.Symbol) {
+			return wsmsg.AlpacaStockMargin{}
+		}
+		return q.alpacaStockMargin(ctx, a)
 	case "QueryVolumeProfile":
 		return q.volumeProfile(ctx, args)
 	case "QueryPerpetualOpening":
