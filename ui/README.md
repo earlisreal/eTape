@@ -157,7 +157,7 @@ hotkey. Choose **Auto (chart and gesture)** under Instrument and direction to
 use one preset on stock charts and MEXC or BingX perpetual charts. Focus a grouped
 chart, press the hotkey, then click the entry trigger and protective stop or
 drag between them. A lower stop gives a long. A higher stop gives a short on
-supported perpetual venues. The preview shows the side, which locks on release or
+Simulator, Alpaca Paper, Alpaca Live and supported perpetual venues. The preview shows the side, which locks on release or
 the second click. Auto uses a fixed risk amount in USD, USDT or VST or a percentage
 of cash or collateral. New perpetual presets default to **Auto** under
 **Perpetual leverage**. Choose a cap, or select **Fixed** to enter the isolated
@@ -182,6 +182,9 @@ the current stop and remain below BUY. Preview shows existing + added = total
 shares and the shared stop change, which takes effect only on first fill.
 Existing Protection Mode, Sell Limit Cushion and trailing progress are retained;
 one pending BUY (including a partial/cancel-pending remainder) blocks another add.
+For a protected short, the COVER keeps or lowers the shared stop on first
+fill. Alpaca checks that the stock is easy to borrow at arming and activation.
+Auto-send applies when Alpaca Live is selected and armed.
 Canceling an add leaves filled shares protected. Pending BUY hover details show
 the proposed shared stop; a stale protection owner requires a new chart draft.
 Stock protective stops resume after a market-data gap on the next eligible

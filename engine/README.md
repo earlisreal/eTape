@@ -53,9 +53,11 @@ the live-account acknowledgement is separate from stop-limit enablement.
 
 Chart Risk Entry links two engine-held STOP_LIMITs through scheduled DataClose,
 sizes shares from a saved risk budget, and protects confirmed entry/add fills.
-A fully protected long position can accept one pending add with its own budget;
-the original shared stop keeps its mode/progress and only keeps or raises its
-price on the first add fill. Coverage follows actual fills and partial sells.
+A fully protected position can accept one same-side add with its own budget.
+The shared stop retains its mode and progress and can tighten on the first add
+fill. Coverage follows confirmed fills and partial sells or covers. Simulator
+and Alpaca Paper and Live support stock shorts. Alpaca openings require fresh
+easy-to-borrow status and shorting capacity at arming and activation.
 Acceptance requires fresh account data and successful ticker subscriptions;
 missing or stale trades leave the accepted entry waiting for a fresh eligible
 trigger print. Immediate activation rechecks print freshness after subscription.

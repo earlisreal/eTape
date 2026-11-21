@@ -34,7 +34,7 @@ func (c *Core) confirmFlatRiskEntries(v VenueID, symbol string) error {
 	vs := c.state.Venue(v)
 	for _, entry := range vs.Orders {
 		if entry.RiskEntry == nil || entry.RiskEntry.SharedEntryID != "" || c.riskFilledQty(entry) <= entry.RiskEntry.FlatConfirmedQty ||
-			(symbol != "" && entry.Symbol != symbol) || vs.Positions[entry.Symbol].Qty > 0 {
+			(symbol != "" && entry.Symbol != symbol) || riskPosition(entry.Side, vs.Positions[entry.Symbol].Qty) > 0 {
 			continue
 		}
 		risk := *entry.RiskEntry
@@ -113,7 +113,7 @@ func (c *Core) refreshProtectionWarnings(ctx context.Context) {
 					warning.State = "unverified"
 				}
 				if check.verified && check.revision == c.protectionRevision[v] && c.state.PositionsReady(v) {
-					warning.Qty = c.state.Venue(v).Positions[symbol].Qty
+					warning.Qty = math.Abs(c.state.Venue(v).Positions[symbol].Qty)
 					if warning.Qty <= 0 {
 						continue
 					}

@@ -315,7 +315,7 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 			stop := c.order(o.RiskEntry.StopID)
 			if owner.RiskEntry == nil || owner.RiskEntry.Closing || owner.RiskEntry.ProtectionCanceled || owner.RiskEntry.Failure != "" ||
 				!stop.Working() || stop.Held == nil || (stop.Held.Phase != HeldWaiting && stop.Held.Phase != HeldArmed) ||
-				stop.Held.ChildClientID != "" || stop.Held.CancelRequested || stop.StopPrice >= o.LimitPrice ||
+				stop.Held.ChildClientID != "" || stop.Held.CancelRequested || riskPosition(o.Side, o.LimitPrice-stop.StopPrice) <= 0 ||
 				stop.Held.Trail != nil && (stop.Held.Trail.Retired || stop.Held.Trail.Triggered) {
 				_ = c.handleCancel(ctx, CancelOrder{Venue: o.Venue, OrderID: o.ID})
 				return
@@ -402,7 +402,12 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 			return
 		}
 	}
-	if ok, reason := c.heldGate(child, o.ID); !ok {
+	ok, reason := c.heldGate(child, o.ID)
+	if o.RiskEntry != nil && o.Side == SideShort && ok {
+		reason = c.checkStockShortTrigger(ctx, o)
+		ok = reason == ""
+	}
+	if !ok {
 		if err := c.appendAndFold(OrderRejected{V: o.Venue, OID: o.ID, Reason: "trigger gate: " + reason, Ts: c.now()}, SrcLocal); err != nil {
 			c.syslog("exec.held", "persist trigger gate rejection "+o.ID+": "+err.Error())
 		}

@@ -318,16 +318,17 @@ type Position struct {
 }
 
 type AccountSnapshot struct {
-	Currency      string
-	MarginUsed    float64
-	FundingPnL    float64
-	Venue         VenueID
-	Equity        float64
-	BuyingPower   float64
-	AvailableCash float64
-	SodEquity     float64
-	Realized      float64
-	DayPnL        float64
+	StockShortingEnabled bool
+	Currency             string
+	MarginUsed           float64
+	FundingPnL           float64
+	Venue                VenueID
+	Equity               float64
+	BuyingPower          float64
+	AvailableCash        float64
+	SodEquity            float64
+	Realized             float64
+	DayPnL               float64
 	// NetCashFlow is the signed cash deposited into (+) or withdrawn from (-)
 	// the account during the current trading cycle. It is used only when a
 	// broker does not report an authoritative DayPnL (currently Moomoo).

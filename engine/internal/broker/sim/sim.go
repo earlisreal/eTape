@@ -78,6 +78,9 @@ type Broker struct {
 
 var _ exec.Broker = (*Broker)(nil)
 
+// SimulatesStockShorts selects the engine's simulated equity cap.
+func (*Broker) SimulatesStockShorts() {}
+
 // New builds a SimBroker for a venue, funded with startingCash — the same
 // seeding ResetBalance performs, so a fresh boot and a manual reset leave the
 // account in an identical state instead of boot defaulting to all-zero. opts

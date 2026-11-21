@@ -13,7 +13,7 @@ type LimitCushion struct {
 	Unit  string  `json:"unit"`
 }
 
-// RiskEntry retains per-BUY sizing; adds link to the original protection owner.
+// RiskEntry retains per-entry sizing; adds link to the original protection owner.
 type RiskEntry struct {
 	SharedEntryID      string       `json:"sharedEntryId,omitempty"`
 	AddStopPrice       float64      `json:"addStopPrice,omitempty"`
@@ -32,6 +32,7 @@ type RiskEntry struct {
 }
 
 type SubmitRiskEntry struct {
+	Side                    Side
 	SharedEntryID           string
 	Venue                   VenueID
 	Symbol                  string
@@ -90,8 +91,39 @@ func riskShares(budget, buyLimit, sellLimit, funds float64) float64 {
 	return math.Min(math.Floor(budget/distance+1e-9), math.Floor(funds/buyLimit+1e-9))
 }
 
+func riskExitSide(side Side) Side {
+	if side == SideShort {
+		return SideCover
+	}
+	return SideSell
+}
+
+func riskPosition(side Side, qty float64) float64 {
+	if side == SideShort {
+		return -qty
+	}
+	return qty
+}
+
+func riskStopTightens(side Side, proposed, current float64) bool {
+	if side == SideShort {
+		return proposed <= current+1e-9
+	}
+	return proposed+1e-9 >= current
+}
+
+func tighterRiskStop(side Side, a, b float64) float64 {
+	if side == SideShort {
+		return math.Min(a, b)
+	}
+	return math.Max(a, b)
+}
+
 func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	blocked := func(reason string) CmdAck { return CmdAck{Reason: reason} }
+	if cm.Side != SideBuy && cm.Side != SideShort {
+		return blocked("invalid risk entry side")
+	}
 	if c.brokers[cm.Venue] == nil || cm.Symbol == "" {
 		return blocked("missing symbol or execution venue")
 	}
@@ -103,7 +135,7 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 		return blocked("position data unavailable or flatten pending")
 	}
 	vs := c.state.Venue(cm.Venue)
-	owner, sharedStop, reason := c.riskAddProtection(cm.Venue, cm.Symbol)
+	owner, sharedStop, reason := c.riskAddProtection(cm.Venue, cm.Symbol, cm.Side)
 	if reason != "" {
 		return blocked(reason)
 	}
@@ -121,7 +153,10 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 		}
 	}
 	if owner.ID != "" {
-		if cm.SellStop+1e-9 < sharedStop.StopPrice {
+		if !riskStopTightens(cm.Side, cm.SellStop, sharedStop.StopPrice) {
+			if cm.Side == SideShort {
+				return blocked("add stop must keep or lower the shared stop")
+			}
 			return blocked("add stop must keep or raise the shared stop")
 		}
 		cm.SellCushion, cm.Protection = owner.RiskEntry.SellCushion, owner.RiskEntry.Protection
@@ -154,19 +189,22 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	if cm.Mode != "Dollar" && cm.Value > 100 {
 		return blocked("risk percentage must be at most 100")
 	}
-	buyLimit, err := riskLimit(cm.BuyStop, cm.BuyCushion, true)
+	buyLimit, err := riskLimit(cm.BuyStop, cm.BuyCushion, cm.Side == SideBuy)
 	if err != nil {
 		return blocked(err.Error())
 	}
-	sellLimit, err := riskLimit(cm.SellStop, cm.SellCushion, false)
-	if err != nil || cm.SellStop >= cm.BuyStop {
-		return blocked("sell trigger must be below buy trigger with valid execution limits")
+	sellLimit, err := riskLimit(cm.SellStop, cm.SellCushion, cm.Side == SideShort)
+	if err != nil || riskPosition(cm.Side, cm.BuyStop-cm.SellStop) <= 0 {
+		return blocked("choose a protective stop on the loss side of the entry")
 	}
-	qty := math.Min(riskShares(budget, buyLimit, sellLimit, funds), math.Floor(cm.MaxQty))
+	qty, reason := c.sizeStockRisk(ctx, cm.Venue, cm.Symbol, "", cm.Side, budget, buyLimit, sellLimit, cm.BuyStop, funds, cm.MaxQty)
+	if reason != "" {
+		return blocked(reason)
+	}
 	if !finitePositive(qty) {
 		return blocked("risk or funding budget rounds to zero shares")
 	}
-	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: SideBuy, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended, Qty: qty, LimitPrice: buyLimit, StopPrice: cm.BuyStop, ClientOrderID: c.idgen.Next()}
+	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended, Qty: qty, LimitPrice: buyLimit, StopPrice: cm.BuyStop, ClientOrderID: c.idgen.Next()}
 	if good, why := Evaluate(c.state, c.gate, req, c.marks); !good {
 		return blocked(why)
 	}
@@ -182,7 +220,7 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	}
 	entry := newOrderFromRequest(req, c.now())
 	stopReq := req
-	stopReq.Side = SideSell
+	stopReq.Side = riskExitSide(cm.Side)
 	stopReq.Qty = 0
 	stopReq.LimitPrice = sellLimit
 	stopReq.StopPrice = cm.SellStop
@@ -253,7 +291,7 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 		}
 		return blocked("event append failed: " + err.Error())
 	}
-	if fresh && c.freshEligiblePrint(last) && deadline > c.now() && StopLimitTriggered(SideBuy, last.Price, entry.StopPrice) {
+	if fresh && c.freshEligiblePrint(last) && deadline > c.now() && StopLimitTriggered(entry.Side, last.Price, entry.StopPrice) {
 		c.activateHeld(ctx, entry)
 	}
 	c.requestProtectionBook(stop)
@@ -301,7 +339,7 @@ func (c *Core) beginRiskExit(ctx context.Context, entry Order) bool {
 		c.syslog("exec.risk", err.Error())
 		return false
 	}
-	c.cancelRiskBuys(ctx, entry, "linked stop triggered; cancel remaining buy")
+	c.cancelRiskOpens(ctx, entry, "linked stop triggered; cancel remaining entry")
 	return true
 }
 
@@ -354,7 +392,7 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 			if last, ok := c.lastEligible[stop.Symbol]; ok && c.printHealthy && c.freshEligiblePrint(last) {
 				if stop.Held.Trail != nil {
 					c.advanceTrail(ctx, stop, last, false)
-				} else if StopLimitTriggered(SideSell, last.Price, stop.StopPrice) {
+				} else if StopLimitTriggered(stop.Side, last.Price, stop.StopPrice) {
 					c.activateProtectedStop(ctx, stop, last)
 				}
 			}
@@ -376,7 +414,7 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 		return
 	}
 	// Late fills get their own durable child; never resize an uncertain/working exit.
-	late := newOrderFromRequest(OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: SideSell, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended,
+	late := newOrderFromRequest(OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: stop.Side, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended,
 		Qty: qty, LimitPrice: stop.LimitPrice, StopPrice: stop.StopPrice, ClientOrderID: c.idgen.Next()}, c.now())
 	late.RiskEntryID = entry.ID
 	late.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: stop.Held.DeadlineMs}
@@ -429,7 +467,7 @@ func (c *Core) failRisk(ctx context.Context, entry Order, reason string) {
 		c.syslog("exec.risk", err.Error())
 		return
 	}
-	c.cancelRiskBuys(ctx, entry, "protection failed")
+	c.cancelRiskOpens(ctx, entry, "protection failed")
 }
 
 func (c *Core) riskBrokerEvent(ctx context.Context, id string) {
@@ -454,7 +492,7 @@ func (c *Core) cancelRiskProtection(ctx context.Context, entry Order) error {
 	if err := c.persistRisk(entry, risk); err != nil {
 		return err
 	}
-	c.cancelRiskBuys(ctx, entry, "protection canceled")
+	c.cancelRiskOpens(ctx, entry, "protection canceled")
 	for _, exit := range c.state.Venue(entry.Venue).Orders {
 		if exit.RiskEntryID == entry.ID && exit.Working() {
 			_ = c.handleCancel(ctx, CancelOrder{Venue: exit.Venue, OrderID: exit.ID})
@@ -495,9 +533,9 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 			return blocked("invalid working limit modification")
 		}
 		if cm.Qty != 0 && cm.Qty != o.Qty {
-			return blocked("linked quantity locks at buy activation")
+			return blocked("linked quantity locks at entry activation")
 		}
-		if o.Side == SideBuy {
+		if o.RiskEntry != nil {
 			req := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: TypeLimit, TIF: o.TIF, Session: o.Session, Qty: o.LeavesQty, LimitPrice: cm.LimitPrice, ClientOrderID: o.ID}
 			if good, reason := c.heldGate(req, o.ID); !good {
 				return blocked(reason)
@@ -518,14 +556,14 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 	risk := *entry.RiskEntry
 	if o.ID == entry.ID {
 		entry.StopPrice = cm.StopPrice
-		price, err := riskLimit(cm.StopPrice, risk.BuyCushion, true)
+		price, err := riskLimit(cm.StopPrice, risk.BuyCushion, entry.Side == SideBuy)
 		if err != nil {
 			return blocked(err.Error())
 		}
 		entry.LimitPrice = price
 	} else {
 		stop.StopPrice = cm.StopPrice
-		price, err := riskLimit(cm.StopPrice, risk.SellCushion, false)
+		price, err := riskLimit(cm.StopPrice, risk.SellCushion, stop.Side == SideCover)
 		if err != nil {
 			return blocked(err.Error())
 		}
@@ -533,10 +571,10 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 	}
 	if entry.Held.ChildClientID == "" {
 		if !finitePositive(cm.Qty) {
-			return blocked("positive reviewed share quantity required before buy activation")
+			return blocked("positive reviewed share quantity required before entry activation")
 		}
-		if stop.StopPrice >= entry.StopPrice {
-			return blocked("sell trigger must be below buy trigger")
+		if riskPosition(entry.Side, entry.StopPrice-stop.StopPrice) <= 0 {
+			return blocked("choose a protective stop on the loss side of the entry")
 		}
 		account := c.state.Venue(entry.Venue).Account
 		if !riskAccountFresh(c.state, entry.Venue) || account.TsMs <= 0 || c.now()-account.TsMs > 30_000 {
@@ -546,11 +584,14 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 		if risk.Mode == "CashPct" {
 			funds = account.AvailableCash
 		}
-		qty := math.Min(riskShares(risk.Budget, entry.LimitPrice, stop.LimitPrice, funds), math.Floor(cm.Qty))
+		qty, reason := c.sizeStockRisk(ctx, entry.Venue, entry.Symbol, entry.ID, entry.Side, risk.Budget, entry.LimitPrice, stop.LimitPrice, entry.StopPrice, funds, cm.Qty)
+		if reason != "" {
+			return blocked(reason)
+		}
 		if !finitePositive(qty) {
 			return blocked("risk or funding budget rounds to zero shares")
 		}
-		req := OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: SideBuy, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended, Qty: qty, LimitPrice: entry.LimitPrice, StopPrice: entry.StopPrice, ClientOrderID: entry.ID}
+		req := OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: entry.Side, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended, Qty: qty, LimitPrice: entry.LimitPrice, StopPrice: entry.StopPrice, ClientOrderID: entry.ID}
 		if good, reason := c.heldGate(req, entry.ID); !good {
 			return blocked(reason)
 		}
@@ -600,7 +641,7 @@ func (c *Core) disarmRiskEntries(ctx context.Context, venue VenueID, protection 
 				if entry.Held.ChildClientID == "" {
 					_ = c.handleCancel(ctx, CancelOrder{Venue: entry.Venue, OrderID: entry.ID})
 				} else {
-					c.requestHeldVenueCancel(ctx, entry, "master disarmed; cancel remaining buy")
+					c.requestHeldVenueCancel(ctx, entry, "master disarmed; cancel remaining entry")
 				}
 			}
 		}

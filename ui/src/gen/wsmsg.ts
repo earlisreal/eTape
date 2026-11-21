@@ -266,6 +266,7 @@ export interface RiskEntry {
   failure?: string;
 }
 export interface SubmitRiskEntryArgs {
+  side?: "BUY" | "SHORT";
   sharedEntryId?: string;
   protection?: TrailConfig;
   venue: string;

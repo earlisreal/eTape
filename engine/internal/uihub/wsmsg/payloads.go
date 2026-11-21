@@ -175,6 +175,7 @@ type RiskEntry struct {
 }
 
 type SubmitRiskEntryArgs struct {
+	Side          string       `json:"side,omitempty" tstype:"\"BUY\" | \"SHORT\""`
 	SharedEntryID string       `json:"sharedEntryId,omitempty"`
 	Protection    *TrailConfig `json:"protection,omitempty"`
 	Venue         string       `json:"venue"`

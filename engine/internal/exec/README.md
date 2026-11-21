@@ -197,12 +197,12 @@ from its persisted equity baseline and cash-flow adjustment. Realized P&L is
 the local cycle ledger and remains visible after flattening. Test:
 `go test ./internal/exec`.
 
-Chart Risk Entry admits a linked BUY/SELL STOP_LIMIT pair as one durable local
-event. Both triggers stay engine-held through PRE/RTH/POST until scheduled
+Stock Chart Risk Entry admits a linked BUY/SELL or SHORT/COVER STOP_LIMIT pair
+as one durable local event. Both triggers stay engine-held through PRE/RTH/POST until scheduled
 DataClose. `SubmitRiskEntry` uses fixed dollars, Cash %, or BP % as a loss budget;
 whole-share sizing uses cushion-adjusted execution limits and the funding cap,
 and `MaxQty` prevents increasing the approved preview. Admission requires fresh
-account data, a confirmed flat position or fully protected managed long position,
+account data, a confirmed flat position or fully protected same-side position,
 no unrelated working orders, opening gates,
 the live held-stop acknowledgement, and successful ticker subscriptions. Missing
 or stale eligible trades do not block acceptance: the durable entry stays
@@ -210,18 +210,20 @@ WAITING with `Waiting for market data` until a fresh trade arms or activates it.
 Immediate activation requires a healthy, fresh eligible trade checked after
 subscription acquisition; account age and DataClose are rechecked after that
 acquisition too. Existing DataClose expiry and feed/restart pauses
-still apply; no UI retry is needed for a quiet symbol.
+still apply. For Simulator shorts, opening capacity is uncommitted equity after
+stock positions and working opens. Alpaca sizes against fresh account buying
+power and easy-to-borrow eligibility with an estimated per-share valuation.
+It checks again at activation and rejects an entry whose shares exceed capacity.
 
 An existing Chart Risk Entry's healthy, untriggered stop can protect one pending
 add at the same venue/symbol. `SharedEntryID` binds the add to the reviewed
 original owner; that owner's single stop and exit children cover all linked
-BUY fills. Each add has its own budget and reviewed quantity ceiling, inherits
-the current stop's Protection Mode and Sell Limit Cushion, and chooses a SELL
-at or above the current shared stop and below its BUY. The original stop stays
-unchanged until the first confirmed add fill. Persist `StopApplied` with the
-tightened price and combined coverage; preserve a higher current stop and all
-trailing progress. Subsequent fills grow quantity without replaying that price
-change. Only the new BUY acquires a new ticker lease; existing protection keeps
+entry fills. Each add has its own budget and reviewed quantity ceiling and
+inherits the current stop's Protection Mode and Limit Cushion. The proposed
+stop must stay on the loss side of the add and keep or tighten the shared stop.
+The first confirmed add fill persists `StopApplied` with the tighter price
+and combined coverage while preserving trailing progress. Subsequent fills
+grow coverage. The new entry acquires a ticker lease. Existing protection keeps
 its lease and deadline. Broker-native/unrelated stops and incomplete coverage
 cannot be adopted. Adds require stop-relative Limit Cushion execution; cancel
 a pending add before editing the shared trail's execution pricing/cushion so its
@@ -229,18 +231,18 @@ reviewed sizing remains valid. Shared strategies must be closed/reconciled befor
 to an engine that predates these ownership fields.
 
 Shared ownership aggregates confirmed entries and exits once when retiring
-coverage after manual sales, including fixed-stop attribution checks when an
+coverage after manual sells or covers, including fixed-stop attribution checks when an
 absolute position push precedes an exit fill. A manual flat cancels pending adds
 and retires the old pretrigger stop, preventing an add from reopening that cycle.
 
 The exit covers only this strategy's confirmed fills. Stop activation cancels the
-remaining buys; late fills receive separate durable exit children, including
-reservations for paused protection. Disarm/day-loss cancel further buying while
+remaining entry quantity. Late fills receive separate durable exit children, including
+reservations for paused protection. Disarm and day-loss cancel further entries while
 healthy reducing linked exits remain enabled. Cancel Protection cancels every
 linked leg and leaves shares open. After a stock market-data gap within the same
 engine run, a pretrigger linked stop resumes on the first fresh eligible trade
 for its symbol when broker positions are ready. That trade can trigger the stop
-through the normal price and position checks. Buy triggers paused by a feed
+through the normal price and position checks. Entry triggers paused by a feed
 gap require manual Resume. Broker interruptions and restarts of fixed stops
 require reconciliation and manual Resume. Ambiguous children are never reposted.
 Snapshots and recovery update protection from confirmed fills; newly uncovered

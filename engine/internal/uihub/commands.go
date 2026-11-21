@@ -311,8 +311,16 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		if json.Unmarshal(args, &a) != nil {
 			return blocked("bad args"), false
 		}
+		side := exec.SideBuy
+		switch a.Side {
+		case "", "BUY":
+		case "SHORT":
+			side = exec.SideShort
+		default:
+			return blocked("invalid risk entry side"), false
+		}
 		return ackFromCmd(cd.ex.Do(exec.SubmitRiskEntry{
-			SharedEntryID: a.SharedEntryID,
+			Side: side, SharedEntryID: a.SharedEntryID,
 			Protection: func() *exec.TrailConfig {
 				if a.Protection == nil {
 					return nil

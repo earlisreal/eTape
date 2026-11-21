@@ -752,11 +752,14 @@ func (rc *restClient) flatten(ctx context.Context) error {
 // denied reading ~/.eTape/credentials.json to do so, see task-13-report.md
 // concerns). DayPnL = equity - last_equity.
 type alpacaAccount struct {
-	Equity      numString `json:"equity"`
-	LastEquity  numString `json:"last_equity"`
-	BuyingPower numString `json:"buying_power"`
-	Cash        numString `json:"cash"`
-	Multiplier  numString `json:"multiplier"`
+	ShortingEnabled bool      `json:"shorting_enabled"`
+	TradingBlocked  bool      `json:"trading_blocked"`
+	AccountBlocked  bool      `json:"account_blocked"`
+	Equity          numString `json:"equity"`
+	LastEquity      numString `json:"last_equity"`
+	BuyingPower     numString `json:"buying_power"`
+	Cash            numString `json:"cash"`
+	Multiplier      numString `json:"multiplier"`
 }
 
 func (rc *restClient) decodeAccount(body []byte) (exec.AccountSnapshot, error) {
@@ -765,14 +768,15 @@ func (rc *restClient) decodeAccount(body []byte) (exec.AccountSnapshot, error) {
 		return exec.AccountSnapshot{}, fmt.Errorf("alpaca: decode account: %w", err)
 	}
 	return exec.AccountSnapshot{
-		Equity:        float64(aa.Equity),
-		BuyingPower:   float64(aa.BuyingPower),
-		AvailableCash: float64(aa.Cash),
-		SodEquity:     float64(aa.LastEquity),
-		Leverage:      float64(aa.Multiplier),
-		DayPnL:        float64(aa.Equity) - float64(aa.LastEquity),
-		DayPnLSource:  "broker",
-		TsMs:          rc.clk.Now().UnixMilli(),
+		StockShortingEnabled: aa.ShortingEnabled && !aa.TradingBlocked && !aa.AccountBlocked,
+		Equity:               float64(aa.Equity),
+		BuyingPower:          float64(aa.BuyingPower),
+		AvailableCash:        float64(aa.Cash),
+		SodEquity:            float64(aa.LastEquity),
+		Leverage:             float64(aa.Multiplier),
+		DayPnL:               float64(aa.Equity) - float64(aa.LastEquity),
+		DayPnLSource:         "broker",
+		TsMs:                 rc.clk.Now().UnixMilli(),
 	}, nil
 }
 

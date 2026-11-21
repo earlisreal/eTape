@@ -418,7 +418,7 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
               onChange={(e) => {setRawEdit(`${t.id}:risk`,e.target.value); patch(t.id,{value:Number(e.target.value)});}} />
           </label>
           {(["buyCushion","sellCushion"] as const).filter(key => !t.perpetual || key === "buyCushion").map((key) => <label key={key} style={fieldGroup}>
-            {key === "buyCushion" ? (t.perpetual || t.auto ? "Entry" : "Buy") : t.auto ? "Stock Sell" : "Sell"} Limit Cushion
+            {key === "buyCushion" ? (t.perpetual || t.auto ? "Entry" : "Buy") : t.auto ? "Stock Protection" : "Sell"} Limit Cushion
             <input className="field" aria-label={`${key}-${t.id}`} type="number" min="0" step="any"
               value={rawEdits[`${t.id}:${key}`] ?? t[key].value} onBlur={() => clearRawEdit(`${t.id}:${key}`)}
               onChange={(e) => {setRawEdit(`${t.id}:${key}`,e.target.value); patch(t.id,{[key]:{...t[key],value:Number(e.target.value)}});}} />
@@ -426,7 +426,7 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
               <option value="$">{t.auto && key === "buyCushion" ? "USD / USDT" : t.perpetual ? "USDT" : "$"}</option><option>%</option>
             </select>
           </label>)}
-          <small>{t.auto ? "Stocks use long entries and the selected Protection Mode. MEXC and BingX perpetuals use the gesture to choose long or short with a fixed mark-price stop." :
+          <small>{t.auto ? "Draw the stop below entry for a long or above entry for a short on supported venues. Stocks use the selected Protection Mode. MEXC and BingX use a fixed mark-price stop." :
             t.perpetual ? "24-hour entry. A mark-price stop covers confirmed fills on MEXC and the entire protected position on BingX." : "Loss budget, excluding fees and execution risk. Whole shares; DAY until market data close. Both triggers are held by eTape."}</small>
         </div>
       ) : t.kind === "place" && t.type==="TRAILING_STOP" ? (

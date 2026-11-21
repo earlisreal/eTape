@@ -154,18 +154,20 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     if(!entry || !risk || !stop)return {detail:"",qty:0};
     let buy=entry.limitPrice,sell=stop.limitPrice;
     const trigger=marker.kind!=="limit";
-    const cushion=marker.order.side === "BUY"?risk.buyCushion:risk.sellCushion;
+    const isEntry = marker.order.id === entry.id;
+    const short = entry.side === "SHORT";
+    const cushion=isEntry?risk.buyCushion:risk.sellCushion;
     const limit=trigger?resolveLimitCushionPrice(marker.order.side,price,cushion.value,cushion.unit === "%"?"%":"$"):price;
-    if(marker.order.side === "BUY")buy=limit;else sell=limit;
-    if(marker.order.side === "SELL" && all.some(o=>o.riskEntry?.sharedEntryId===entry.id))
+    if(isEntry)buy=limit;else sell=limit;
+    if(!isEntry && all.some(o=>o.riskEntry?.sharedEntryId===entry.id))
       return {qty:stop.leavesQty,plannedQty:stop.qty,limit,detail:`${stop.leavesQty.toLocaleString("en-US")} shares · Shared protection`};
-    const sellTrigger=risk.sharedEntryId?Math.max(stop.stopPrice,risk.addStopPrice??0):marker.order.id!==entry.id && trigger?price:stop.stopPrice;
-    if(risk.sharedEntryId)sell=resolveLimitCushionPrice("SELL",sellTrigger,risk.sellCushion.value,risk.sellCushion.unit === "%"?"%":"$");
+    const sellTrigger=risk.sharedEntryId?(short ? Math.min : Math.max)(stop.stopPrice,risk.addStopPrice??stop.stopPrice):marker.order.id!==entry.id && trigger?price:stop.stopPrice;
+    if(risk.sharedEntryId)sell=resolveLimitCushionPrice(short ? "COVER" : "SELL",sellTrigger,risk.sellCushion.value,risk.sellCushion.unit === "%"?"%":"$");
     const locked=!!entry.held?.childClientId;
     const sized=riskEntrySize({kind:"risk",id:entry.id,label:"Risk",mode:risk.mode === "CashPct" ? "CashPct" : risk.mode === "BuyingPowerPct" ? "BuyingPowerPct" : "Dollar",value:risk.budget,buyCushion:risk.buyCushion,sellCushion:risk.sellCushion},
-      marker.order.id===entry.id && trigger?price:entry.stopPrice,sellTrigger,latest.current.availableCash ?? 0,latest.current.buyingPower ?? 0,risk.budget);
+      marker.order.id===entry.id && trigger?price:entry.stopPrice,sellTrigger,latest.current.availableCash ?? 0,latest.current.buyingPower ?? 0,risk.budget,short);
     const qty=locked?entry.qty:sized.qty;
-    const aboveBudget=qty*Math.max(0,buy-sell)>risk.budget+0.005;
+    const aboveBudget=qty*Math.max(0,short ? sell-buy : buy-sell)>risk.budget+0.005;
     return {qty,plannedQty:entry.qty,limit,aboveBudget,detail:`${qty} shares${aboveBudget?" · ABOVE ORIGINAL BUDGET":""}`};
   };
   const sideText = (marker: ChartOrderMarker) => markerSide(marker) === "BUY" || markerSide(marker) === "COVER" ? "B" : "S";
@@ -549,7 +551,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
           </button>
           {group.markers.length===1 && trailActions(first.order)}
           {group.markers.length === 1 && (!plannedStop || first.draggable) && <button type="button" disabled={action?.kind === "cancel"}
-            aria-label={plannedStop ? "Cancel pending risk entry" : first.order.riskEntryId?"Cancel Protection":`Cancel ${orderTitle(first)}`} title={plannedStop ? "Cancel both pending Chart Risk Entry legs" : first.order.riskEntryId?"Cancel Protection — cancels remaining buy and linked sells; leaves shares open":`Cancel ${orderTitle(first)}`} onClick={() => void cancelOrder(first)}
+            aria-label={plannedStop ? "Cancel pending risk entry" : first.order.riskEntryId?"Cancel Protection":`Cancel ${orderTitle(first)}`} title={plannedStop ? "Cancel both pending Chart Risk Entry legs" : first.order.riskEntryId?"Cancel Protection — cancels remaining entry and linked stops; leaves shares open":`Cancel ${orderTitle(first)}`} onClick={() => void cancelOrder(first)}
             style={{ border:0, borderLeft:`1px solid ${color}`, background:"transparent", color:"inherit", height:"100%", padding:"0 5px", cursor:"pointer", font:"bold 12px system-ui" }}>×</button>}
         </div>
         <div data-order-status data-status={status} style={{display:status ? "block" : "none",position:"absolute",right:props.rightAxisWidth + 4,top:stackIndex * 20 + 12,color:"#ff9d72",background:"#0c1017",fontSize:10}}>{status}</div>

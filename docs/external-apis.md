@@ -32,7 +32,9 @@ is introduced.
   configured Alpaca adapter loads its active asset directory concurrently at engine
   startup with `GET /v2/assets?status=active`, without blocking pollers. Stock
   Info revalidates the displayed symbol's margin percentages via
-  `GET /v2/assets/{symbol}` after 15 minutes. Paper credentials may also provide
+  `GET /v2/assets/{symbol}` after 15 minutes. Stock Chart Risk Entry shorts
+  read the selected account and symbol at arming and activation for borrow
+  status, shorting permission and buying power. Paper credentials may also provide
   daily and one-minute history; live credentials are not reused for history.
   Alpaca SIP raw daily history also supplies the Scanner's process-local
   up-to-50-day REL VOL baselines when configured; IEX and unavailable clients

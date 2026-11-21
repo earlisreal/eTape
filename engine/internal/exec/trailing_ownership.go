@@ -18,7 +18,7 @@ func (c *Core) trailExposure() map[string]ownedExposure {
 				continue
 			}
 			// Fixed and trailing protection both retain confirmed entry ownership.
-			e := ownedExposure{position: vs.Positions[entry.Symbol].Qty, entries: c.riskFilledQty(entry)}
+			e := ownedExposure{position: riskPosition(entry.Side, vs.Positions[entry.Symbol].Qty), entries: c.riskFilledQty(entry)}
 			e.entryFills = make(map[string]float64)
 			for _, member := range c.riskMembers(entry) {
 				e.entryFills[member.ID] = member.ExecutedQty

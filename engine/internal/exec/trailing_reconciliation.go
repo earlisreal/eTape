@@ -44,7 +44,8 @@ func (c *Core) checkAbsoluteTrailAttribution(ctx context.Context, event BrokerEv
 	}
 	for _, o := range c.state.Venue(venue).Orders {
 		qty, present := positions[o.Symbol]
-		if !present || qty <= 0 || qty >= c.state.VenuePositionShares(venue, o.Symbol) || o.RiskEntryID == "" || !o.Working() || o.Held == nil || o.Held.ChildClientID == "" {
+		side := c.riskOwner(o).Side
+		if !present || riskPosition(side, qty) <= 0 || riskPosition(side, qty-c.state.VenuePositionShares(venue, o.Symbol)) >= 0 || o.RiskEntryID == "" || !o.Working() || o.Held == nil || o.Held.ChildClientID == "" {
 			continue
 		}
 		anchor := make(map[string]ownedExposure)

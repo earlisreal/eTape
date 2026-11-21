@@ -248,7 +248,7 @@ _Avoid_: Previous extended-session close
 ## Order Entry
 
 **Chart Risk Entry**:
-An entry sized to a loss budget from two chart-selected prices, with a linked protective stop. Stocks support long entries with the selected Protection Mode. MEXC and BingX perpetuals support long and short entries with a fixed mark-price stop. On BingX Virtual and Live, eTape holds one shared stop for the entire position identified by BingX. Same-side entries and partial exits change the size covered by that stop. An Auto preset takes the instrument from the chart and resolves the direction from the entry and stop prices within those supported sides.
+An entry sized to a loss budget from two chart-selected prices, with a linked protective stop. Stocks support long entries with the selected Protection Mode. Simulator and Alpaca Paper and Live also support short entries. Alpaca short entries require easy-to-borrow stocks. MEXC and BingX perpetuals support long and short entries with a fixed mark-price stop. On BingX Virtual and Live, eTape holds one shared stop for the entire position identified by BingX. Same-side entries and partial exits change the size covered by that stop. An Auto preset takes the instrument from the chart and resolves the direction from the entry and stop prices within those supported sides.
 _Avoid_: Risk confirmation, bracket (when referring to this entry tool)
 
 **Auto Leverage**:
@@ -256,11 +256,11 @@ The perpetual Chart Risk Entry preset option that sizes within a leverage ceilin
 _Avoid_: Auto direction
 
 **Protection Mode**:
-A Chart Risk Entry preset's choice of fixed-stop, dollar-distance, percentage-distance or Candle Trail protection for its linked sell exit.
+A Chart Risk Entry preset's choice of fixed-stop, dollar-distance, percentage-distance or Candle Trail protection for its linked SELL or COVER exit.
 _Avoid_: Order type, sizing mode
 
 **Initial Stop Price**:
-The chart-selected protective trigger used to size Chart Risk Entry. For a preset that begins with trailing Protection Mode, it remains that long protection's minimum trigger price.
+The chart-selected protective trigger used to size Chart Risk Entry. For a preset that begins with trailing Protection Mode, it bounds the protective trigger from below for a long and from above for a short.
 _Avoid_: Execution limit, Trail Distance
 
 **Limit-if-Touched (LIT)**:

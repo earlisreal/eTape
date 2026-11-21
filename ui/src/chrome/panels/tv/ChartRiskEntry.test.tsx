@@ -16,8 +16,8 @@ const mexcSymbol = "PERP.MEXC.BTC_USDT";
 const autoPreset: RiskEntryTemplate = { ...template, auto: { leverage: 5 }, value: 1 };
 function mount(auto = false, preset = template, chartSymbol = preset.perpetual ? mexcSymbol : "AAPL", live = false) {
     const stores = makeStores();
-    const venue = live ? "mexc-live" : "sim";
-    const broker = chartSymbol === mexcSymbol ? live ? "mexc" : "mexc-sim" : "sim";
+    const venue = live ? (chartSymbol === mexcSymbol ? "mexc-live" : "alpaca-live") : "sim";
+    const broker = chartSymbol === mexcSymbol ? live ? "mexc" : "mexc-sim" : live ? "alpaca" : "sim";
     stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, global: { maxDayLoss: 0 },
         venues: [{ venue, broker, env: live ? "live" : "paper", heldStopLimitAcknowledged: live, connected: true, positionDataReady: true }] } });
     stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { venue, buyingPower: 100000, availableCash: 100000, tsMs: Date.now() } });
@@ -175,14 +175,15 @@ it("auto-sends only after an in-chart release at a different contract tick", asy
     })));
 });
 
-it("keeps an Auto stock entry long and blocks a stop above it", async () => {
-    const { host, sendCommand } = mount(true, autoPreset);
+it.each([false, true])("auto-sends the stock short with live venue %s", async live => {
+    const { host, sendCommand } = mount(true, autoPreset, "AAPL", live);
     initiateChartRiskEntry(autoPreset);
     fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 100, clientY: 180 });
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 100, clientY: 180 });
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Sell trigger must be below buy trigger."));
-    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.objectContaining({
+        symbol: "AAPL", venue: live ? "alpaca-live" : "sim", side: "SHORT", buyStop: 10, sellStop: 10.2, maxQty: 5,
+    })));
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitPerpetualRiskEntry", expect.anything());
 });
 

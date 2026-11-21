@@ -42,6 +42,7 @@ type Draft = {
     buyX?: number;
     sellX?: number;
     complete: boolean;
+    stockShort?: boolean;
     busy: boolean;
     unknown: boolean;
     maxQty: number;
@@ -98,7 +99,13 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (draft.buy === undefined || draft.sell === undefined || draft.buy === draft.sell) return undefined;
             return draft.sell > draft.buy ? "SHORT" : "BUY";
         };
-        const short = () => perpetualSide() === "SHORT";
+        const stockBroker = () => latest.current.stores.exec.status()?.venues.find(v => v.venue === venue)?.broker;
+        const canDrawStockShort = () => draft?.template.auto && !draft.template.perpetual && ["sim", "alpaca"].includes(stockBroker() ?? "");
+        const short = () => {
+            if (draft?.template.perpetual) return perpetualSide() === "SHORT";
+            if (draft?.complete) return draft.stockShort === true;
+            return !!canDrawStockShort() && draft?.buy !== undefined && draft.sell !== undefined && draft.sell > draft.buy;
+        };
         const cursor = (endpoint: "buy" | "sell" | null) => {
             if (!endpoint && host.dataset.orderEntryMode !== "risk") return;
             if (endpoint) host.dataset.orderEntryMode = "risk";
@@ -132,7 +139,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             return rules ? perpetualTick(value, rules) : snapOrderMarkerPrice(value);
         };
         const leg = (endpoint: "buy" | "sell") => {
-            if (draft?.template.auto && draft.template.perpetual && !perpetualSide()) return endpoint === "buy" ? "Entry" : "Stop";
+            if (draft?.template.auto && (draft.template.perpetual ? !perpetualSide() : canDrawStockShort() && (!draft.buy || !draft.sell || draft.buy === draft.sell))) return endpoint === "buy" ? "Entry" : "Stop";
             return endpoint === "buy" ? short() ? "SHORT" : "BUY" : short() ? "COVER" : "SELL";
         };
         const pxText = (price: number) => draft?.template.perpetual ? String(price) : price.toFixed(price < 1 ? 4 : 2);
@@ -168,8 +175,20 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     reviewedOnly && draft.complete && !pointer ? draft.maxQty : undefined, terms, opening?.notional);
             }
             const context = protection();
+            let shortFunds = (a?.buyingPower ?? 0) / 1.03;
+            if (short() && stockBroker() === "sim") {
+                const store = latest.current.stores.exec;
+                shortFunds = a?.equity ?? a?.buyingPower ?? 0;
+                for (const position of store.positions()) {
+                    if (position.venue === venue) shortFunds -= Math.abs(position.qty) * position.avgPrice;
+                }
+                for (const { order } of store.orders()) {
+                    if (order.venue === venue && isWorking(order.status) && (order.side === "BUY" || order.side === "SHORT") && !order.riskEntryId)
+                        shortFunds -= order.leavesQty * Math.max(order.stopPrice ?? 0, order.limitPrice ?? 0);
+                }
+            }
             const stock = draft && riskEntrySize(riskEntryAddTemplate(draft.template, context.owner, context.stop),
-                draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0);
+                draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0, undefined, short(), shortFunds);
             return stock && { ...stock, kind: "stock" as const };
         };
         const sizingError = () => {
@@ -238,8 +257,11 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return "";
             }
             if (draft && draft.sharedEntryId !== (context.owner?.id ?? "")) return "Shared protection changed; review a new chart risk entry.";
-            if (context.stop && draft?.sell !== undefined && draft.sell + 1e-9 < context.stop.stopPrice)
-                return "Add stop must keep or raise the shared stop.";
+            if (context.qty && draft?.sell !== undefined && (short() ? context.qty > 0 : context.qty < 0))
+                return "Choose an entry in the direction of the existing position.";
+            if (context.stop && draft?.sell !== undefined &&
+                (short() ? draft.sell > context.stop.stopPrice + 1e-9 : draft.sell + 1e-9 < context.stop.stopPrice))
+                return short() ? "Add stop must keep or lower the shared stop." : "Add stop must keep or raise the shared stop.";
             if (!draft?.route)
                 return draft?.error ?? "Checking engine trigger source…";
             if (draft.route.reason)
@@ -305,7 +327,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                         readout.textContent += ` · ${base.toLocaleString("en-US", { maximumFractionDigits: 10 })} ${contract()?.base ?? "base units"}`;
                     }
                 }
-                if (draft.template.auto && (perpetualSide() || (!draft.template.perpetual && draft.sell! < draft.buy!)))
+                if (draft.template.auto && (perpetualSide() || (!draft.template.perpetual && (isShort || draft.sell! < draft.buy!))))
                     readout.textContent = `${isShort ? "Short" : "Long"} · ${readout.textContent}`;
                 const context = protection();
                 if (context.stop) {
@@ -341,11 +363,11 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     if (button && price !== undefined) {
                         button.textContent = pxText(price);
                         const limit = side === "buy" ? s?.buyLimit : s?.sellLimit;
-                        button.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${side === "buy" ? "BUY" : "SELL"} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
+                        button.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${leg(side)} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
                         if (draft.template.perpetual)
                             button.title = side === "buy" ? `${leg(side)} entry · Last trade triggers a limit using ${short() ? "bid minus" : "ask plus"} cushion · 24 hours` :
                                 `${leg(side)} protective stop · Fair price · ${bingx() ? "Whole position · Held by eTape" : `Confirmed fills${isLivePerpetual ? " · Held by eTape" : ""}`}`;
-                        button.setAttribute("aria-label", `${draft.template.perpetual ? leg(side) : side === "buy" ? "Buy" : "Sell"} trigger ${pxText(price)}; drag or use arrow keys to adjust`);
+                        button.setAttribute("aria-label", `${draft.template.perpetual || isShort ? leg(side) : side === "buy" ? "Buy" : "Sell"} trigger ${pxText(price)}; drag or use arrow keys to adjust`);
                         button.disabled = draft.busy || draft.unknown;
                     }
                     const cancel = chip.querySelector<HTMLButtonElement>("[data-risk-cancel]");
@@ -363,7 +385,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     label.style.maxWidth = `${facade?.priceScaleWidth() ?? 60}px`;
                 }
             }
-            message(draft.template.auto && draft.template.perpetual ? (draft.buy === undefined ? "Click entry, then stop, or drag. Esc cancel." :
+            message(draft.template.auto && (draft.template.perpetual || canDrawStockShort()) ? (draft.buy === undefined ? "Click entry, then stop, or drag. Esc cancel." :
                 !draft.complete ? "Stop below for long or above for short. Esc cancel." : "") :
                 draft.template.perpetual ? (draft.buy === undefined ? `Click ${leg("buy")} entry, then stop; or drag. Esc cancel.` :
                 !draft.complete ? `Choose the stop ${short() ? "above" : "below"} the entry. Esc cancel.` : "") :
@@ -373,7 +395,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 host.dataset.orderCursorPrice = String(candidate);
                 host.dataset.orderCursorY = String(candidateY);
                 const limit = endpoint === "buy" ? s?.buyLimit : s?.sellLimit;
-                host.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${endpoint === "buy" ? "BUY" : "SELL"} STOP-LIMIT · trigger ${candidate} · limit ${limit ?? "pending"}\nHeld by eTape · DAY ${deadline}\n${venue} · fees/execution risk excluded\nEsc cancel`;
+                host.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${leg(endpoint)} STOP-LIMIT · trigger ${candidate} · limit ${limit ?? "pending"}\nHeld by eTape · DAY ${deadline}\n${venue} · fees/execution risk excluded\nEsc cancel`;
                 if (draft.template.perpetual)
                     host.title = endpoint === "buy" ? `${leg(endpoint)} entry · Last trade ${candidate} · Limit uses ${short() ? "bid minus" : "ask plus"} cushion` :
                         `${leg(endpoint)} protective stop · Fair price ${candidate}`;
@@ -381,9 +403,9 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             const status = rootRef.current.querySelector<HTMLElement>("[data-risk-status]");
             if (status) {
                 const route = draft.route, age = route?.lastEligibleTsMs ? Date.now() - route.lastEligibleTsMs : Infinity;
-                const willTrigger = route?.hasTrustedEligiblePrint && age >= 0 && age <= 2000 && draft.buy !== undefined && (route.lastEligiblePrice ?? 0) >= draft.buy;
+                const willTrigger = route?.hasTrustedEligiblePrint && age >= 0 && age <= 2000 && draft.buy !== undefined && route.lastEligiblePrice !== undefined && (isShort ? route.lastEligiblePrice <= draft.buy : route.lastEligiblePrice >= draft.buy);
                 status.textContent = draft.unknown ? "Submit outcome unknown. Verify Orders; this setup cannot be resent." : draft.busy ? "Submitting linked pair…" :
-                    [error, draft.error !== error ? draft.error : "", willTrigger ? "BUY WILL TRIGGER NOW" : "",
+                    [error, draft.error !== error ? draft.error : "", willTrigger ? `${isShort ? "SHORT" : "BUY"} WILL TRIGGER NOW` : "",
                         bingx() ? `${venue} ${isLivePerpetual ? "LIVE" : "VST"} · eTape-held whole-position stop` :
                             isLivePerpetual ? `${venue} LIVE · eTape-held fair-price stop` : ""].filter(Boolean).join(" · ");
                 status.style.display = status.textContent ? "block" : "none";
@@ -450,7 +472,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return;
             }
             const context = protection(), effective = riskEntryAddTemplate(current.template, context.owner, context.stop);
-            const args: SubmitRiskEntryArgs = { venue, symbol, buyStop: current.buy!, sellStop: current.sell!, mode: current.template.mode, value: current.template.value,
+            const args: SubmitRiskEntryArgs = { venue, symbol, ...(short() ? {side: "SHORT" as const} : {}), buyStop: current.buy!, sellStop: current.sell!, mode: current.template.mode, value: current.template.value,
                 ...(current.sharedEntryId ? { sharedEntryId: current.sharedEntryId } : {}),
                 maxQty: Math.min(current.maxQty, s.qty), buyCushion: current.template.buyCushion, sellCushion: effective.sellCushion,
                 ...(effective.protection?{protection:effective.protection}:{}) };
@@ -569,6 +591,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     for (const endpoint of ["buy", "sell"] as const) {
                         const choice = chooser.querySelector(`[data-risk-choice='${endpoint}']`);
                         if (choice) choice.textContent = leg(endpoint);
+                        if (choice) choice.textContent = leg(endpoint);
                     }
                     chooser.style.display = "flex";
                     chooser.style.top = `${e.clientY - host.getBoundingClientRect().top}px`;
@@ -658,6 +681,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 const side = perpetualSide();
                 if (draft.template.auto && draft.template.perpetual && side)
                     draft.template.perpetual.side = side;
+                draft.stockShort = !draft.template.perpetual && short();
                 draft.complete = true;
             }
             draft.maxQty = size(false)?.qty ?? 0;
