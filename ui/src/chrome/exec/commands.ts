@@ -38,6 +38,15 @@ const KILL_SUCCESS_TEXT = "KILL initiated — trading locked; cancel-all request
 const KILL_UNKNOWN_TEXT = "KILL outcome unknown — connection was lost. Verify open orders and positions immediately.";
 
 export class OrderCommands {
+  async stockEligibility(venue: string, symbol: string): Promise<import("../../gen/wsmsg").VenueInstrumentEligibility | null> {
+    if (!symbol.startsWith("US.") || !this.d.cmd.sendQuery) return null;
+    try {
+      return await this.d.cmd.sendQuery("QueryVenueInstrumentEligibility", { venue, symbol }) as import("../../gen/wsmsg").VenueInstrumentEligibility;
+    } catch {
+      return null;
+    }
+  }
+
   constructor(private readonly d: OrderCommandsDeps) {}
 
   async submitTrail(args:SubmitTrailArgs):Promise<void> {

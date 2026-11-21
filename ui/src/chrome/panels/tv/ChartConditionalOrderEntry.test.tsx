@@ -207,7 +207,7 @@ describe("ChartConditionalOrderEntry", () => {
     focusChart();
     const {host,sendCommand,sendQuery} = mount();
     moveToChart(host);
-    await waitFor(() => expect(sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", {tif:"DAY",session:"EXTENDED",symbol:"US.AAPL",deferredPositionSizing:false}));
+    await waitFor(() => expect(sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", {tif:"DAY",session:"EXTENDED",symbol:"US.AAPL",venue:"sim",deferredPositionSizing:false}));
     await waitFor(() => expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("WILL TRIGGER NOW"));
     await placeClick(host);
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.objectContaining({
@@ -222,7 +222,7 @@ describe("ChartConditionalOrderEntry", () => {
     const { host, sendCommand, sendQuery } = mount("paper", litConfig, { ...route, lastEligiblePrice: 100 });
     moveToChart(host);
     await waitFor(() => expect(sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", {
-      tif: "DAY", session: "EXTENDED", symbol: "US.AAPL", deferredPositionSizing: false, type: "LIMIT_IF_TOUCHED",
+      tif: "DAY", session: "EXTENDED", symbol: "US.AAPL", venue: "sim", deferredPositionSizing: false, type: "LIMIT_IF_TOUCHED",
     }));
     await waitFor(() => expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("WILL TRIGGER NOW"));
     const tooltip = host.title;
@@ -243,7 +243,7 @@ describe("ChartConditionalOrderEntry", () => {
     const {host,sendCommand,sendQuery} = mount("paper", deferredConfig, { ...route, lastEligiblePrice:99 });
     moveToChart(host);
     await waitFor(() => expect(sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", {
-      tif:"DAY",session:"EXTENDED",symbol:"US.AAPL",deferredPositionSizing:true,
+      tif:"DAY",session:"EXTENDED",symbol:"US.AAPL",venue:"sim",deferredPositionSizing:true,
     }));
     const preview = screen.getByTestId("chart-order-entry-preview");
     await waitFor(() => expect(preview.textContent).toContain("WILL TRIGGER NOW — NO OPEN POSITION"));

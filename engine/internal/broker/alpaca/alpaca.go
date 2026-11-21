@@ -67,11 +67,13 @@ type Config struct {
 // locate workflow. marginable and tradable are also asset-level flags, not
 // account or risk authorization.
 type AssetStatus struct {
-	margin       StockMargin
-	BorrowStatus *string
-	Shortable    *bool
-	Marginable   *bool
-	Tradable     *bool
+	Fractionable        *bool
+	FractionalEHEnabled *bool
+	margin              StockMargin
+	BorrowStatus        *string
+	Shortable           *bool
+	Marginable          *bool
+	Tradable            *bool
 }
 
 // Adapter is the Alpaca exec.Broker implementation. It owns the REST client
@@ -82,6 +84,7 @@ type AssetStatus struct {
 // state machine (replaceState/idByDomain/replacing), since Alpaca's native
 // PATCH replace needs none of that (see the package doc).
 type Adapter struct {
+	paper bool
 	venue exec.VenueID
 	clk   clock.Clock
 
@@ -199,6 +202,7 @@ func New(cfg Config) (*Adapter, error) {
 
 	a := &Adapter{
 		venue:              cfg.Venue,
+		paper:              !live,
 		clk:                clk,
 		events:             make(chan exec.BrokerEvent, 256),
 		seenExecIDs:        map[string]bool{},
@@ -271,7 +275,16 @@ func (a *Adapter) LoadActiveAssets(ctx context.Context) (int, error) {
 		if symbol == "" {
 			continue
 		}
+		var extended *bool
+		if asset.Attributes != nil {
+			enabled := false
+			for _, attr := range asset.Attributes {
+				enabled = enabled || attr == "fractional_eh_enabled"
+			}
+			extended = &enabled
+		}
 		next[symbol] = AssetStatus{
+			Fractionable: asset.Fractionable, FractionalEHEnabled: extended,
 			margin:       asset.stockMargin(fetchedAt),
 			BorrowStatus: asset.BorrowStatus,
 			Shortable:    asset.Shortable,
@@ -301,10 +314,11 @@ func (a *Adapter) AssetStatus(symbol string) (AssetStatus, bool) {
 func (a *Adapter) VenueInstrumentEligibility(_ context.Context, symbol string) (eligibility.Eligibility, bool, error) {
 	status, ok := a.AssetStatus(symbol)
 	if !ok {
-		return eligibility.Eligibility{}, false, nil
+		return eligibility.Eligibility{FractionalPaper: a.paper}, false, nil
 	}
 	return eligibility.Eligibility{
 		Shortable: status.Shortable, Marginable: status.Marginable, Tradable: status.Tradable,
+		Fractionable: status.Fractionable, FractionalEHEnabled: status.FractionalEHEnabled, FractionalPaper: a.paper,
 	}, true, nil
 }
 
@@ -374,8 +388,13 @@ func (a *Adapter) SubmitOrder(ctx context.Context, req exec.OrderRequest) (exec.
 		return exec.OrderAck{}, err
 	}
 
-	brokerID, err := a.rest.submitOrder(ctx, req, req.ClientOrderID)
+	brokerID, err := a.rest.submitOrder(ctx, req, req.ClientOrderID, a.FractionalStockOrderReason)
 	if err != nil {
+		var routeErr fractionalRouteError
+		if errors.As(err, &routeErr) {
+			a.emit(exec.OrderRejected{V: a.venue, OID: req.ClientOrderID, Reason: routeErr.Error(), Ts: a.now()})
+			return exec.OrderAck{OrderID: req.ClientOrderID, Accepted: false, Message: routeErr.Error()}, nil
+		}
 		ord, found, lookupErr := a.rest.orderByClientID(ctx, req.ClientOrderID)
 		switch {
 		case lookupErr != nil:

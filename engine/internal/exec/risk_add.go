@@ -54,7 +54,7 @@ func (c *Core) riskAddProtection(venue VenueID, symbol string, side Side) (Order
 		if held.Trail != nil && held.Trail.Config.Pricing != "CUSHION" {
 			return Order{}, Order{}, "add requires stop-relative Limit Cushion protection"
 		}
-		if math.Abs(stop.LeavesQty-qty) > 1e-9 || math.Abs(c.riskFilledQty(owner)-risk.RetiredQty-qty) > 1e-9 {
+		if normalizedStockQuantity(symbol, stop.LeavesQty-qty) != 0 || normalizedStockQuantity(symbol, c.riskFilledQty(owner)-risk.RetiredQty-qty) != 0 {
 			return Order{}, Order{}, "add requires full confirmed shared protection"
 		}
 		return owner, stop, ""
@@ -139,14 +139,14 @@ func (c *Core) replaceRiskAdd(ctx context.Context, cm ReplaceOrder, entry, stop 
 	if entry.RiskEntry.Mode == "CashPct" {
 		funds = account.AvailableCash
 	}
-	qty, reason := c.sizeStockRisk(ctx, entry.Venue, entry.Symbol, entry.ID, entry.Side, entry.RiskEntry.Budget, limit, sell, cm.StopPrice, funds, math.Min(entry.Qty, cm.Qty))
+	qty, reason := c.sizeStockRisk(ctx, entry.Venue, entry.Symbol, entry.ID, entry.Side, entry.RiskEntry.Budget, limit, sell, cm.StopPrice, funds, math.Min(entry.Qty, cm.Qty), entry.RiskEntry.Fractional)
 	if reason != "" {
 		return blocked(reason)
 	}
 	if qty <= 0 {
 		return blocked("risk or funding budget rounds to zero shares")
 	}
-	req := OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: entry.Side, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended, Qty: qty, StopPrice: cm.StopPrice, LimitPrice: limit, ClientOrderID: entry.ID}
+	req := OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: entry.Side, Type: TypeStopLimit, TIF: TIFDay, Session: entry.Session, Qty: qty, StopPrice: cm.StopPrice, LimitPrice: limit, ClientOrderID: entry.ID}
 	if good, why := c.heldGate(req, entry.ID); !good {
 		return blocked(why)
 	}

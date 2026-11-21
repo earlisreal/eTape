@@ -1,3 +1,4 @@
+import { formatExecutionQuantity } from "../exec/sizing";
 import { Fragment, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Dialog } from "../controls/Dialog";
@@ -17,7 +18,7 @@ import { useOrderConfig } from "../exec/useOrderConfig";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import { pendingPerpetualStop, wholePositionCloseStatus } from "../exec/perpetual";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
-import { formatClock, formatEtDateTime, formatPrice, formatSize, marketPriceDecimals, quoteDecimals } from "../../render/format";
+import { formatClock, formatEtDateTime, formatPrice, marketPriceDecimals, quoteDecimals } from "../../render/format";
 import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, abbrevType, isTerminal, isWorking, type DisplayStatus } from "../exec/orderStatus";
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
 import type { OrderView } from "../../data/ExecStore";
@@ -315,7 +316,7 @@ function OrdersTable({
               {symbol}
               <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
               <td data-column="qty">{order.deferredPositionPct !== undefined && !order.held?.resolvedQty
-                ? `${order.deferredPositionPct}% position` : formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)}</td>
+                ? `${order.deferredPositionPct}% position` : formatExecutionQuantity(order.leavesQty > 0 ? order.leavesQty : order.qty)}</td>
               <OrderPriceCells order={order} />
               <td data-column="state">{pausedStockProtection ? <span className="chip chip-pending" title={order.held?.pausedReason}>Paused</span>
                 : variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
@@ -365,8 +366,8 @@ function OrdersTable({
               <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
               <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
               <td data-column="qty">{order.deferredPositionPct !== undefined && !order.held?.resolvedQty
-                ? `${order.deferredPositionPct}% position` : formatSize(order.qty)}</td>
-              <td data-column="executedQty">{formatSize(order.executedQty)}</td>
+                ? `${order.deferredPositionPct}% position` : formatExecutionQuantity(order.qty)}</td>
+              <td data-column="executedQty">{formatExecutionQuantity(order.executedQty)}</td>
               <OrderPriceCells order={order} />
               <td data-column="avgFillPrice">{order.executedQty > 0 ? formatPrice(order.avgFillPrice, quoteDecimals(order.avgFillPrice)) : "—"}</td>
               <td data-column="state">{danger ? <span className="chip chip-rejected" data-chip="rejected">{STATUS_LABEL[order.status]}</span>
@@ -552,7 +553,7 @@ function PositionsTable({
                     background: selected ? "rgba(154,106,27,.16)" : hoveredPosition === positionKey ? "rgba(154,106,27,.06)" : "transparent",
                     boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : "none", transition: "background 120ms ease" }}>
                   <td data-column="symbol" style={{ padding: "2px 8px" }} title={r.leverage ? `${r.leverage}× isolated · ${r.marginUsed?.toFixed(2) ?? "—"} USDT margin · Stop ${r.protectionPrice ?? "—"}` : undefined}>{bareSymbol(r.symbol)}</td>
-                  <td data-column="qty" style={{ color: r.qty >= 0 ? palette.up : palette.down }}>{formatSize(r.qty)}{r.leverage ? ` cont · ${r.leverage}×` : ""}</td>
+                  <td data-column="qty" style={{ color: r.qty >= 0 ? palette.up : palette.down }}>{formatExecutionQuantity(r.qty)}{r.leverage ? ` cont · ${r.leverage}×` : ""}</td>
                   <td data-column="avgPrice">{formatPrice(r.avgPrice, quoteDecimals(r.avgPrice, 2))}</td>
                   {(() => {
                     const quote = stores.quote.get(r.symbol);
@@ -611,7 +612,7 @@ function FillsTable({ stores, palette, venue, cycleStartMs, config, onConfigChan
       </th>)}
     </tr></thead><tbody>{fills.map((f, n) => <tr key={`${f.orderId}-${f.tsMs}-${n}`} style={{ borderTop:`1px solid ${palette.border}` }}>
       <td data-column="symbol" style={cell}>{bareSymbol(f.symbol)}</td><td data-column="side" style={cell}>{sideLabel(f.side)}</td>
-      <td data-column="qty" style={cell}>{formatSize(f.qty)}</td><td data-column="price" style={cell}>{formatPrice(f.price, quoteDecimals(f.price, 2))}</td>
+      <td data-column="qty" style={cell}>{formatExecutionQuantity(f.qty)}</td><td data-column="price" style={cell}>{formatPrice(f.price, quoteDecimals(f.price, 2))}</td>
       <td data-column="time" style={cell}>{formatClock(f.tsMs)}</td><td data-column="orderId" style={cell}>{f.orderId}</td>
     </tr>)}</tbody></table>
   </div>;
@@ -735,7 +736,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
       {(venueStatus?.protectionWarnings ?? []).map((warning) => <div key={warning.symbol} role="alert" data-testid="account-protection-warning"
         style={{ padding:"4px 8px", fontSize:11, color:palette.warn, borderBottom:`1px solid ${palette.border}` }}>
         {bareSymbol(warning.symbol)} · {warning.state === "open" && venueStatus?.positionDataReady
-          ? `${formatSize(warning.qty)} ${warning.symbol.startsWith("PERP.MEXC.") ? "contracts open" : "shares open"}`
+          ? `${formatExecutionQuantity(warning.qty)} ${warning.symbol.startsWith("PERP.MEXC.") ? "contracts open" : "shares open"}`
           : warning.state === "unverified" ? "Position unverified; retrying automatically" : "Checking broker positions"} · {warning.reason}
       </div>)}
       <OrdersTable stores={stores} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} height={ordersHeight} availableWidth={width} />

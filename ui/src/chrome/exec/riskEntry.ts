@@ -1,6 +1,7 @@
 import type { RiskEntryTemplate } from "./actionTemplate";
 import { resolveLimitCushionPrice } from "./priceSource";
 import type { Order } from "../../wire/contract";
+import { floorFractionalShares } from "./sizing";
 import { isWorking } from "../../wire/orderStatus";
 
 export function riskEntryProtection(orders: readonly Order[], qty: number, venue: string, symbol: string): { owner?: Order; stop?: Order; error?: string } {
@@ -27,13 +28,15 @@ export function riskEntryAddTemplate(template: RiskEntryTemplate, owner?: Order,
     return { ...template, sellCushion: protection?.cushion ?? owner.riskEntry.sellCushion,
         ...(protection ? { protection } : { protection: undefined }) };
 }
-export function riskEntrySize(template: RiskEntryTemplate, buyStop: number, sellStop: number, cash: number, bp: number, savedBudget?: number, short = false, shortFunds = bp) {
+export function riskEntrySize(template: RiskEntryTemplate, buyStop: number, sellStop: number, cash: number, bp: number, savedBudget?: number, short = false, shortFunds = bp, fractional = false) {
     const buyLimit = resolveLimitCushionPrice(short ? "SHORT" : "BUY", buyStop, template.buyCushion.value, template.buyCushion.unit === "%" ? "%" : "$");
     const sellLimit = resolveLimitCushionPrice(short ? "COVER" : "SELL", sellStop, template.sellCushion.value, template.sellCushion.unit === "%" ? "%" : "$");
     const budget = savedBudget ?? (template.mode === "Dollar" ? template.value : (template.mode === "CashPct" ? cash : bp) * template.value / 100);
     const funds = short ? shortFunds : template.mode === "CashPct" ? cash : bp;
     const distance = Math.round((short ? sellLimit - buyLimit : buyLimit - sellLimit) * 10000) / 10000;
     const qty = distance > 0 && buyLimit > 0 && sellLimit > 0 && Number.isFinite(budget) && budget > 0 && Number.isFinite(funds)
-        ? Math.max(0, Math.min(Math.floor(budget / distance + 1e-9), Math.floor(funds / (short ? buyStop : buyLimit) + 1e-9))) : 0;
+        ? Math.max(0, fractional && !short
+            ? floorFractionalShares(Math.min(budget / distance, funds / buyLimit))
+            : Math.min(Math.floor(budget / distance + 1e-9), Math.floor(funds / (short ? buyStop : buyLimit) + 1e-9))) : 0;
     return { buyLimit, sellLimit, budget, qty, risk: qty * distance, notional: qty * buyLimit };
 }

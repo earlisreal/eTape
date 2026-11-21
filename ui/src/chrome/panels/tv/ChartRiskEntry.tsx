@@ -1,3 +1,4 @@
+import { formatExecutionQuantity } from "../../exec/sizing";
 import { useEffect, useRef, type MutableRefObject } from "react";
 import type { AckMsg, StopLimitRoutePreview, SubmitRiskEntryArgs } from "../../../wire/contract";
 import type { PerpetualOpeningPreview } from "../../../gen/wsmsg";
@@ -188,7 +189,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 }
             }
             const stock = draft && riskEntrySize(riskEntryAddTemplate(draft.template, context.owner, context.stop),
-                draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0, undefined, short(), shortFunds);
+                draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0, undefined, short(), shortFunds, draft.route?.fractionalRisk);
             return stock && { ...stock, kind: "stock" as const };
         };
         const sizingError = () => {
@@ -319,7 +320,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 const unit = draft.template.perpetual ? bingx() ? "lots" : "contracts" : "shares";
                 const currency = bingx() && executionVenue()?.broker === "bingx-vst" ? "VST" : "USDT";
                 readout.textContent = sizingError() || !s ? `— ${unit} · Est. risk —` :
-                    `${qty.toLocaleString("en-US")} ${unit} · Est. risk ${s.kind === "perpetual" ? `${amount.toFixed(2)} ${currency} · ${s.leverage}×${s.autoLeverage ? " Auto" : ""}` : amount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
+                    `${formatExecutionQuantity(qty)} ${unit} · Est. risk ${s.kind === "perpetual" ? `${amount.toFixed(2)} ${currency} · ${s.leverage}×${s.autoLeverage ? " Auto" : ""}` : amount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
                 if (s?.kind === "perpetual" && qty > 0) {
                     readout.textContent += `\nEst. initial margin ${(s.margin * qty / s.qty).toFixed(2)} ${currency}`;
                     if (bingx()) {
@@ -332,7 +333,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 const context = protection();
                 if (context.stop) {
                     const existing = Math.abs(context.qty);
-                    readout.textContent += `\n${existing.toLocaleString("en-US")} existing + ${qty.toLocaleString("en-US")} added = ${(existing + qty).toLocaleString("en-US")} total\nShared stop ${pxText(context.stop.stopPrice)} → ${pxText(draft.sell!)} on first fill · ${context.stop.held?.trail ? "trailing mode retained" : "Fixed"}`;
+                    readout.textContent += `\n${formatExecutionQuantity(existing)} existing + ${formatExecutionQuantity(qty)} added = ${formatExecutionQuantity((existing + qty))} total\nShared stop ${pxText(context.stop.stopPrice)} → ${pxText(draft.sell!)} on first fill · ${context.stop.held?.trail ? "trailing mode retained" : "Fixed"}`;
                 }
                 readout.style.whiteSpace = "pre-line";
                 readout.style.maxWidth = `${Math.max(0, plotWidth - 16)}px`;
@@ -363,7 +364,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     if (button && price !== undefined) {
                         button.textContent = pxText(price);
                         const limit = side === "buy" ? s?.buyLimit : s?.sellLimit;
-                        button.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${leg(side)} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
+                        button.title = `${draft.complete ? `${formatExecutionQuantity(qty)} planned shares` : "Choose both prices to size shares"}\n${leg(side)} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
                         if (draft.template.perpetual)
                             button.title = side === "buy" ? `${leg(side)} entry · Last trade triggers a limit using ${short() ? "bid minus" : "ask plus"} cushion · 24 hours` :
                                 `${leg(side)} protective stop · Fair price · ${bingx() ? "Whole position · Held by eTape" : `Confirmed fills${isLivePerpetual ? " · Held by eTape" : ""}`}`;
@@ -395,7 +396,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 host.dataset.orderCursorPrice = String(candidate);
                 host.dataset.orderCursorY = String(candidateY);
                 const limit = endpoint === "buy" ? s?.buyLimit : s?.sellLimit;
-                host.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${leg(endpoint)} STOP-LIMIT · trigger ${candidate} · limit ${limit ?? "pending"}\nHeld by eTape · DAY ${deadline}\n${venue} · fees/execution risk excluded\nEsc cancel`;
+                host.title = `${draft.complete ? `${formatExecutionQuantity(qty)} planned shares` : "Choose both prices to size shares"}\n${leg(endpoint)} STOP-LIMIT · trigger ${candidate} · limit ${limit ?? "pending"}\nHeld by eTape · DAY ${deadline}\n${venue} · fees/execution risk excluded\nEsc cancel`;
                 if (draft.template.perpetual)
                     host.title = endpoint === "buy" ? `${leg(endpoint)} entry · Last trade ${candidate} · Limit uses ${short() ? "bid minus" : "ask plus"} cushion` :
                         `${leg(endpoint)} protective stop · Fair price ${candidate}`;
@@ -439,11 +440,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 push({ level: unknown ? "warn" : "danger", text: `${symbol} (${venue}) Chart Risk Entry ${detail}` });
             };
             // Refresh custody/session at submit; eligible trades govern activation.
+            const reviewedRoute = current.route;
             current.busy = true;
             paint();
             try {
                 if (!current.template.perpetual)
-                    current.route = await latest.current.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol, riskEntry: true }) as StopLimitRoutePreview;
+                    current.route = await latest.current.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol, venue, riskEntry: true, riskShort: short(), sharedStopSession: protection().stop?.session }) as StopLimitRoutePreview;
             }
             catch {
                 notify("not sent: Engine preview unavailable.");
@@ -461,6 +463,14 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 clear();
                 return;
             }
+            if (!short() && reviewedRoute?.fractionalRisk && (!current.route?.fractionalRisk
+                || current.route.effectiveSession !== reviewedRoute.effectiveSession)) {
+                current.busy = false;
+                current.error = "Fractional session changed. Restart Chart Risk Entry to review.";
+                notify(current.error);
+                clear();
+                return;
+            }
             delete current.error;
             const error = invalid();
             const s = size();
@@ -472,7 +482,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return;
             }
             const context = protection(), effective = riskEntryAddTemplate(current.template, context.owner, context.stop);
-            const args: SubmitRiskEntryArgs = { venue, symbol, ...(short() ? {side: "SHORT" as const} : {}), buyStop: current.buy!, sellStop: current.sell!, mode: current.template.mode, value: current.template.value,
+            const args: SubmitRiskEntryArgs = { venue, symbol, ...(current.route?.fractionalRisk ? { expectedSession: current.route.effectiveSession } : {}), ...(short() ? {side: "SHORT" as const} : {}), buyStop: current.buy!, sellStop: current.sell!, mode: current.template.mode, value: current.template.value,
                 ...(current.sharedEntryId ? { sharedEntryId: current.sharedEntryId } : {}),
                 maxQty: Math.min(current.maxQty, s.qty), buyCushion: current.template.buyCushion, sellCushion: effective.sellCushion,
                 ...(effective.protection?{protection:effective.protection}:{}) };
@@ -543,7 +553,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             paint();
             const current = draft;
             if (current.template.perpetual) return;
-            void p.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol: p.symbol, riskEntry: true }).then(raw => {
+            void p.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol: p.symbol, venue, riskEntry: true, sharedStopSession: protection().stop?.session }).then(raw => {
                 if (draft !== current)
                     return;
                 current.route = raw as StopLimitRoutePreview;

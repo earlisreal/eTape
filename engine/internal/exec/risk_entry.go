@@ -15,6 +15,7 @@ type LimitCushion struct {
 
 // RiskEntry retains per-entry sizing; adds link to the original protection owner.
 type RiskEntry struct {
+	Fractional         bool         `json:"fractional,omitempty"`
 	SharedEntryID      string       `json:"sharedEntryId,omitempty"`
 	AddStopPrice       float64      `json:"addStopPrice,omitempty"`
 	StopApplied        bool         `json:"stopApplied,omitempty"`
@@ -32,6 +33,7 @@ type RiskEntry struct {
 }
 
 type SubmitRiskEntry struct {
+	ExpectedSession         *OrderSession
 	Side                    Side
 	SharedEntryID           string
 	Venue                   VenueID
@@ -197,14 +199,29 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	if err != nil || riskPosition(cm.Side, cm.BuyStop-cm.SellStop) <= 0 {
 		return blocked("choose a protective stop on the loss side of the entry")
 	}
-	qty, reason := c.sizeStockRisk(ctx, cm.Venue, cm.Symbol, "", cm.Side, budget, buyLimit, sellLimit, cm.BuyStop, funds, cm.MaxQty)
+	orderSession := SessionExtended
+	route := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeLimit, TIF: TIFDay, Session: orderSession}
+	if owner.ID != "" {
+		route.Session = sharedStop.Session
+	} else if phase == session.RTH && c.stockFractionalRouteReason(route) != "" {
+		route.Session = SessionRTH
+		if c.stockFractionalRouteReason(route) != "" {
+			route.Session = SessionExtended
+		}
+	}
+	orderSession = route.Session
+	fractional := c.stockFractionalRouteReason(route) == ""
+	if cm.ExpectedSession != nil && (*cm.ExpectedSession != route.Session || !fractional) {
+		return blocked("fractional session or eligibility changed; review and retry")
+	}
+	qty, reason := c.sizeStockRisk(ctx, cm.Venue, cm.Symbol, "", cm.Side, budget, buyLimit, sellLimit, cm.BuyStop, funds, cm.MaxQty, fractional)
 	if reason != "" {
 		return blocked(reason)
 	}
 	if !finitePositive(qty) {
 		return blocked("risk or funding budget rounds to zero shares")
 	}
-	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended, Qty: qty, LimitPrice: buyLimit, StopPrice: cm.BuyStop, ClientOrderID: c.idgen.Next()}
+	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeStopLimit, TIF: TIFDay, Session: orderSession, Qty: qty, LimitPrice: buyLimit, StopPrice: cm.BuyStop, ClientOrderID: c.idgen.Next()}
 	if good, why := Evaluate(c.state, c.gate, req, c.marks); !good {
 		return blocked(why)
 	}
@@ -226,7 +243,11 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	stopReq.StopPrice = cm.SellStop
 	stopReq.ClientOrderID = c.idgen.Next()
 	stop := newOrderFromRequest(stopReq, c.now())
-	deadline := session.Schedule(c.clk.Now()).DataClose.UnixMilli()
+	schedule := session.Schedule(c.clk.Now())
+	deadline := schedule.DataClose.UnixMilli()
+	if orderSession == SessionRTH {
+		deadline = schedule.Close.UnixMilli()
+	}
 	entry.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: deadline}
 	stop.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: deadline, PausedReason: "awaiting entry fills"}
 	if cm.Protection != nil && owner.ID == "" {
@@ -234,7 +255,7 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 		if config.Pricing != "CUSHION" && config.Pricing != "" {
 			return blocked("risk presets require stop-relative Limit Cushion execution")
 		}
-		config.Sessions = TrailSessions{Pre: true, RTH: true, Post: true}
+		config.Sessions = TrailSessions{Pre: orderSession != SessionRTH, RTH: true, Post: orderSession != SessionRTH}
 		config.Pricing, config.Cushion = "CUSHION", cm.SellCushion
 		if err := validateTrailConfig(&config); err != nil {
 			return blocked(err.Error())
@@ -242,7 +263,7 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 		cm.Protection = &config
 		stop.Held.Trail = &TrailState{Config: config, Stop: cm.SellStop, Limit: sellLimit, Floor: cm.SellStop}
 	}
-	entry.RiskEntry = &RiskEntry{StopID: stop.ID, Budget: budget, Mode: cm.Mode, BuyCushion: cm.BuyCushion, SellCushion: cm.SellCushion}
+	entry.RiskEntry = &RiskEntry{Fractional: fractional, StopID: stop.ID, Budget: budget, Mode: cm.Mode, BuyCushion: cm.BuyCushion, SellCushion: cm.SellCushion}
 	entry.RiskEntry.Protection = cm.Protection
 	stop.RiskEntryID = entry.ID
 	acquire := []Order{entry, stop}
@@ -361,7 +382,7 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 		if stop.Held.ChildClientID != "" {
 			return
 		}
-		stop.Qty = math.Max(0, c.riskFilledQty(entry)-risk.RetiredQty)
+		stop.Qty = math.Max(0, normalizedStockQuantity(entry.Symbol, c.riskFilledQty(entry)-risk.RetiredQty))
 		stop.LeavesQty = stop.Qty
 		stop.UpdatedMs = c.now()
 		var ok bool
@@ -409,12 +430,12 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 			covered += exit.LeavesQty
 		}
 	}
-	qty := c.riskFilledQty(entry) - risk.RetiredQty - covered
-	if qty <= 1e-9 || risk.Failure != "" {
+	qty := normalizedStockQuantity(entry.Symbol, c.riskFilledQty(entry)-risk.RetiredQty-covered)
+	if qty <= 0 || risk.Failure != "" {
 		return
 	}
 	// Late fills get their own durable child; never resize an uncertain/working exit.
-	late := newOrderFromRequest(OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: stop.Side, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended,
+	late := newOrderFromRequest(OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: stop.Side, Type: TypeStopLimit, TIF: TIFDay, Session: stop.Session,
 		Qty: qty, LimitPrice: stop.LimitPrice, StopPrice: stop.StopPrice, ClientOrderID: c.idgen.Next()}, c.now())
 	late.RiskEntryID = entry.ID
 	late.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: stop.Held.DeadlineMs}
@@ -584,14 +605,14 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 		if risk.Mode == "CashPct" {
 			funds = account.AvailableCash
 		}
-		qty, reason := c.sizeStockRisk(ctx, entry.Venue, entry.Symbol, entry.ID, entry.Side, risk.Budget, entry.LimitPrice, stop.LimitPrice, entry.StopPrice, funds, cm.Qty)
+		qty, reason := c.sizeStockRisk(ctx, entry.Venue, entry.Symbol, entry.ID, entry.Side, risk.Budget, entry.LimitPrice, stop.LimitPrice, entry.StopPrice, funds, cm.Qty, risk.Fractional)
 		if reason != "" {
 			return blocked(reason)
 		}
 		if !finitePositive(qty) {
 			return blocked("risk or funding budget rounds to zero shares")
 		}
-		req := OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: entry.Side, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended, Qty: qty, LimitPrice: entry.LimitPrice, StopPrice: entry.StopPrice, ClientOrderID: entry.ID}
+		req := OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: entry.Side, Type: TypeStopLimit, TIF: TIFDay, Session: entry.Session, Qty: qty, LimitPrice: entry.LimitPrice, StopPrice: entry.StopPrice, ClientOrderID: entry.ID}
 		if good, reason := c.heldGate(req, entry.ID); !good {
 			return blocked(reason)
 		}

@@ -44,18 +44,24 @@ export function fireTemplate(
       toast.push({ level: "danger", text: "no symbol focused — type a symbol in the order ticket or a linked panel" });
       return;
     }
-    if (!ctx.quote) {
+    const quote = ctx.quote;
+    if (!quote) {
       toast.push({ level: "danger", text: `no live quote for ${bareSymbol(ctx.symbol)} yet — waiting for market data` });
       return;
     }
-    const r = resolvePlaceTemplate(t, {
-      venue: ctx.venue, symbol: ctx.symbol, quote: ctx.quote,
-      buyingPower: ctx.buyingPower, availableCash: ctx.availableCash, positionQty: ctx.positionQty, nowMs: ctx.nowMs,
-      extHoursMarketBufferPct: ctx.extHoursMarketBufferPct,
-    });
-    for (const n of r.preCheck.notices) toast.push({ level: "warn", text: n });
-    if (!r.preCheck.ok) { toast.push({ level: "danger", text: r.preCheck.errors.join(" ") }); return; }
-    void oc.submit(r.args, r.flash);
+    const place = (stockEligibility?: Awaited<ReturnType<OrderCommands["stockEligibility"]>>) => {
+      const r = resolvePlaceTemplate(t, {
+        ...(stockEligibility ? { stockEligibility } : {}),
+        venue: ctx.venue, symbol: ctx.symbol, quote,
+        buyingPower: ctx.buyingPower, availableCash: ctx.availableCash, positionQty: ctx.positionQty, nowMs: ctx.nowMs,
+        extHoursMarketBufferPct: ctx.extHoursMarketBufferPct,
+      });
+      for (const n of r.preCheck.notices) toast.push({ level: "warn", text: n });
+      if (!r.preCheck.ok) { toast.push({ level: "danger", text: r.preCheck.errors.join(" ") }); return; }
+      void oc.submit(r.args, r.flash);
+    };
+    if (oc.stockEligibility && t.sizing.mode !== "Shares") void oc.stockEligibility(ctx.venue, ctx.symbol).then(place);
+    else place();
     return;
   }
 

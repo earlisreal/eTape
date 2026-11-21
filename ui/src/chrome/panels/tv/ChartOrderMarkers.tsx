@@ -1,3 +1,4 @@
+import { formatExecutionQuantity } from "../../exec/sizing";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import type { AckMsg, Order, ReplaceOrderArgs, TrailConfig } from "../../../wire/contract";
 import {TrailEditor} from "../../exec/TrailEditor";
@@ -160,12 +161,12 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     const limit=trigger?resolveLimitCushionPrice(marker.order.side,price,cushion.value,cushion.unit === "%"?"%":"$"):price;
     if(isEntry)buy=limit;else sell=limit;
     if(!isEntry && all.some(o=>o.riskEntry?.sharedEntryId===entry.id))
-      return {qty:stop.leavesQty,plannedQty:stop.qty,limit,detail:`${stop.leavesQty.toLocaleString("en-US")} shares · Shared protection`};
+      return {qty:stop.leavesQty,plannedQty:stop.qty,limit,detail:`${formatExecutionQuantity(stop.leavesQty)} shares · Shared protection`};
     const sellTrigger=risk.sharedEntryId?(short ? Math.min : Math.max)(stop.stopPrice,risk.addStopPrice??stop.stopPrice):marker.order.id!==entry.id && trigger?price:stop.stopPrice;
     if(risk.sharedEntryId)sell=resolveLimitCushionPrice(short ? "COVER" : "SELL",sellTrigger,risk.sellCushion.value,risk.sellCushion.unit === "%"?"%":"$");
     const locked=!!entry.held?.childClientId;
     const sized=riskEntrySize({kind:"risk",id:entry.id,label:"Risk",mode:risk.mode === "CashPct" ? "CashPct" : risk.mode === "BuyingPowerPct" ? "BuyingPowerPct" : "Dollar",value:risk.budget,buyCushion:risk.buyCushion,sellCushion:risk.sellCushion},
-      marker.order.id===entry.id && trigger?price:entry.stopPrice,sellTrigger,latest.current.availableCash ?? 0,latest.current.buyingPower ?? 0,risk.budget,short);
+      marker.order.id===entry.id && trigger?price:entry.stopPrice,sellTrigger,latest.current.availableCash ?? 0,latest.current.buyingPower ?? 0,risk.budget,short,undefined,risk.fractional);
     const qty=locked?entry.qty:sized.qty;
     const aboveBudget=qty*Math.max(0,short ? sell-buy : buy-sell)>risk.budget+0.005;
     return {qty,plannedQty:entry.qty,limit,aboveBudget,detail:`${qty} shares${aboveBudget?" · ABOVE ORIGINAL BUDGET":""}`};

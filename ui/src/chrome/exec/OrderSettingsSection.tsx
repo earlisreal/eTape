@@ -111,7 +111,7 @@ function setSizingValue(s: SizingSpec, n: number): SizingSpec {
   const max = SIZE_MAX[s.mode];
   switch (s.mode) {
     case "Dollar": return { mode: "Dollar", dollar: clampNum(n, 0, max) };
-    case "Shares": return { mode: "Shares", shares: Math.floor(clampNum(n, 0, max)) };
+    case "Shares": return { mode: "Shares", shares: clampNum(n, 0, max) };
     case "CashPct": return { mode: "CashPct", pct: clampNum(n, 0, max) };
     case "BuyingPowerPct": return { mode: "BuyingPowerPct", pct: clampNum(n, 0, max) };
     case "PositionFraction": return { mode: "PositionFraction", pct: clampNum(n, 0, max) };

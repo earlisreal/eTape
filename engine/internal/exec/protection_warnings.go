@@ -62,7 +62,7 @@ func (c *Core) protectionProblems(v VenueID) map[string]string {
 	latest := make(map[string]Order)
 	for _, entry := range vs.Orders {
 		risk := entry.RiskEntry
-		if risk == nil || risk.SharedEntryID != "" || c.riskFilledQty(entry) <= risk.FlatConfirmedQty || c.riskFilledQty(entry)-exited[entry.ID] <= 1e-9 {
+		if risk == nil || risk.SharedEntryID != "" || c.riskFilledQty(entry) <= risk.FlatConfirmedQty || normalizedStockQuantity(entry.Symbol, c.riskFilledQty(entry)-exited[entry.ID]) <= 0 {
 			continue
 		}
 		stop := vs.Orders[risk.StopID]

@@ -46,10 +46,11 @@ func (c *Core) retireReducedOwnership(ctx context.Context, before map[string]own
 			continue
 		}
 		reduction := prior.position - after.position + (after.entries - prior.entries) - (after.exits - prior.exits)
-		if reduction <= 1e-9 {
+		entry := c.order(id)
+		reduction = normalizedStockQuantity(entry.Symbol, reduction)
+		if reduction <= 0 {
 			continue
 		}
-		entry := c.order(id)
 		risk := *entry.RiskEntry
 		risk.RetiredQty = math.Max(0, math.Min(after.entries-after.exits, risk.RetiredQty+reduction))
 		if err := c.persistRisk(entry, risk); err != nil {

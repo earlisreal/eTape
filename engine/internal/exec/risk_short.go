@@ -59,7 +59,17 @@ func (c *Core) stockShortCapacity(ctx context.Context, venue VenueID, symbol, ex
 	}
 }
 
-func (c *Core) sizeStockRisk(ctx context.Context, venue VenueID, symbol, exclude string, side Side, budget, entry, stop, trigger, funds, reviewed float64) (float64, string) {
+func (c *Core) sizeStockRisk(ctx context.Context, venue VenueID, symbol, exclude string, side Side, budget, entry, stop, trigger, funds, reviewed float64, fractional bool) (float64, string) {
+	if side == SideBuy && fractional {
+		distance := math.Round((entry-stop)*10000) / 10000
+		if distance > 0 && finitePositive(entry) {
+			qty := floorStockQuantity(math.Min(reviewed, math.Min(budget/distance, funds/entry)))
+			if finitePositive(qty) {
+				return qty, ""
+			}
+		}
+		return 0, "risk or funding budget rounds to zero shares"
+	}
 	qty := riskShares(budget, entry, stop, funds)
 	if side == SideShort {
 		capacity, reason := c.stockShortCapacity(ctx, venue, symbol, exclude, entry, trigger)

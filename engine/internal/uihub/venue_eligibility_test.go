@@ -82,3 +82,22 @@ func TestVenueInstrumentEligibilityQueryDoesNotCacheProviderErrors(t *testing.T)
 		t.Fatalf("provider calls after errors = %d, want 2", provider.calls)
 	}
 }
+
+func TestFractionableSessionChangesBeforeAssetCacheExpires(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 11, 27, 17, 59, 59, 0, time.UTC))
+	yes, no := true, false
+	provider := &venueEligibilityProviderSpy{found: true, result: eligibility.Eligibility{
+		Fractionable: &yes, FractionalEHEnabled: &no,
+	}}
+	registry := eligibility.NewRegistry()
+	registry.Register("paper", provider)
+	q := NewVenueEligibilityQueriesForTest(&spyFills{}, clk, registry)
+	query := json.RawMessage(`{"venue":"paper","symbol":"US.AAPL"}`)
+	before := q.handle("QueryVenueInstrumentEligibility", query).(wsmsg.VenueInstrumentEligibility)
+	clk.Advance(time.Second)
+	after := q.handle("QueryVenueInstrumentEligibility", query).(wsmsg.VenueInstrumentEligibility)
+	if before.Phase != "rth" || before.PhaseRefreshMs != 1001 || after.Phase != "post" ||
+		after.Fractionable == nil || !*after.Fractionable || after.FractionalEHEnabled == nil || *after.FractionalEHEnabled || provider.calls != 1 {
+		t.Fatalf("before=%+v after=%+v provider calls=%d", before, after, provider.calls)
+	}
+}

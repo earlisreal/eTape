@@ -11,9 +11,12 @@ import (
 // Eligibility contains only the generic instrument permissions shown by the
 // shell. A nil field means the venue did not provide that permission.
 type Eligibility struct {
-	Tradable   *bool
-	Marginable *bool
-	Shortable  *bool
+	FractionalPaper     bool
+	Fractionable        *bool
+	FractionalEHEnabled *bool
+	Tradable            *bool
+	Marginable          *bool
+	Shortable           *bool
 }
 
 // Provider resolves one exact venue/account's instrument metadata.

@@ -13,7 +13,8 @@ import { useVenueSelection } from "../exec/venueSelection";
 import { VenueEnvironmentBadge, venueEnvironment } from "../exec/VenueEnvironmentBadge";
 import { useOrderConfig } from "../exec/useOrderConfig";
 import { useThrottledQuote } from "../exec/useThrottledQuote";
-import { resolveShares, type SizingMode } from "../exec/sizing";
+import { fractionalStockSizing } from "../exec/fractionalStock";
+import { formatExecutionQuantity, resolveShares, type SizingMode } from "../exec/sizing";
 import { preCheck, type DraftOrder } from "../exec/preChecks";
 import { sideLabel, bareSymbol, abbrevType } from "../exec/orderStatus";
 import { formatPrice, QUOTE_DECIMALS } from "../../render/format";
@@ -153,16 +154,31 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       : mode === "CashPct" ? { mode, pct: Number(amount) || 0 }
       : mode === "BuyingPowerPct" ? { mode, pct: Number(amount) || 0 }
       : { mode, pct: Number(amount) || 0 };
-    const { qty, reason } = resolveShares(spec, { price: px, buyingPower, availableCash, positionQty });
-    const draft: DraftOrder = { symbol, side, type, tif, session, qty, limitPrice: type === "MARKET" ? 0 : px, stopPrice: hasStop ? Number(stop) || 0 : 0 };
-    const pc = preCheck(draft, quote ?? { bid: 0, ask: 0, last: 0 }, Date.now(), extBufferPct, reason);
-    for (const n of pc.notices) toast.push({ level: "warn", text: n });
-    if (!pc.ok) { toast.push({ level: "danger", text: pc.errors.join(" ") }); return; }
-    const o = pc.order;
-    const args: SubmitOrderArgs = { venue, symbol, side: o.side, type: o.type, tif: o.tif, session: o.session, qty: o.qty, limitPrice: o.limitPrice, stopPrice: o.stopPrice };
-    const tail = o.type === "MARKET" ? "MKT" : `${o.limitPrice.toFixed(QUOTE_DECIMALS)} ${abbrevType(o.type)}`;
-    const flash = `${sideLabel(o.side)} ${o.qty.toLocaleString("en-US")} ${bareSymbol(symbol)} @ ${tail}`;
-    void oc.submit(args, flash);
+    const draft: DraftOrder = { symbol, side, type, tif, session, qty: 0, limitPrice: type === "MARKET" ? 0 : px, stopPrice: hasStop ? Number(stop) || 0 : 0 };
+    const submit = (stock?: import("../../gen/wsmsg").VenueInstrumentEligibility | null) => {
+      if (!linkGroups.matchesOrderContext(group, symbol, venue, stores.exec.status())) return;
+      const now = Date.now();
+      const book = stores.quote.get(symbol) ?? quote ?? { bid: 0, ask: 0, last: 0 };
+      const priced = preCheck(draft, book, now, extBufferPct, undefined, stock?.phase).order;
+      const market = side === "BUY" || side === "COVER" ? book.ask : book.bid;
+      const account = stores.exec.accounts().find(a => a.venue === venue);
+      const held = stores.exec.positions().find(p => p.venue === venue && p.symbol === symbol)?.qty ?? 0;
+      const { qty, reason } = resolveShares(spec, {
+        price: priced.type === "MARKET" ? market || book.last : priced.type === "STOP" ? priced.stopPrice : priced.limitPrice,
+        buyingPower: account?.buyingPower ?? buyingPower, availableCash: account?.availableCash ?? availableCash, positionQty: held,
+        fractional: fractionalStockSizing(stock, priced, held), exactShares: true,
+      });
+      const pc = preCheck({ ...draft, qty }, book, now, extBufferPct, reason, stock?.phase);
+      for (const n of pc.notices) toast.push({ level: "warn", text: n });
+      if (!pc.ok) { toast.push({ level: "danger", text: pc.errors.join(" ") }); return; }
+      const o = pc.order;
+      const args: SubmitOrderArgs = { venue, symbol, side: o.side, type: o.type, tif: o.tif, session: o.session, qty: o.qty, limitPrice: o.limitPrice, stopPrice: o.stopPrice };
+      const tail = o.type === "MARKET" ? "MKT" : `${o.limitPrice.toFixed(QUOTE_DECIMALS)} ${abbrevType(o.type)}`;
+      const flash = `${sideLabel(o.side)} ${formatExecutionQuantity(o.qty)} ${bareSymbol(symbol)} @ ${tail}`;
+      void oc.submit(args, flash);
+    };
+    if (oc.stockEligibility && mode !== "Shares") void oc.stockEligibility(venue, symbol).then(submit);
+    else submit();
   };
 
   // Clickable inline bid/ask in the header blotter line (replaces the old Bid/Ask

@@ -160,6 +160,7 @@ type LimitCushion struct {
 }
 
 type RiskEntry struct {
+	Fractional         bool         `json:"fractional,omitempty"`
 	SharedEntryID      string       `json:"sharedEntryId,omitempty"`
 	AddStopPrice       float64      `json:"addStopPrice,omitempty"`
 	StopApplied        bool         `json:"stopApplied,omitempty"`
@@ -175,18 +176,19 @@ type RiskEntry struct {
 }
 
 type SubmitRiskEntryArgs struct {
-	Side          string       `json:"side,omitempty" tstype:"\"BUY\" | \"SHORT\""`
-	SharedEntryID string       `json:"sharedEntryId,omitempty"`
-	Protection    *TrailConfig `json:"protection,omitempty"`
-	Venue         string       `json:"venue"`
-	Symbol        string       `json:"symbol"`
-	BuyStop       float64      `json:"buyStop"`
-	SellStop      float64      `json:"sellStop"`
-	Mode          string       `json:"mode"`
-	Value         float64      `json:"value"`
-	MaxQty        float64      `json:"maxQty"`
-	BuyCushion    LimitCushion `json:"buyCushion"`
-	SellCushion   LimitCushion `json:"sellCushion"`
+	ExpectedSession OrderSession `json:"expectedSession,omitempty"`
+	Side            string       `json:"side,omitempty" tstype:"\"BUY\" | \"SHORT\""`
+	SharedEntryID   string       `json:"sharedEntryId,omitempty"`
+	Protection      *TrailConfig `json:"protection,omitempty"`
+	Venue           string       `json:"venue"`
+	Symbol          string       `json:"symbol"`
+	BuyStop         float64      `json:"buyStop"`
+	SellStop        float64      `json:"sellStop"`
+	Mode            string       `json:"mode"`
+	Value           float64      `json:"value"`
+	MaxQty          float64      `json:"maxQty"`
+	BuyCushion      LimitCushion `json:"buyCushion"`
+	SellCushion     LimitCushion `json:"sellCushion"`
 }
 
 type CryptoScannerRow struct {
@@ -474,12 +476,17 @@ type ExecStatus struct {
 // shell's selected venue/symbol cue. A nil permission was not supplied by the
 // venue and must not be rendered as a guess.
 type VenueInstrumentEligibility struct {
-	Supported  bool   `json:"supported"`
-	Found      bool   `json:"found"`
-	Shortable  *bool  `json:"shortable" tstype:"boolean | null,required"`
-	Marginable *bool  `json:"marginable" tstype:"boolean | null,required"`
-	Tradable   *bool  `json:"tradable" tstype:"boolean | null,required"`
-	Error      string `json:"error"`
+	FractionalPaper     bool   `json:"fractionalPaper,omitempty"`
+	Fractionable        *bool  `json:"fractionable,omitempty" tstype:"boolean | null"`
+	FractionalEHEnabled *bool  `json:"fractionalEhEnabled,omitempty" tstype:"boolean | null"`
+	Phase               string `json:"phase,omitempty"`
+	PhaseRefreshMs      int64  `json:"phaseRefreshMs,omitempty"`
+	Supported           bool   `json:"supported"`
+	Found               bool   `json:"found"`
+	Shortable           *bool  `json:"shortable" tstype:"boolean | null,required"`
+	Marginable          *bool  `json:"marginable" tstype:"boolean | null,required"`
+	Tradable            *bool  `json:"tradable" tstype:"boolean | null,required"`
+	Error               string `json:"error"`
 }
 
 // LocateEligibility is sourced from Alpaca's startup active-assets cache.
@@ -799,6 +806,9 @@ type QueryFillsArgs struct {
 }
 
 type QueryStopLimitRouteArgs struct {
+	Venue                  string       `json:"venue,omitempty"`
+	RiskShort              bool         `json:"riskShort,omitempty"`
+	SharedStopSession      OrderSession `json:"sharedStopSession,omitempty"`
 	RiskEntry              bool         `json:"riskEntry,omitempty"`
 	TIF                    TIF          `json:"tif"`
 	Session                OrderSession `json:"session"`
@@ -808,15 +818,17 @@ type QueryStopLimitRouteArgs struct {
 }
 
 type StopLimitRoutePreview struct {
-	Route                   string       `json:"route"`
-	EffectiveSession        OrderSession `json:"effectiveSession"`
-	Phase                   string       `json:"phase"`
-	DeadlineMs              int64        `json:"deadlineMs"`
-	HasTrustedEligiblePrint bool         `json:"hasTrustedEligiblePrint,omitempty"`
-	LastEligiblePrice       float64      `json:"lastEligiblePrice,omitempty"`
-	LastEligibleTsMs        int64        `json:"lastEligibleTsMs,omitempty"`
-	Reason                  string       `json:"reason,omitempty"`
-	OrderType               OrderType    `json:"orderType,omitempty"`
+	StockEligibility        *VenueInstrumentEligibility `json:"stockEligibility,omitempty"`
+	FractionalRisk          bool                        `json:"fractionalRisk,omitempty"`
+	Route                   string                      `json:"route"`
+	EffectiveSession        OrderSession                `json:"effectiveSession"`
+	Phase                   string                      `json:"phase"`
+	DeadlineMs              int64                       `json:"deadlineMs"`
+	HasTrustedEligiblePrint bool                        `json:"hasTrustedEligiblePrint,omitempty"`
+	LastEligiblePrice       float64                     `json:"lastEligiblePrice,omitempty"`
+	LastEligibleTsMs        int64                       `json:"lastEligibleTsMs,omitempty"`
+	Reason                  string                      `json:"reason,omitempty"`
+	OrderType               OrderType                   `json:"orderType,omitempty"`
 }
 
 type QueryAlpacaStockMarginArgs struct {

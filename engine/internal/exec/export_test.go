@@ -135,16 +135,16 @@ func TestBuildFillsCSVSideMapping(t *testing.T) {
 
 func TestBuildFillsCSVExactFixture(t *testing.T) {
 	rows := []ExportFillRow{
-		{FillID: 12, Symbol: "US.NVDA", Side: "BUY", Qty: 100, Price: 120.5, TsMs: ms("2026-07-10T13:31:05Z"), Venue: "sim"},
-		{FillID: 19, Symbol: "US.NVDA", Side: "SELL", Qty: 100, Price: 121.25, TsMs: ms("2026-07-10T13:44:02Z"), Venue: "sim"},
+		{FillID: 12, Symbol: "US.NVDA", Side: "BUY", Qty: 0.75, Price: 120.5, TsMs: ms("2026-07-10T13:31:05Z"), Venue: "sim"},
+		{FillID: 19, Symbol: "US.NVDA", Side: "SELL", Qty: 0.375, Price: 121.25, TsMs: ms("2026-07-10T13:44:02Z"), Venue: "sim"},
 	}
 	got, err := BuildFillsCSV(rows)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := "datetime,symbol,action,price,shares,fees,externalId\n" +
-		"2026-07-10T09:31:05,NVDA,BUY,120.5,100,0,etape:sim:12\n" +
-		"2026-07-10T09:44:02,NVDA,SELL,121.25,100,0,etape:sim:19\n"
+		"2026-07-10T09:31:05,NVDA,BUY,120.5,0.75,0,etape:sim:12\n" +
+		"2026-07-10T09:44:02,NVDA,SELL,121.25,0.375,0,etape:sim:19\n"
 	if got != want {
 		t.Fatalf("CSV mismatch:\ngot:  %q\nwant: %q", got, want)
 	}

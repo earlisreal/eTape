@@ -1,5 +1,7 @@
 package exec
 
+import "strings"
+
 // ReconcileAccount overwrites a venue's account snapshot (broker is authoritative;
 // eTape mirrors). Not persisted.
 func (s *State) ReconcileAccount(a AccountSnapshot) {
@@ -235,7 +237,7 @@ func (s *State) FlattenReconciled(v VenueID) bool {
 		return false
 	}
 	for _, p := range vs.Positions {
-		if p.Qty > 1e-9 || p.Qty < -1e-9 {
+		if (strings.HasPrefix(p.Symbol, "US.") && p.Qty != 0) || p.Qty > 1e-9 || p.Qty < -1e-9 {
 			return false
 		}
 	}

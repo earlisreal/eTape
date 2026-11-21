@@ -191,6 +191,22 @@ func (q *queries) handleContext(ctx context.Context, name string, args json.RawM
 			route, effective, deadline = exec.ResolveStopLimitRoute(now, tifFromWire(a.TIF), sessionFromWire(a.Session))
 		}
 		preview := wsmsg.StopLimitRoutePreview{Route: string(route), EffectiveSession: sessionToWire(effective), Phase: session.PhaseAt(now).String(), Reason: reason, OrderType: a.Type}
+		if a.Venue != "" {
+			stock := q.queryVenueInstrumentEligibility(ctx, a.Venue, a.Symbol)
+			preview.StockEligibility = &stock
+			if a.RiskEntry && !a.RiskShort && stock.FractionalPaper && stock.Tradable != nil && *stock.Tradable && stock.Fractionable != nil && *stock.Fractionable {
+				extended := stock.FractionalEHEnabled != nil && *stock.FractionalEHEnabled
+				if a.SharedStopSession == wsmsg.OrderSession("RTH") || (a.SharedStopSession == "" && !extended) {
+					if preview.Phase == "rth" {
+						preview.EffectiveSession = sessionToWire(exec.SessionRTH)
+						deadline = session.Schedule(now).Close
+						preview.FractionalRisk = true
+					}
+				} else {
+					preview.FractionalRisk = extended && (preview.Phase == "pre" || preview.Phase == "rth" || preview.Phase == "post")
+				}
+			}
+		}
 		if !deadline.IsZero() {
 			preview.DeadlineMs = deadline.UnixMilli()
 		}
@@ -329,6 +345,26 @@ func canonicalEligibilitySymbol(symbol string) string {
 }
 
 func (q *queries) queryVenueInstrumentEligibility(ctx context.Context, venue, symbol string) wsmsg.VenueInstrumentEligibility {
+	value := q.cachedVenueInstrumentEligibility(ctx, venue, symbol)
+	if value.Fractionable == nil && !value.FractionalPaper {
+		return value
+	}
+	now := q.clk.Now()
+	value.Phase = session.PhaseAt(now).String()
+	day := session.Schedule(now)
+	if day.TradingDay {
+		pre := time.Date(day.Date.Year(), day.Date.Month(), day.Date.Day(), 4, 0, 0, 0, session.Loc())
+		for _, boundary := range []time.Time{pre, day.Open, day.Close, day.DataClose, day.Date.AddDate(0, 0, 1)} {
+			if boundary.After(now) {
+				value.PhaseRefreshMs = boundary.Sub(now).Milliseconds() + 1
+				break
+			}
+		}
+	}
+	return value
+}
+
+func (q *queries) cachedVenueInstrumentEligibility(ctx context.Context, venue, symbol string) wsmsg.VenueInstrumentEligibility {
 	key := venueEligibilityKey{venue: exec.VenueID(venue), symbol: canonicalEligibilitySymbol(symbol)}
 	now := q.clk.Now()
 	q.eligibilityMu.Lock()
@@ -384,6 +420,7 @@ func (q *queries) fetchVenueInstrumentEligibility(ctx context.Context, key venue
 	return wsmsg.VenueInstrumentEligibility{
 		Supported: true, Found: found,
 		Shortable: value.Shortable, Marginable: value.Marginable, Tradable: value.Tradable,
+		Fractionable: value.Fractionable, FractionalEHEnabled: value.FractionalEHEnabled, FractionalPaper: value.FractionalPaper,
 	}
 }
 

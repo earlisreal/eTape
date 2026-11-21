@@ -117,3 +117,10 @@ describe("resolveShares PositionFraction reads pct", () => {
       .toEqual({ qty: 0, reason: "10% of 3 shares rounds to 0." });
   });
 });
+
+it("sizes fractional budgets and closes exact fractional balances", () => {
+  const ctx = { price: 400, buyingPower: 550, availableCash: 550, positionQty: 0.75, fractional: true };
+  expect(resolveShares({ mode: "Dollar", dollar: 550 }, ctx).qty).toBe(1.375);
+  expect(resolveShares({ mode: "PositionFraction", pct: 50 }, ctx).qty).toBe(0.375);
+  expect(resolveShares({ mode: "PositionFraction", pct: 100 }, { ...ctx, fractional: false }).qty).toBe(0.75);
+});

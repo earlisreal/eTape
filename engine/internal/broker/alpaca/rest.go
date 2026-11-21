@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,13 +95,15 @@ type alpacaError struct {
 }
 
 type assetResponse struct {
-	MarginLong   *string `json:"margin_requirement_long"`
-	MarginShort  *string `json:"margin_requirement_short"`
-	Symbol       string  `json:"symbol"`
-	BorrowStatus *string `json:"borrow_status"`
-	Shortable    *bool   `json:"shortable"`
-	Marginable   *bool   `json:"marginable"`
-	Tradable     *bool   `json:"tradable"`
+	Fractionable *bool    `json:"fractionable"`
+	Attributes   []string `json:"attributes"`
+	MarginLong   *string  `json:"margin_requirement_long"`
+	MarginShort  *string  `json:"margin_requirement_short"`
+	Symbol       string   `json:"symbol"`
+	BorrowStatus *string  `json:"borrow_status"`
+	Shortable    *bool    `json:"shortable"`
+	Marginable   *bool    `json:"marginable"`
+	Tradable     *bool    `json:"tradable"`
 }
 
 type locateQuoteResponse struct {
@@ -429,7 +433,11 @@ func mapLocateRecord(wire locateRecordWire) (locates.Record, error) {
 // A >=400 response is ALWAYS an error — parsed via apiError — and this
 // never falls through to a default-accept on a response it can't parse: a
 // 200 that doesn't even decode an order id is treated as an error too.
-func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, clientOrderID string) (string, error) {
+type fractionalRouteError string
+
+func (r fractionalRouteError) Error() string { return string(r) }
+
+func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, clientOrderID string, checks ...func(exec.OrderRequest) string) (string, error) {
 	ot, err := orderTypeWire(req.Type)
 	if err != nil {
 		return "", err
@@ -438,6 +446,16 @@ func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, cl
 	if err != nil {
 		return "", err
 	}
+	if err := rc.bucket.Take(ctx); err != nil {
+		return "", err
+	}
+	if req.Qty != math.Trunc(req.Qty) {
+		for _, check := range checks {
+			if reason := check(req); reason != "" {
+				return "", fractionalRouteError(reason)
+			}
+		}
+	}
 	payload := map[string]any{
 		"symbol":          wireSymbol(req.Symbol),
 		"qty":             req.Qty,
@@ -445,6 +463,9 @@ func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, cl
 		"type":            ot,
 		"time_in_force":   tif,
 		"client_order_id": clientOrderID,
+	}
+	if req.Qty != math.Trunc(req.Qty) {
+		payload["qty"] = strconv.FormatFloat(req.Qty, 'f', -1, 64)
 	}
 	if req.Type == exec.TypeLimit || req.Type == exec.TypeStopLimit {
 		payload["limit_price"] = roundPrice(req.LimitPrice)
@@ -463,7 +484,7 @@ func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, cl
 		return "", fmt.Errorf("alpaca: marshal order: %w", err)
 	}
 
-	resp, err := rc.do(ctx, http.MethodPost, "/v2/orders", bytes.NewReader(buf))
+	resp, err := rc.doHTTPWithHeaders(ctx, http.MethodPost, "/v2/orders", bytes.NewReader(buf), nil)
 	if err != nil {
 		return "", fmt.Errorf("alpaca: submit transport: %w", err)
 	}

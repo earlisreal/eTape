@@ -64,7 +64,7 @@ func (c *cycleProjection) applyFill(f Fill) {
 	}
 	if (p.Qty > 0) == (delta > 0) {
 		p.Basis = (p.Basis*math.Abs(p.Qty) + f.Price*f.Qty) / (math.Abs(p.Qty) + f.Qty)
-		p.Qty += delta
+		p.Qty = normalizedStockQuantity(f.Symbol, p.Qty+delta)
 		cp.Positions[f.Symbol] = p
 		return
 	}
@@ -75,7 +75,7 @@ func (c *cycleProjection) applyFill(f Fill) {
 	}
 	cp.Realized += realized
 	p.Realized += realized
-	next := p.Qty + delta
+	next := normalizedStockQuantity(f.Symbol, p.Qty+delta)
 	if next == 0 {
 		delete(cp.Positions, f.Symbol)
 	} else if (next > 0) != (p.Qty > 0) {

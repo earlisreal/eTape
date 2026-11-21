@@ -212,7 +212,7 @@ func (a *RoundTripAggregator) Apply(venue VenueID, symbol string, side Side, qty
 		t.openQty += qty
 		t.openNotional += price * qty
 		t.cash += sign * price * qty
-		t.running += d
+		t.running = normalizedStockQuantity(symbol, t.running+d)
 		return nil
 	}
 
@@ -221,7 +221,7 @@ func (a *RoundTripAggregator) Apply(venue VenueID, symbol string, side Side, qty
 	t.closeQty += closeQty
 	t.closeNotional += price * closeQty
 	t.cash += sign * price * closeQty
-	newRunning := t.running + d
+	newRunning := normalizedStockQuantity(symbol, t.running+d)
 
 	if newRunning == 0 {
 		trade := t.toClosedTrade(venue, symbol, tsMs, a.nextSeq())

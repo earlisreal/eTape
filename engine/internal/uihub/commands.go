@@ -319,8 +319,14 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		default:
 			return blocked("invalid risk entry side"), false
 		}
+		var expectedSession *exec.OrderSession
+		if a.ExpectedSession != "" {
+			s := sessionFromWire(a.ExpectedSession)
+			expectedSession = &s
+		}
 		return ackFromCmd(cd.ex.Do(exec.SubmitRiskEntry{
-			Side: side, SharedEntryID: a.SharedEntryID,
+			ExpectedSession: expectedSession,
+			Side:            side, SharedEntryID: a.SharedEntryID,
 			Protection: func() *exec.TrailConfig {
 				if a.Protection == nil {
 					return nil

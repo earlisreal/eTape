@@ -48,6 +48,7 @@ export function preCheck(
   nowMs: number,
   extBufferPct: number,
   sizeReason?: string,
+  phase: string = sessionAt(nowMs),
 ): PreCheckResult {
   const errors: string[] = [];
   const notices: string[] = [];
@@ -64,7 +65,7 @@ export function preCheck(
 
   // Market outside RTH → aggressive marketable limit (ask×(1+pct) buys /
   // bid×(1−pct) sells), tick-rounded. Falls back to last for a one-sided book.
-  if (order.type === "MARKET" && sessionAt(nowMs) !== "rth") {
+  if (order.type === "MARKET" && phase !== "rth") {
     const buyish = order.side === "BUY" || order.side === "COVER";
     const leg = buyish ? quote.ask : quote.bid;
     const usedFallback = !(leg > 0);

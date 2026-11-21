@@ -74,27 +74,37 @@ export function targetCueFor(target: HotkeyTarget | null): HotkeyTargetCue {
 
 function EligibilityTiles({ value, palette }: { value: VenueInstrumentEligibility; palette: ReturnType<typeof useTheme>["palette"] }): JSX.Element | null {
   if (!value.supported || !value.found) return null;
-  const fields: Array<[string, string, boolean | null | undefined]> = [
+  const fields: Array<[string, string, boolean | null | undefined, string?]> = [
     ["T", "Tradable", value.tradable],
     ["M", "Marginable", value.marginable],
     ["S", "Shortable", value.shortable],
   ];
-  const available = fields.filter(([, , permission]) => permission !== null && permission !== undefined);
+  const available = fields.filter(([, , permission]) => permission != null);
+  if (value.fractionable != null) {
+    const phase = value.phase ?? "closed";
+    const eligible = phase === "rth" ? value.fractionable
+      : phase === "pre" || phase === "post" ? value.fractionable && value.fractionalEhEnabled
+      : undefined;
+    const name = ({ pre: "Pre-market", rth: "Regular hours", post: "After-hours", overnight: "Overnight" } as Record<string, string>)[phase] ?? "Closed";
+    const status = eligible == null ? "Unavailable" : eligible ? "Yes" : "No";
+    available.push(["F", "Fractionable", eligible,
+      `Fractionable in ${name}: ${status}\nfractionable: ${value.fractionable}\nfractional_eh_enabled: ${value.fractionalEhEnabled ?? "unknown"}`]);
+  }
   if (available.length === 0) return null;
   return (
     <span className="top-bar-eligibility" data-testid="venue-instrument-eligibility" role="group"
       aria-label="Venue Instrument Eligibility"
       style={{ display: "inline-flex", alignItems: "center", gap: 3, flex: "0 0 auto" }}>
       <span aria-hidden="true" style={{ width: 1, height: 13, background: palette.borderStrong, margin: "0 2px" }} />
-      {available.map(([monogram, name, permission]) => {
-        const label = `${name}: ${permission ? "Yes" : "No"}`;
+      {available.map(([monogram, name, permission, detail]) => {
+        const label = detail ?? `${name}: ${permission ? "Yes" : "No"}`;
         return (
           <span key={name} data-testid={`eligibility-${name.toLowerCase()}`} role="img" aria-label={label} title={label}
             style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center",
-              width: 16, height: 16, borderRadius: 3, background: permission ? palette.ok : palette.danger,
+              width: 16, height: 16, borderRadius: 3, background: permission == null ? palette.textMuted : permission ? palette.ok : palette.danger,
               color: palette.bg, fontFamily: "IBM Plex Mono, ui-monospace, monospace", fontSize: 10, fontWeight: 700 }}>
             <span aria-hidden="true">{monogram}</span>
-            {!permission && <span aria-hidden="true" style={{ position: "absolute", width: 17, height: 1,
+            {permission === false && <span aria-hidden="true" style={{ position: "absolute", width: 17, height: 1,
               background: palette.bg, transform: "rotate(-45deg)" }} />}
           </span>
         );
@@ -113,20 +123,24 @@ function TargetCue({ cue, venueStatus, palette, commands }: { cue: HotkeyTargetC
     }
     let current = true;
     setEligibility((previous) => previous.key === eligibilityKey ? previous : { key: eligibilityKey, value: null });
+    let timer: number;
     const refresh = () => {
       void commands.sendQuery("QueryVenueInstrumentEligibility", { venue: cue.venue, symbol: cue.symbol }).then((raw) => {
         if (!current) return;
         const value = raw as VenueInstrumentEligibility;
         setEligibility({ key: eligibilityKey, value: value && !value.error ? value : null });
+        timer = window.setTimeout(refresh, Math.min(60_000, value?.phaseRefreshMs || 60_000));
       }).catch(() => {
-        if (current) setEligibility({ key: eligibilityKey, value: null });
+        if (current) {
+          setEligibility({ key: eligibilityKey, value: null });
+          timer = window.setTimeout(refresh, 60_000);
+        }
       });
     };
     refresh();
-    const timer = window.setInterval(refresh, 60_000);
     return () => {
       current = false;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
   }, [commands, cue.symbol, cue.venue, eligibilityKey]);
   const dot = cue.group === null ? palette.textMuted : {

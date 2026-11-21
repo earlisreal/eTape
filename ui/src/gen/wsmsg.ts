@@ -252,6 +252,7 @@ export interface LimitCushion {
   unit: string;
 }
 export interface RiskEntry {
+  fractional?: boolean;
   sharedEntryId?: string;
   addStopPrice?: number /* float64 */;
   stopApplied?: boolean;
@@ -266,6 +267,7 @@ export interface RiskEntry {
   failure?: string;
 }
 export interface SubmitRiskEntryArgs {
+  expectedSession?: OrderSession;
   side?: "BUY" | "SHORT";
   sharedEntryId?: string;
   protection?: TrailConfig;
@@ -548,6 +550,11 @@ export interface ExecStatus {
  * venue and must not be rendered as a guess.
  */
 export interface VenueInstrumentEligibility {
+  fractionalPaper?: boolean;
+  fractionable?: boolean | null;
+  fractionalEhEnabled?: boolean | null;
+  phase?: string;
+  phaseRefreshMs?: number /* int64 */;
   supported: boolean;
   found: boolean;
   shortable: boolean | null;
@@ -849,6 +856,9 @@ export interface QueryFillsArgs {
   toMs: number /* int64 */;
 }
 export interface QueryStopLimitRouteArgs {
+  venue?: string;
+  riskShort?: boolean;
+  sharedStopSession?: OrderSession;
   riskEntry?: boolean;
   tif: TIF;
   session: OrderSession;
@@ -857,6 +867,8 @@ export interface QueryStopLimitRouteArgs {
   deferredPositionSizing?: boolean;
 }
 export interface StopLimitRoutePreview {
+  stockEligibility?: VenueInstrumentEligibility;
+  fractionalRisk?: boolean;
   route: string;
   effectiveSession: OrderSession;
   phase: string;

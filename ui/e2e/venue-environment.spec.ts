@@ -206,3 +206,30 @@ test("linked panels recall the stock and exchange accounts", async ({ page, cont
   await expect(select.locator("option:checked")).toHaveText("Confirm live account");
   await expect(account).toHaveValue("");
 });
+
+test("fractional eligibility follows the active session", async ({ page, context }) => {
+  const workspace = "e2e-fractionable";
+  const seed = venueWorkspace(workspace);
+  let phase = "rth";
+  await context.routeWebSocket("**/ws", socket => {
+    const server = socket.connectToServer();
+    socket.onMessage(raw => {
+      const message = JSON.parse(raw.toString());
+      if (message.name === "GetConfig" && message.args.key === "workspace." + workspace) {
+        socket.send(JSON.stringify({ kind: "ack", corrId: message.corrId, status: "accepted", value: seed }));
+      } else if (message.name === "QueryVenueInstrumentEligibility" && message.args.venue === "sim-paper") {
+        socket.send(JSON.stringify({ kind: "result", corrId: message.corrId, payload: {
+          supported: true, found: true, error: "", fractionable: true, fractionalEhEnabled: false,
+          phase, phaseRefreshMs: 250,
+        } }));
+      } else server.send(raw);
+    });
+  });
+  await page.goto("/?workspace=" + workspace);
+  const tile = page.getByTestId("eligibility-fractionable");
+  await expect(tile).toHaveAttribute("title", /Regular hours: Yes.*fractionable: true.*fractional_eh_enabled: false/s);
+  phase = "post";
+  await expect(tile).toHaveAttribute("title", /After-hours: No/);
+  phase = "closed";
+  await expect(tile).toHaveAttribute("title", /Closed: Unavailable/);
+});

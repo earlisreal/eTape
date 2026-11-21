@@ -1,3 +1,4 @@
+import { formatExecutionQuantity } from "../../exec/sizing";
 import { useEffect, useRef, type CSSProperties, type MutableRefObject } from "react";
 import type { AckMsg, StopLimitRoutePreview, SubmitOrderArgs } from "../../../wire/contract";
 import type { Stores } from "../../../data/registry";
@@ -138,13 +139,15 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
 
   const requestRoute = (template: ChartConditionalTemplate, symbol: string): Promise<StopLimitRoutePreview | null> => {
     const deferred = template.side === "SELL" && template.sizing.mode === "PositionFraction";
-	const key = chartConditionalRouteKey(template.tif, template.session ?? "AUTO", symbol, deferred, template.type);
+    const { group, linkGroups } = latest.current;
+    const venue = group === null ? "" : linkGroups.venueFor(group) ?? "";
+	const key = venue + ":" + chartConditionalRouteKey(template.tif, template.session ?? "AUTO", symbol, deferred, template.type);
     const old = routeCache.current.get(key);
     if (old?.route && Date.now() - old.at < 250) return Promise.resolve(old.route);
     if (old?.pending) return old.pending;
     const entry: RouteCache = { at: Date.now(), pending: null };
     entry.pending = latest.current.sendQuery("QueryStopLimitRoute", {
-		tif: template.tif, session: template.session ?? "AUTO", symbol, deferredPositionSizing: deferred,
+		tif: template.tif, session: template.session ?? "AUTO", symbol, venue, deferredPositionSizing: deferred,
 		...(template.type === "LIMIT_IF_TOUCHED" ? { type: template.type } : {}),
     })
       .then((raw) => {
@@ -178,7 +181,7 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     const quote = stores.quote.get(latest.current.symbol);
     const resolvedPlace = resolveChartConditionalOrder(resolved.template, {
       venue, symbol: latest.current.symbol, ...(quote ? { quote } : {}), buyingPower: account?.buyingPower ?? 0, availableCash: account?.availableCash ?? 0,
-      positionQty, nowMs: Date.now(), extHoursMarketBufferPct: latest.current.config.extHoursMarketBufferPct ?? 1,
+      positionQty, ...(route?.stockEligibility ? { stockEligibility: route.stockEligibility } : {}), nowMs: Date.now(), extHoursMarketBufferPct: latest.current.config.extHoursMarketBufferPct ?? 1,
     }, stopPrice);
 	const args: SubmitOrderArgs = { ...resolvedPlace.args, ...(route ? { routeExpected: route.route,
 		...(resolved.template.type === "LIMIT_IF_TOUCHED" ? { routeDeadlineMs: route.deadlineMs } : {}) } : {}) };
@@ -188,7 +191,7 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
 	const triggerNow = chartConditionalOrderWillTrigger(resolved.template.side, stopPrice, route, resolved.template.type);
     const noPositionAtTrigger = triggerNow && args.deferredPositionPct !== undefined && venueStatus?.positionDataReady && positionQty <= 0;
     const warning = triggerNow ? noPositionAtTrigger ? "WILL TRIGGER NOW — NO OPEN POSITION" : "WILL TRIGGER NOW" : "";
-    const size = args.deferredPositionPct === undefined ? `${args.qty.toLocaleString("en-US")} shares` : `${args.deferredPositionPct}% position · shares determined on trigger`;
+    const size = args.deferredPositionPct === undefined ? `${formatExecutionQuantity(args.qty)} shares` : `${args.deferredPositionPct}% position · shares determined on trigger`;
 	const litCustody = route?.route === "ENGINE_HELD" && resolved.template.type === "LIMIT_IF_TOUCHED"
 		? " · Held by eTape — no broker order before activation; trigger source: primary moomoo OpenD Last-Eligible Prints; engine or feed loss pauses evaluation."
 		: "";

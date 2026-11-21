@@ -57,6 +57,14 @@ Dollar, Cash %, Buying Power %, Shares, and Position sizing use the selected
 venue's live account and position data; Cash % uses the same available cash
 shown by the Account panel.
 
+Alpaca Paper calculated long orders use fractional shares on eligible routes,
+including existing dollar and risk templates. The Top Bar `F` follows the
+engine's market session for the selected venue and symbol. Hover shows both
+Alpaca asset flags. A 50% sale of 0.75 shares sizes to 0.375 shares on an eligible
+route. A 100% close uses the confirmed balance. The linked Chart Risk Entry
+stop follows fills, and a regular-hours-only fractional pair expires at the
+scheduled regular close.
+
 Position-% SELL STOP_LIMIT templates defer share sizing through Chart Order
 Gestures, hotkeys and Deck Buttons. Their DAY held parent shows percentage
 intent before trigger and the resolved shares after activation; a ready flat

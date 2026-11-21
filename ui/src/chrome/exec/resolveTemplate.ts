@@ -3,12 +3,16 @@
 // + the pre-check result. Pure; nowMs decides the ET session for RTH coercion.
 import type { Quote, SubmitOrderArgs, VenueID } from "../../wire/contract";
 import type { PlaceOrderTemplate } from "./actionTemplate";
-import { resolveShares } from "./sizing";
+import { formatExecutionQuantity, resolveShares } from "./sizing";
 import { resolveLimitCushionPrice, resolvePrice } from "./priceSource";
 import { preCheck, type PreCheckResult, type DraftOrder } from "./preChecks";
 import { sideLabel, bareSymbol, abbrevType } from "./orderStatus";
 
+import type { VenueInstrumentEligibility } from "../../gen/wsmsg";
+import { fractionalStockSizing } from "./fractionalStock";
+
 export interface ResolveContext {
+  stockEligibility?: VenueInstrumentEligibility | null;
   venue: VenueID; symbol: string; quote: Quote;
   buyingPower: number; availableCash: number; positionQty: number; nowMs: number;
   extHoursMarketBufferPct: number;
@@ -22,22 +26,25 @@ export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext)
   const limitPrice = t.type === "STOP_LIMIT" || t.type === "LIMIT_IF_TOUCHED"
     ? resolveLimitCushionPrice(t.side, sourcePrice, t.limitCushion ?? 0, t.limitCushionUnit)
     : sourcePrice;
-  const sizingPrice = t.type === "STOP_LIMIT" || t.type === "LIMIT_IF_TOUCHED" ? limitPrice : sourcePrice;
   const deferredPositionPct = t.side === "SELL" && t.type === "STOP_LIMIT" && t.sizing.mode === "PositionFraction"
     ? t.sizing.pct ?? (t.sizing.fraction === "half" ? 50 : 100)
     : undefined;
-  const { qty, reason } = deferredPositionPct === undefined
-    ? resolveShares(t.sizing, {
-      price: sizingPrice, buyingPower: ctx.buyingPower, availableCash: ctx.availableCash, positionQty: ctx.positionQty,
-    })
-    : { qty: 0 };
   const draft: DraftOrder = {
-    symbol: ctx.symbol, side: t.side, type: t.type, tif: t.tif, session: t.session ?? "AUTO", qty,
+    symbol: ctx.symbol, side: t.side, type: t.type, tif: t.tif, session: t.session ?? "AUTO", qty: 0,
     ...(deferredPositionPct !== undefined ? { deferredPositionPct } : {}),
     limitPrice: t.type === "MARKET" ? 0 : limitPrice,
     stopPrice: t.type === "STOP" || t.type === "STOP_LIMIT" || t.type === "LIMIT_IF_TOUCHED" ? sourcePrice : 0,
   };
-  const pc = preCheck(draft, ctx.quote, ctx.nowMs, ctx.extHoursMarketBufferPct, reason);
+  const priced = preCheck(draft, ctx.quote, ctx.nowMs, ctx.extHoursMarketBufferPct, undefined, ctx.stockEligibility?.phase).order;
+  const marketQuote = t.side === "BUY" || t.side === "COVER" ? ctx.quote.ask : ctx.quote.bid;
+  const sizingPrice = priced.type === "MARKET" ? marketQuote || ctx.quote.last : priced.type === "STOP" ? priced.stopPrice : priced.limitPrice;
+  const { qty, reason } = deferredPositionPct === undefined
+    ? resolveShares(t.sizing, {
+      price: sizingPrice, buyingPower: ctx.buyingPower, availableCash: ctx.availableCash, positionQty: ctx.positionQty,
+      fractional: fractionalStockSizing(ctx.stockEligibility, priced, ctx.positionQty), exactShares: true,
+    })
+    : { qty: 0 };
+  const pc = preCheck({ ...draft, qty }, ctx.quote, ctx.nowMs, ctx.extHoursMarketBufferPct, reason, ctx.stockEligibility?.phase);
   const o = pc.order;
   const args: SubmitOrderArgs = {
     venue: ctx.venue, symbol: ctx.symbol, side: o.side, type: o.type, tif: o.tif, session: o.session,
@@ -48,7 +55,7 @@ export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext)
     ? `${displayPrice(o.stopPrice)}→${displayPrice(o.limitPrice)} ${abbrevType(o.type)}`
     : `${o.limitPrice.toFixed(2)} ${abbrevType(o.type)}`;
   const size = o.deferredPositionPct === undefined
-    ? o.qty.toLocaleString("en-US")
+    ? formatExecutionQuantity(o.qty)
     : `${o.deferredPositionPct}% position`;
   const flash = `${sideLabel(o.side)} ${size} ${bareSymbol(ctx.symbol)} @ ${tail}`;
   return { args, flash, preCheck: pc };

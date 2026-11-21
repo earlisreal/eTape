@@ -218,3 +218,17 @@ func TestRoundTripSeqMonotonicAcrossKeys(t *testing.T) {
 		t.Fatalf("seq should be a single monotonic counter across (venue,symbol) keys: t1=%d t2=%d", t1[0].Seq, t2[0].Seq)
 	}
 }
+
+func TestFractionalStockRoundTripReturnsFlat(t *testing.T) {
+	trip := NewRoundTripAggregator()
+	trip.Apply("v", "US.AAPL", SideBuy, .1, 10, 1)
+	trip.Apply("v", "US.AAPL", SideBuy, .2, 10, 2)
+	closed := trip.Apply("v", "US.AAPL", SideSell, .3, 11, 3)
+	if len(closed) != 1 || trip.OpenMs("v", "US.AAPL") != 0 {
+		t.Fatalf("closed trades = %+v, open timestamp = %d", closed, trip.OpenMs("v", "US.AAPL"))
+	}
+	trip.Apply("v", "US.AAPL", SideBuy, .000000001, 10, 4)
+	if trip.OpenMs("v", "US.AAPL") != 4 {
+		t.Fatal("one nanoshare must remain an open position")
+	}
+}

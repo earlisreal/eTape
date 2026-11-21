@@ -632,3 +632,43 @@ func TestRiskEntryReconciledLateFillRequiresResume(t *testing.T) {
 		}
 	}
 }
+
+func TestFractionalRiskEntryKeepsPreciseProtectionAfterSale(t *testing.T) {
+	b := newHeldTestBroker()
+	b.fractional = true
+	at := time.Date(2026, 11, 27, 16, 0, 0, 0, time.UTC)
+	c, clk, _, ctx := newHeldCoreWithBroker(t, at, nil, nil, nil, b)
+	c.PublishBrokerEvent(BrokerAccount{Account: AccountSnapshot{Venue: "v", BuyingPower: 1000, AvailableCash: 1000, TsMs: clk.Now().UnixMilli()}})
+	select {
+	case <-c.Updates():
+	case <-time.After(time.Second):
+		t.Fatal("missing account update")
+	}
+	symbol := "US.AAPL"
+	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: symbol, BuyStop: 10, SellStop: 9, Mode: "Dollar", Value: .75, MaxQty: .75})
+	if !ack.Accepted {
+		t.Fatal(ack)
+	}
+	entry := waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+	if entry.Qty != .75 || entry.Session != SessionRTH || entry.Held.DeadlineMs != time.Date(2026, 11, 27, 18, 0, 0, 0, time.UTC).UnixMilli() {
+		t.Fatalf("fractional entry: %+v", entry)
+	}
+
+	clk.Advance(time.Millisecond)
+	print := eligible(1, clk.Now(), 10)
+	print.Symbol = symbol
+	feedCorroboratedPrint(t, c, ctx, print)
+	select {
+	case req := <-b.submits:
+		if req.Qty != .75 || req.Session != SessionRTH {
+			t.Fatalf("fractional child: %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing fractional child")
+	}
+	b.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
+	b.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: symbol, Side: SideBuy, Qty: .75, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: .75, AvgPrice: 10}
+	stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Qty == .75 })
+	b.ev <- BrokerPosition{Position: Position{Venue: "v", Symbol: symbol, Qty: .375, AvgPrice: 10}}
+	waitOrder(t, c, stop.ID, func(o Order) bool { return o.Qty == .375 })
+}

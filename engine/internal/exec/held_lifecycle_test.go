@@ -55,6 +55,7 @@ func (s *heldTestStore) ReadExecOrderHistoriesFor(ids []string) ([]EventEnvelope
 func (*heldTestStore) QueryFillsSince(context.Context, int64) ([]FillRow, error) { return nil, nil }
 
 type heldTestBroker struct {
+	fractional      bool
 	ev              chan BrokerEvent
 	submits         chan OrderRequest
 	mu              sync.Mutex
@@ -79,6 +80,12 @@ func (b *heldTestBroker) setPositions(positions []Position) {
 	b.mu.Lock()
 	b.positions = append([]Position(nil), positions...)
 	b.mu.Unlock()
+}
+func (b *heldTestBroker) FractionalStockOrderReason(req OrderRequest) string {
+	if !b.fractional || req.Session != SessionRTH {
+		return "fixture requires regular hours for fractional shares"
+	}
+	return ""
 }
 func (*heldTestBroker) Capabilities() Capabilities { return Capabilities{FlattenAll: true} }
 func (b *heldTestBroker) SubmitOrder(_ context.Context, req OrderRequest) (OrderAck, error) {
@@ -180,8 +187,12 @@ func newHeldCore(t *testing.T, at time.Time) (*Core, *clock.Fake, *heldTestBroke
 
 func newHeldCoreWithLiveAck(t *testing.T, at time.Time, identity, acknowledged, litAcknowledged map[VenueID]string) (*Core, *clock.Fake, *heldTestBroker, context.Context) {
 	t.Helper()
+	return newHeldCoreWithBroker(t, at, identity, acknowledged, litAcknowledged, newHeldTestBroker())
+}
+
+func newHeldCoreWithBroker(t *testing.T, at time.Time, identity, acknowledged, litAcknowledged map[VenueID]string, broker *heldTestBroker) (*Core, *clock.Fake, *heldTestBroker, context.Context) {
+	t.Helper()
 	clk := clock.NewFake(at)
-	broker := newHeldTestBroker()
 	c := NewCore(CoreConfig{
 		Venues: []VenueID{"v"}, Gate: GateConfig{
 			Global: GlobalLimits{MaxDayLoss: 1000, MaxSymbolPositionValue: 1_000_000, MaxSymbolPositionShares: 1000},

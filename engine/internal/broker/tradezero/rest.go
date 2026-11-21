@@ -84,6 +84,9 @@ type orderResp struct {
 // an R114 (duplicate) on the retry means the original landed; a clean accept
 // means it did not.
 func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, tzClientOrderID, route string) (bool, string, error) {
+	if req.Qty != float64(int(req.Qty)) {
+		return false, "", fmt.Errorf("TradeZero requires whole shares")
+	}
 	ot, err := orderTypeWire(req.Type)
 	if err != nil {
 		return false, "", err

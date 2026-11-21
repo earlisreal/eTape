@@ -958,7 +958,7 @@ func (c *Core) applyPositionEffect(e BrokerPositionEffect) bool {
 	}
 	vs := c.state.Venue(e.Venue)
 	p := vs.Positions[e.Symbol]
-	newQty := p.Qty + delta
+	newQty := normalizedStockQuantity(e.Symbol, p.Qty+delta)
 	switch {
 	case p.Qty == 0 || p.Qty*newQty < 0:
 		p.AvgPrice = e.Price
@@ -1145,6 +1145,21 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 			}
 		}
 	}
+	if strings.HasPrefix(req.Symbol, "US.") && req.Qty != math.Trunc(req.Qty) && req.Session == SessionAuto && route == RouteNative {
+		switch session.PhaseAt(c.clk.Now()) {
+		case session.RTH:
+			req.Session = SessionRTH
+		case session.PreMarket, session.PostMarket:
+			req.Session = SessionExtended
+		}
+	}
+	quantityRoute := req
+	if route == RouteEngineHeld {
+		quantityRoute.Type = TypeLimit
+	}
+	if reason := c.stockFractionalReason(quantityRoute); reason != "" {
+		return CmdAck{Reason: reason, OrderID: req.ClientOrderID}
+	}
 	var ok bool
 	var reason string
 	if deferred {
@@ -1264,7 +1279,12 @@ func (c *Core) sellLeavesCheck(req OrderRequest, leaves float64, excludeID strin
 		return 0, "no open long position to sell"
 	}
 	available = max(0, long-c.state.VenueReducingCommittedShares(req.Venue, req.Symbol, req.Side, excludeID))
-	if leaves > available+1e-9 {
+	exceeds := leaves > available+1e-9
+	if strings.HasPrefix(req.Symbol, "US.") {
+		available = normalizedStockQuantity(req.Symbol, available)
+		exceeds = normalizedStockQuantity(req.Symbol, leaves) > available
+	}
+	if exceeds {
 		return available, sellLeavesShortfall
 	}
 	return available, ""
@@ -1467,6 +1487,9 @@ func (c *Core) handleReplaceSingle(ctx context.Context, cm ReplaceOrder) CmdAck 
 	}
 	if cm.LimitPrice <= 0 && o.Type != TypeMarket {
 		return CmdAck{Accepted: false, Reason: "replacement limit price must be positive", OrderID: o.ID}
+	}
+	if _, ok := b.(fractionalStockBroker); ok && (o.Qty != math.Trunc(o.Qty) || cm.Qty != math.Trunc(cm.Qty)) {
+		return CmdAck{Reason: "cancel the fractional order before submitting a replacement", OrderID: o.ID}
 	}
 	rr := ReplaceRequest{Qty: cm.Qty, LimitPrice: cm.LimitPrice, StopPrice: cm.StopPrice}
 	action := OrderAction{Kind: ActionReplace, Phase: ActionRequested, PreviousLimitPrice: o.LimitPrice,

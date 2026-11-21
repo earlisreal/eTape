@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
 	"time"
 
@@ -276,6 +275,13 @@ func (c *Core) heldGate(req OrderRequest, orderID string) (bool, string) {
 			copyState.orderIndex[id] = v
 		}
 	}
+	quantityRoute := req
+	if req.Type == TypeStopLimit || req.Type == TypeLimitIfTouched {
+		quantityRoute.Type = TypeLimit
+	}
+	if reason := c.stockFractionalReason(quantityRoute); reason != "" {
+		return false, reason
+	}
 	if req.Qty == 0 {
 		return EvaluateDeferredAdmission(&copyState, gate, req)
 	}
@@ -347,6 +353,9 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 	}
 	child := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: TypeLimit, TIF: o.TIF, Session: o.Session,
 		Qty: o.LeavesQty, LimitPrice: o.LimitPrice, ClientOrderID: o.ID}
+	if o.Type == TypeTrailingStop && o.Held.Trail != nil {
+		child.Session = o.Held.Trail.Config.Sessions.orderSession()
+	}
 	if o.Perpetual != nil {
 		p := *o.Perpetual
 		child.Perpetual = &p
@@ -384,7 +393,7 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 			c.releaseHeld(o.ID)
 			return
 		}
-		child.Qty = math.Floor(long * o.DeferredPositionPct / 100)
+		child.Qty = c.sizePositionShares(child, long, o.DeferredPositionPct)
 		if child.Qty <= 0 {
 			if err := c.appendAndFold(OrderRejected{V: o.Venue, OID: o.ID, Reason: "position % rounds to 0 shares", Ts: c.now()}, SrcLocal); err != nil {
 				c.syslog("exec.held", "persist rounded-zero rejection "+o.ID+": "+err.Error())
@@ -401,6 +410,10 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 			c.releaseHeld(o.ID)
 			return
 		}
+	}
+	if reason := c.stockFractionalReason(child); reason != "" {
+		c.changeHeld(o, HeldPaused, reason, false)
+		return
 	}
 	ok, reason := c.heldGate(child, o.ID)
 	if o.RiskEntry != nil && o.Side == SideShort && ok {

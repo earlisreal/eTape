@@ -197,6 +197,13 @@ func (c *Core) acquireHeldDemand(ctx context.Context, o Order) error {
 	return c.heldDemand.Acquire(ctx, o.ID, o.Symbol)
 }
 
+func (s TrailSessions) orderSession() OrderSession {
+	if s.RTH && !s.Pre && !s.Post {
+		return SessionRTH
+	}
+	return SessionExtended
+}
+
 func (c *Core) handleSubmitTrail(ctx context.Context, cm SubmitTrail) CmdAck {
 	blocked := func(reason string) CmdAck { return CmdAck{Reason: reason, OrderID: cm.ClientOrderID} }
 	if c.brokers[cm.Venue] == nil || cm.Symbol == "" {
@@ -227,8 +234,10 @@ func (c *Core) handleSubmitTrail(ctx context.Context, cm SubmitTrail) CmdAck {
 		}
 	}
 	shares := c.state.VenuePositionShares(cm.Venue, cm.Symbol)
-	qty := math.Floor(math.Abs(shares) * cm.PositionPct / 100)
-	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Qty: qty, Type: TypeLimit, TIF: TIFDay, Session: SessionExtended}
+	orderSession := cm.Config.Sessions.orderSession()
+	req := OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeLimit, TIF: TIFDay, Session: orderSession}
+	qty := c.sizePositionShares(req, shares, cm.PositionPct)
+	req.Qty = qty
 	if ok, reason := c.checkSellLeaves(req, qty, ""); !ok {
 		return blocked(reason)
 	}
@@ -267,7 +276,7 @@ func (c *Core) handleSubmitTrail(ctx context.Context, cm SubmitTrail) CmdAck {
 		c.releaseHeld(cm.ClientOrderID)
 		return blocked("trail session expired while acquiring market data")
 	}
-	o := newOrderFromRequest(OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeTrailingStop, TIF: TIFDay, Session: SessionExtended, ClientOrderID: cm.ClientOrderID}, c.now())
+	o := newOrderFromRequest(OrderRequest{Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: TypeTrailingStop, TIF: TIFDay, Session: orderSession, ClientOrderID: cm.ClientOrderID}, c.now())
 	o.DeferredPositionPct = cm.PositionPct
 	o.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: deadline.UnixMilli(), PausedReason: "waiting for market data", Trail: &TrailState{Config: cm.Config, PositionCycle: c.trailPositionCycle(cm.Venue, cm.Symbol)}}
 	if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcLocal); err != nil {
@@ -373,7 +382,8 @@ func (c *Core) advanceTrailPrice(ctx context.Context, o Order, p EligiblePrint, 
 	if t.Triggered {
 		t.ReservedQty = o.LeavesQty
 		if o.DeferredPositionPct > 0 {
-			t.ReservedQty = math.Floor(math.Abs(c.state.VenuePositionShares(o.Venue, o.Symbol)) * o.DeferredPositionPct / 100)
+			req := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: TypeLimit, TIF: o.TIF, Session: t.Config.Sessions.orderSession()}
+			t.ReservedQty = c.sizePositionShares(req, c.state.VenuePositionShares(o.Venue, o.Symbol), o.DeferredPositionPct)
 		}
 		if t.ReservedQty <= 0 {
 			c.rejectTrail(ctx, o, "position percentage rounds to zero shares")
