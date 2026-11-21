@@ -550,7 +550,7 @@ export interface ExecStatus {
  * venue and must not be rendered as a guess.
  */
 export interface VenueInstrumentEligibility {
-  fractionalPaper?: boolean;
+  fractionalStockOrders?: boolean;
   fractionable?: boolean | null;
   fractionalEhEnabled?: boolean | null;
   phase?: string;

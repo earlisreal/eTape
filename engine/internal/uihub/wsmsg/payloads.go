@@ -476,17 +476,17 @@ type ExecStatus struct {
 // shell's selected venue/symbol cue. A nil permission was not supplied by the
 // venue and must not be rendered as a guess.
 type VenueInstrumentEligibility struct {
-	FractionalPaper     bool   `json:"fractionalPaper,omitempty"`
-	Fractionable        *bool  `json:"fractionable,omitempty" tstype:"boolean | null"`
-	FractionalEHEnabled *bool  `json:"fractionalEhEnabled,omitempty" tstype:"boolean | null"`
-	Phase               string `json:"phase,omitempty"`
-	PhaseRefreshMs      int64  `json:"phaseRefreshMs,omitempty"`
-	Supported           bool   `json:"supported"`
-	Found               bool   `json:"found"`
-	Shortable           *bool  `json:"shortable" tstype:"boolean | null,required"`
-	Marginable          *bool  `json:"marginable" tstype:"boolean | null,required"`
-	Tradable            *bool  `json:"tradable" tstype:"boolean | null,required"`
-	Error               string `json:"error"`
+	FractionalStockOrders bool   `json:"fractionalStockOrders,omitempty"`
+	Fractionable          *bool  `json:"fractionable,omitempty" tstype:"boolean | null"`
+	FractionalEHEnabled   *bool  `json:"fractionalEhEnabled,omitempty" tstype:"boolean | null"`
+	Phase                 string `json:"phase,omitempty"`
+	PhaseRefreshMs        int64  `json:"phaseRefreshMs,omitempty"`
+	Supported             bool   `json:"supported"`
+	Found                 bool   `json:"found"`
+	Shortable             *bool  `json:"shortable" tstype:"boolean | null,required"`
+	Marginable            *bool  `json:"marginable" tstype:"boolean | null,required"`
+	Tradable              *bool  `json:"tradable" tstype:"boolean | null,required"`
+	Error                 string `json:"error"`
 }
 
 // LocateEligibility is sourced from Alpaca's startup active-assets cache.

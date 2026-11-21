@@ -10,9 +10,6 @@ func (a *Adapter) FractionalStockOrderReason(req exec.OrderRequest) string {
 	if req.Side != exec.SideBuy && req.Side != exec.SideSell {
 		return "stock shorts and covers require whole shares"
 	}
-	if !a.paper && req.Side == exec.SideBuy {
-		return "fractional opening orders require Alpaca Paper verification before Live rollout"
-	}
 	if req.TIF != exec.TIFDay || req.Session == exec.SessionOvernight {
 		return "fractional stocks require DAY during regular, pre-market or after-hours sessions"
 	}
@@ -26,8 +23,8 @@ func (a *Adapter) FractionalStockOrderReason(req exec.OrderRequest) string {
 	}
 	extended := req.Session == exec.SessionExtended || phase != session.RTH
 	if extended {
-		if !a.paper || req.Type != exec.TypeLimit || status.FractionalEHEnabled == nil || !*status.FractionalEHEnabled {
-			return "fractional extended-hours orders require an eligible Alpaca Paper DAY limit"
+		if req.Type != exec.TypeLimit || status.FractionalEHEnabled == nil || !*status.FractionalEHEnabled {
+			return "fractional extended-hours orders require an eligible Alpaca DAY limit"
 		}
 	}
 	return ""

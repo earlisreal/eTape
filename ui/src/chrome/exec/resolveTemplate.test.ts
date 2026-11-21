@@ -12,6 +12,23 @@ const tmpl = (o: Partial<PlaceOrderTemplate> = {}): PlaceOrderTemplate => ({
 });
 
 describe("resolvePlaceTemplate", () => {
+  it.each(["alpaca-paper", "alpaca-live"])("sizes fractional buys and partial exits on %s", venue => {
+    const ctx = {
+      venue, symbol: "US.AAPL", quote: { ...q, ask: 400 }, buyingPower: 550,
+      availableCash: 550, positionQty: 0.75, nowMs: RTH, extHoursMarketBufferPct: 1,
+      stockEligibility: {
+        supported: true, found: true, tradable: true, marginable: null, shortable: null, error: "",
+        fractionable: true, fractionalStockOrders: true, phase: "rth",
+      },
+    };
+    const buy = resolvePlaceTemplate(tmpl({ sizing: { mode: "Dollar", dollar: 550 } }), ctx);
+    expect(buy.args).toMatchObject({ venue, side: "BUY", qty: 1.375 });
+    expect(buy.preCheck.ok).toBe(true);
+    const sell = resolvePlaceTemplate(tmpl({ side: "SELL", sizing: { mode: "PositionFraction", pct: 50 } }), ctx);
+    expect(sell.args).toMatchObject({ venue, side: "SELL", qty: 0.375 });
+    expect(sell.preCheck.ok).toBe(true);
+  });
+
   it("resolves price+qty and builds a venue-tagged SubmitOrderArgs + flash string", () => {
     const r = resolvePlaceTemplate(tmpl(), { venue: "alpaca-paper", symbol: "US.AAPL", quote: q, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
     expect(r.args.venue).toBe("alpaca-paper");

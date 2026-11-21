@@ -101,3 +101,18 @@ func TestFractionableSessionChangesBeforeAssetCacheExpires(t *testing.T) {
 		t.Fatalf("before=%+v after=%+v provider calls=%d", before, after, provider.calls)
 	}
 }
+
+func TestLiveChartRiskPreviewUsesFractionalRoute(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 11, 27, 17, 59, 59, 0, time.UTC))
+	yes, no := true, false
+	registry := eligibility.NewRegistry()
+	registry.Register("alpaca-live", &venueEligibilityProviderSpy{found: true, result: eligibility.Eligibility{
+		Tradable: &yes, Fractionable: &yes, FractionalEHEnabled: &no, FractionalStockOrders: true,
+	}})
+	q := NewVenueEligibilityQueriesForTest(&spyFills{}, clk, registry)
+	args := json.RawMessage(`{"venue":"alpaca-live","symbol":"US.AAPL","riskEntry":true,"tif":"DAY","session":"EXTENDED"}`)
+	got := q.handle("QueryStopLimitRoute", args).(wsmsg.StopLimitRoutePreview)
+	if !got.FractionalRisk || got.EffectiveSession != "RTH" || got.DeadlineMs != clk.Now().Add(time.Second).UnixMilli() {
+		t.Fatalf("regular-hours-only live preview: %+v", got)
+	}
+}

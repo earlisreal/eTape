@@ -12,12 +12,10 @@ directory with `GET /v2/assets?status=active` and stores the returned
 `borrow_status`, `shortable`, `marginable`, `tradable`, `fractionable`, and the
 `fractional_eh_enabled` asset attribute in memory.
 
-Fractional long orders use DAY and accept share quantities up to nine decimal
-places. Alpaca Paper accepts fractional submissions for testing. Pre-market and
-after-hours require an eligible DAY limit. Live fractional openings,
-extended-hours fractional routes, and price-only fractional replacement await
-Paper execution verification. Live accounts can submit regular-hours DAY
-reductions of confirmed fractional long positions.
+Alpaca Paper and Live support DAY orders for fractional long positions with
+share quantities up to nine decimal places. Pre-market and after-hours require
+a DAY limit on a symbol with extended-hours fractional eligibility. A working
+fractional order can be canceled and entered again as a separate order.
 Stock Info, venue instrument eligibility, and the locate workflow's borrow
 lookup are pure map reads and do not make per-symbol REST requests; each
 snapshot is treated as session-static until the next restart. The generic

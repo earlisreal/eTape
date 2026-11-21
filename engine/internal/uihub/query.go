@@ -194,7 +194,7 @@ func (q *queries) handleContext(ctx context.Context, name string, args json.RawM
 		if a.Venue != "" {
 			stock := q.queryVenueInstrumentEligibility(ctx, a.Venue, a.Symbol)
 			preview.StockEligibility = &stock
-			if a.RiskEntry && !a.RiskShort && stock.FractionalPaper && stock.Tradable != nil && *stock.Tradable && stock.Fractionable != nil && *stock.Fractionable {
+			if a.RiskEntry && !a.RiskShort && stock.FractionalStockOrders && stock.Tradable != nil && *stock.Tradable && stock.Fractionable != nil && *stock.Fractionable {
 				extended := stock.FractionalEHEnabled != nil && *stock.FractionalEHEnabled
 				if a.SharedStopSession == wsmsg.OrderSession("RTH") || (a.SharedStopSession == "" && !extended) {
 					if preview.Phase == "rth" {
@@ -346,7 +346,7 @@ func canonicalEligibilitySymbol(symbol string) string {
 
 func (q *queries) queryVenueInstrumentEligibility(ctx context.Context, venue, symbol string) wsmsg.VenueInstrumentEligibility {
 	value := q.cachedVenueInstrumentEligibility(ctx, venue, symbol)
-	if value.Fractionable == nil && !value.FractionalPaper {
+	if value.Fractionable == nil && !value.FractionalStockOrders {
 		return value
 	}
 	now := q.clk.Now()
@@ -420,7 +420,7 @@ func (q *queries) fetchVenueInstrumentEligibility(ctx context.Context, key venue
 	return wsmsg.VenueInstrumentEligibility{
 		Supported: true, Found: found,
 		Shortable: value.Shortable, Marginable: value.Marginable, Tradable: value.Tradable,
-		Fractionable: value.Fractionable, FractionalEHEnabled: value.FractionalEHEnabled, FractionalPaper: value.FractionalPaper,
+		Fractionable: value.Fractionable, FractionalEHEnabled: value.FractionalEHEnabled, FractionalStockOrders: value.FractionalStockOrders,
 	}
 }
 

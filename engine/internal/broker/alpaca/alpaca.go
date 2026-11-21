@@ -84,7 +84,6 @@ type AssetStatus struct {
 // state machine (replaceState/idByDomain/replacing), since Alpaca's native
 // PATCH replace needs none of that (see the package doc).
 type Adapter struct {
-	paper bool
 	venue exec.VenueID
 	clk   clock.Clock
 
@@ -202,7 +201,6 @@ func New(cfg Config) (*Adapter, error) {
 
 	a := &Adapter{
 		venue:              cfg.Venue,
-		paper:              !live,
 		clk:                clk,
 		events:             make(chan exec.BrokerEvent, 256),
 		seenExecIDs:        map[string]bool{},
@@ -314,11 +312,11 @@ func (a *Adapter) AssetStatus(symbol string) (AssetStatus, bool) {
 func (a *Adapter) VenueInstrumentEligibility(_ context.Context, symbol string) (eligibility.Eligibility, bool, error) {
 	status, ok := a.AssetStatus(symbol)
 	if !ok {
-		return eligibility.Eligibility{FractionalPaper: a.paper}, false, nil
+		return eligibility.Eligibility{FractionalStockOrders: true}, false, nil
 	}
 	return eligibility.Eligibility{
 		Shortable: status.Shortable, Marginable: status.Marginable, Tradable: status.Tradable,
-		Fractionable: status.Fractionable, FractionalEHEnabled: status.FractionalEHEnabled, FractionalPaper: a.paper,
+		Fractionable: status.Fractionable, FractionalEHEnabled: status.FractionalEHEnabled, FractionalStockOrders: true,
 	}, true, nil
 }
 
