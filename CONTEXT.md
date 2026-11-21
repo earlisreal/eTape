@@ -39,7 +39,7 @@ _Avoid_: Active venue, global broker
 ## Venue Eligibility
 
 **Venue Instrument Eligibility**:
-A selected Execution Venue's asset-level classification of whether a symbol is Tradable, Marginable, or Shortable. It does not express immediate order readiness or account-level permission.
+A selected Execution Venue's asset-level classification of a symbol as Tradable, Marginable, Shortable, or Fractionable. Specific orders also depend on session, account, and risk rules.
 _Avoid_: Order readiness, trading permission, asset status
 
 **Tradable**:
@@ -53,6 +53,10 @@ _Avoid_: Margin-enabled account, margin available
 **Shortable**:
 A Venue Instrument Eligibility state indicating that the selected Execution Venue classifies the symbol as eligible for short selling. It does not indicate current borrow availability, locate status, or authorization to submit a short order.
 _Avoid_: Borrowable, easy to borrow, short-authorized
+
+**Fractionable**:
+A Venue Instrument Eligibility state indicating that the selected Execution Venue classifies the stock as eligible for fractional-share quantities. The order's side, type, and session determine how it can use that eligibility.
+_Avoid_: Fractional trading permission
 
 ## Positions
 
