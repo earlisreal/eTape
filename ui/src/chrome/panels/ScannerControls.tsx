@@ -41,13 +41,15 @@ export function ScannerHeader({ title, context, muted, onMute, filtersOpen, onFi
 export function ScannerSyncControl({ sync, sourceLabel = "Monitoring source", sourceName = "Scanner" }: {
   sync: NonNullable<PanelProps["scannerSync"]>;
   sourceLabel?: string;
-  sourceName?: "Scanner" | "List";
+  sourceName?: "Scanner" | "List" | "Watchlist";
 }): JSX.Element {
   const { status } = sync;
-  const toggleLabel = sync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync";
+  const syncName = sourceName === "Watchlist" ? "Watchlist Sync" : "Scanner Sync";
+  const toggleLabel = `${sync.enabled ? "Disable" : "Enable"} ${syncName}`;
+  const waitingForWatchlist = sourceName === "Watchlist" && status.kind === "paused" && status.reason === "source";
   const statusText = (sync.statusVisible ?? sync.selected) && status.kind !== "disabled"
     && (status.targetCount > 0 || status.kind === "paused")
-    ? status.kind === "paused" ? "Paused" : `${status.availableCount}/${status.targetCount}`
+    ? waitingForWatchlist ? "Waiting for Watchlist" : status.kind === "paused" ? "Paused" : `${status.availableCount}/${status.targetCount}`
     : null;
   return (
     <div className="scanner-sync" data-testid="scanner-sync-control">
@@ -66,7 +68,7 @@ export function ScannerSyncControl({ sync, sourceLabel = "Monitoring source", so
           title={`Use this ${sourceName} as the Monitoring Source`} onClick={sync.onSelect}>Use this {sourceName}</button>
       </>}
       {statusText && <span className="mono scanner-sync-status" aria-live="polite"
-        title={scannerSyncStatusText(status)}>{statusText}</span>}
+        title={waitingForWatchlist ? "Waiting for Watchlist" : scannerSyncStatusText(status)}>{statusText}</span>}
     </div>
   );
 }

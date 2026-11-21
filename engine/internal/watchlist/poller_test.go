@@ -2,6 +2,7 @@ package watchlist
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -65,12 +66,16 @@ func (p *pub) snapshot() []struct {
 // fakeReq returns a canned snapshot for the requested codes; retType controls
 // a whole-batch application failure to exercise binary split.
 type fakeReq struct {
-	calls   int
-	failAll bool
+	calls     int
+	failAll   bool
+	onRequest func()
 }
 
 func (r *fakeReq) Request(ctx context.Context, protoID uint32, req proto.Message) (opend.Frame, error) {
 	r.calls++
+	if r.onRequest != nil {
+		r.onRequest()
+	}
 	in := req.(*snappb.Request)
 	var resp snappb.Response
 	if r.failAll {
@@ -117,6 +122,22 @@ func (r *fakeReq) Request(ctx context.Context, protoID uint32, req proto.Message
 // Direct-call idiom (no Run/ticker involved), matching scan_test.go's
 // p.pollOnce(...) and stockinfo_test.go's p.fetchSnapshots(...) style — fast,
 // deterministic, no goroutine/sleep races.
+
+func TestQuoteCompletionUsesLatestMembershipOrder(t *testing.T) {
+	l, _ := NewList(newFakeStore())
+	l.Seed([]string{"AAPL", "MSFT"})
+	pb := &pub{}
+	r := &fakeReq{onRequest: func() {
+		if moved, err := l.Move("MSFT", "AAPL", "before"); err != nil || !moved {
+			t.Fatalf("Move during request: moved=%v err=%v", moved, err)
+		}
+	}}
+	p := New(l, r, pb, clock.NewFake(time.Unix(0, 0)), time.Second)
+	p.pollAndPublish(context.Background())
+	if got := pb.last().Symbols; !slices.Equal(got, []string{"US.MSFT", "US.AAPL"}) {
+		t.Fatalf("published order: %v", got)
+	}
+}
 
 func TestEmptyListPublishesButZeroRequests(t *testing.T) {
 	st := newFakeStore()

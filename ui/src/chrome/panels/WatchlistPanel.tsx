@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
-import type { WatchlistRow } from "../../gen/wsmsg";
+import { ScannerSyncControl } from "./ScannerControls";
+import type { WatchlistMoveArgs, WatchlistRow } from "../../gen/wsmsg";
 import { useTheme } from "../ThemeProvider";
 import { FONTS } from "../../render/palette";
 import { formatPrice, quoteDecimals } from "../../render/format";
@@ -42,7 +43,7 @@ function toRowView(symbol: string, row: WatchlistRow | undefined): WatchlistRowV
   return { symbol, last: row.last, changePct: row.changePct, volume: row.volume };
 }
 
-export function WatchlistPanel({ config, stores, linkGroups, commands, group: groupProp }: PanelProps): JSX.Element {
+export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSync, group: groupProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   // config.group is frozen at panel creation (dockview never re-invokes the panel
   // factory with a fresh config after a later swatch re-pick) — PanelFrame threads
@@ -51,6 +52,7 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
   const group = groupProp === undefined ? config.group : groupProp;
   const toast = useToasts();
   const snap = useSyncExternalStore((cb) => stores.watchlist.subscribe(cb), () => stores.watchlist.getSnapshot());
+  const draggedSymbol = useRef<string | null>(null);
   const [sort, setSort] = useState<SortState>(null);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
@@ -72,6 +74,16 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
     const views = snap.symbols.map((sym) => toRowView(sym, snap.rows.get(sym)));
     return sortRows(views, sort, SORT_ACCESSORS);
   }, [snap.symbols, snap.rows, sort]);
+
+  const move = (symbol: string, target: string | undefined, position: "before" | "after") => {
+    if (!target || symbol === target) return;
+    const args: WatchlistMoveArgs = { symbol, target, position };
+    void commands.sendCommand("WatchlistMove", args).then((ack) => {
+      if (ack.status !== "accepted") {
+        toast.push({ level: "warn", text: ack.reason ?? "Could not move Watchlist symbol." });
+      }
+    });
+  };
 
   const clickSort = (col: string) => setSort((s) => toggleSort(s, col));
 
@@ -107,21 +119,27 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
     />
   );
 
+  const following = scannerSync && <ScannerSyncControl sync={scannerSync} sourceName="Watchlist" />;
+
   if (snap.symbols.length === 0) {
     return (
-      <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12,
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 16 }}>
-        <span style={{ color: palette.textMuted }}>Add a symbol to start your watchlist</span>
-        {!group && <span>Choose a Link Group color to load symbols.</span>}
-        {addInput}
+      <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
+        {following}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: 16 }}>
+          <span style={{ color: palette.textMuted }}>Add a symbol to start your watchlist</span>
+          {!group && <span>Choose a Link Group color to load symbols.</span>}
+          {addInput}
+        </div>
       </div>
     );
   }
 
   return (
     <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}` }}>
+      {following}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}` }}>
         {addInput}
+        {sort && <button type="button" onClick={() => setSort(null)}>Manual order</button>}
       </div>
       {!group && <p style={{ padding: "0 8px" }}>Choose a Link Group color to load symbols.</p>}
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -136,10 +154,24 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => {
+          {rows.map((r, index) => {
             const selected = r.symbol === selectedSymbol;
             return (
               <tr key={r.symbol}
+                onDragOver={(event) => {
+                  if (!sort && draggedSymbol.current && draggedSymbol.current !== r.symbol) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                  }
+                }}
+                onDrop={(event) => {
+                  const source = draggedSymbol.current;
+                  if (sort || !source) return;
+                  event.preventDefault();
+                  draggedSymbol.current = null;
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  move(source, r.symbol, event.clientY < bounds.top + bounds.height / 2 ? "before" : "after");
+                }}
                 onClick={() => setSelectedSymbol(r.symbol)}
                 onDoubleClick={() => { if (group) linkGroups.focus(group, r.symbol); }}
                 onContextMenu={(e) => { e.preventDefault(); setMenu({ clientX: e.clientX, clientY: e.clientY, symbol: r.symbol }); }}
@@ -149,7 +181,24 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
                   background: selected ? "rgba(154,106,27,.16)" : hoveredSymbol === r.symbol ? "rgba(154,106,27,.06)" : "transparent",
                   boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : "none",
                   transition: "background 120ms ease" }}>
-                <td style={symCell}>{bareSymbol(r.symbol)}</td>
+                <td style={symCell}>
+                  {!sort && <span style={{ display: "inline-flex", alignItems: "center", gap: 2, marginRight: 4 }}
+                    onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+                    <span draggable title={`Drag ${bareSymbol(r.symbol)} to reorder`} aria-hidden="true"
+                      style={{ cursor: "grab", color: palette.textMuted, padding: "0 2px" }}
+                      onDragStart={(event) => {
+                        draggedSymbol.current = r.symbol;
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", r.symbol);
+                      }}
+                      onDragEnd={() => { draggedSymbol.current = null; }}>⠿</span>
+                    <button type="button" disabled={index === 0} aria-label={`Move ${bareSymbol(r.symbol)} up`}
+                      onClick={() => move(r.symbol, snap.symbols[index - 1], "before")}>↑</button>
+                    <button type="button" disabled={index === rows.length - 1} aria-label={`Move ${bareSymbol(r.symbol)} down`}
+                      onClick={() => move(r.symbol, snap.symbols[index + 1], "after")}>↓</button>
+                  </span>}
+                  <span>{bareSymbol(r.symbol)}</span>
+                </td>
                 <td style={{ ...numCell, opacity: stale ? 0.55 : 1 }}>{r.last === null ? "—" : formatPrice(r.last, quoteDecimals(r.last, 2))}</td>
                 <td style={{ ...numCell, opacity: stale ? 0.55 : 1,
                   color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>

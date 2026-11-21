@@ -247,7 +247,9 @@ export function PanelFrame(
   // hysteresis window). DemandRegistry dedupes an unchanged symbol, so this
   // fires no redundant command when the pinned commit path already ensured.
   useEffect(() => {
-    if (!demandProfile || !rawSymbol) return;
+    if (!demandProfile) return;
+    if (rawSymbol === "") demandRegistry.release(config.id);
+    if (!rawSymbol) return;
     demandRegistry.ensure(config.id, rawSymbol, demandProfile).then(
       (ack) => {
         if (ack.status !== "accepted") {
@@ -442,9 +444,9 @@ export function PanelFrame(
   const handleGroupPick = (g: LinkGroup) => {
     // Detaching keeps the symbol the panel is showing now, not the stale
     // creation-time settings.symbol that happened to exist before it linked.
-    if (g === null && group !== null && rawSymbol) {
-      panelSymbols?.set(config.id, rawSymbol);
-      onConfigChange({ symbol: rawSymbol });
+    if (g === null && group !== null) {
+      panelSymbols?.set(config.id, rawSymbol ?? "");
+      onConfigChange({ symbol: rawSymbol ?? "" });
     }
     if (g !== null) panelSymbols?.clear(config.id);
     setGroup(g);

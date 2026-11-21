@@ -618,6 +618,12 @@ type WatchlistRemoveArgs struct {
 	Symbol string `json:"symbol"`
 }
 
+type WatchlistMoveArgs struct {
+	Symbol   string `json:"symbol"`
+	Target   string `json:"target"`
+	Position string `json:"position"`
+}
+
 // StockDetailPayload is the snapshot for the stock.detail topic: fundamentals
 // for the Stock Info panel. Nullable numerics follow the ScannerRow
 // convention (`*float64` + tstype) — null means moomoo hasn't returned a

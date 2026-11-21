@@ -85,7 +85,7 @@ The eTape-tracked profit or loss from completed local trade cycles, retained aft
 _Avoid_: Broker Day P&L
 
 **Monitoring Workspace**:
-eTape's reserved workspace for following Scanner rankings with Chart Panels. It cannot be renamed or deleted, while its Panel Groups remain user-editable.
+eTape's reserved stock workspace for following Scanner rankings or the shared Watchlist with Chart Panels. It cannot be renamed or deleted, while its Panel Groups remain user-editable.
 _Avoid_: Monitoring window, monitoring layout
 
 **Scanner Sync**:
@@ -94,11 +94,11 @@ The Scanner Source's selected sort order, including Relative Volume (Daily Rate)
 _Avoid_: Auto load, scanner auto-refresh
 
 **Unassigned Chart Panel**:
-A pinned Chart Panel with no current symbol. In a Monitoring Workspace it displays “Waiting for Scanner Sync” until Scanner Sync assigns it a ranked symbol.
+A pinned Chart Panel with no current symbol. In a Monitoring Workspace it displays “Waiting for Following” until the selected source supplies a symbol or the trader assigns one.
 _Avoid_: Blank chart, default chart
 
 **Layout-only Export**:
-A portable Workspace Layout export that preserves panel arrangement, panel settings unrelated to symbol selection, Link Group membership, and Scanner Sync's enabled intent, but omits every panel symbol, every Link Group focused symbol, and the non-portable Scanner Source reference. An imported enabled Scanner Sync is paused until its user selects a Scanner Source. It never alters an already saved Workspace.
+A portable Workspace Layout export that preserves panel arrangement, panel settings unrelated to symbol selection, Link Group membership, and Following's enabled intent. An imported enabled setting pauses until the trader selects Watchlist or a Scanner.
 _Avoid_: Workspace backup, symbol-free preset
 
 **Scanner Panel**:
@@ -116,6 +116,9 @@ _Avoid_: Daily volume ranking, most-active movers
 **Scanner Source**:
 The Scanner Panel, in any Workspace, explicitly selected to drive Scanner Sync for the Monitoring Workspace. Only one Scanner Source is active at a time. Its identity survives closing its host window; deleting it pauses Scanner Sync.
 _Avoid_: Active scanner, selected scanner
+
+**Watchlist Following**:
+The Monitoring Workspace mode driven by the shared Watchlist's saved manual order. It takes as many symbols from the top of the list as there are pinned Chart Panels. It keeps still-eligible symbols in their chart slots and clears surplus slots after membership arrives. The Watchlist and Scanner are alternate sources for the same charts.
 
 **Scanner Sound**:
 An audible cue emitted by an open workspace window when one of its unmuted Scanner Panels reports a new hit. Multiple eligible Scanner Panels in one window produce one cue; separate windows may each produce a cue. Silent intervals never replay.

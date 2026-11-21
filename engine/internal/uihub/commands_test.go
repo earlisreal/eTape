@@ -1063,6 +1063,8 @@ func (f *fakeWL) Remove(symbol string) bool {
 	return f.removed
 }
 
+func (f *fakeWL) Move(_, _, _ string) error { return nil }
+
 func (f *fakeWL) Poke() { f.poked++ }
 
 // TestWatchlistAdd_ProbeRejectionBlocks covers the existence-probe guard

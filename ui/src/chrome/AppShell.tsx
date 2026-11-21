@@ -117,6 +117,21 @@ async function migrateScannerSettings(workspace: Workspace, commands: PanelProps
   };
 }
 
+function monitoringSlots(current: Workspace | null) {
+  const panelsById = new Map(current?.panels.map((panel) => [panel.id, panel]) ?? []);
+  const layoutOrder = orderedPanelIds(current?.layout);
+  const panelOrder = [...layoutOrder, ...(current?.panels.map((panel) => panel.id) ?? [])];
+  const seenPanels = new Set<string>();
+  return panelOrder.flatMap((id) => {
+    if (seenPanels.has(id)) return [];
+    seenPanels.add(id);
+    const panel = panelsById.get(id);
+    return panel?.panelId === "chart" && panel.group === null
+      ? [{ id: panel.id, symbol: typeof panel.settings.symbol === "string" ? panel.settings.symbol : undefined }]
+      : [];
+  });
+}
+
 export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, demandRegistry, commands, engineState, hotkeyTargetChannel, onTransitionApplied }: Props): JSX.Element {
   const [ws, setWs] = useState<Workspace | null>(null);
   const [sourceWorkspace, setSourceWorkspace] = useState<Workspace | null>(null);
@@ -213,42 +228,36 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     syncConfigRef.current = next;
     setSyncConfig(next);
   }, []);
-  const persistMonitoringSync = useCallback((nextSync: ScannerSyncConfig) => {
-    const save = (current: Workspace) => {
-      const next = { ...current, scannerSync: nextSync };
-      monitoringWorkspaceRef.current = next;
-      if (workspaceName === MONITORING_WORKSPACE_ID) {
-        wsRef.current = next;
-        setWs(next);
-      }
-      workspaceStore.save(next);
-    };
-    if (workspaceName === MONITORING_WORKSPACE_ID) {
+  const updateMonitoringSync = useCallback((update: (current: ScannerSyncConfig | undefined) => ScannerSyncConfig | undefined) => {
+    void workspaceStore.updateMonitoringSync(buildMonitoringWorkspace(), update).then((saved) => {
+      const next = saved.scannerSync;
+      monitoringWorkspaceRef.current = saved;
+      observeScannerSync(next);
       const current = wsRef.current;
-      if (current) save(current);
-      return;
-    }
-    const current = monitoringWorkspaceRef.current;
-    if (current) save(current);
-    else void workspaceStore.load(MONITORING_WORKSPACE_ID).then(save);
-  }, [workspaceName, workspaceStore]);
-  const updateScannerSync = useCallback((patch: Partial<ScannerSyncConfig>) => {
-    const merged = { ...(syncConfigRef.current ?? { enabled: false }), ...patch };
-    const next = merged.sourcePanelId && !merged.sourceWorkspaceId
-      ? { ...merged, sourceWorkspaceId: MONITORING_WORKSPACE_ID }
-      : merged;
-    observeScannerSync(next);
-    persistMonitoringSync(next);
-  }, [observeScannerSync, persistMonitoringSync]);
+      if (workspaceName === MONITORING_WORKSPACE_ID && current && next) {
+        wsRef.current = { ...current, scannerSync: next };
+        setWs(wsRef.current);
+      }
+    }).catch((error: unknown) => {
+      toast.push({ level: "warn", text: error instanceof Error ? error.message : "Could not save Monitoring source." });
+    });
+  }, [observeScannerSync, toast, workspaceName, workspaceStore]);
   const selectScannerSource = useCallback((panelId: string) => {
-    updateScannerSync({ enabled: true, sourceWorkspaceId: workspaceName, sourcePanelId: panelId });
-  }, [updateScannerSync, workspaceName]);
-  const toggleScannerSync = useCallback(() => {
-    const current = syncConfigRef.current;
-    const sourceId = current?.sourceWorkspaceId ?? MONITORING_WORKSPACE_ID;
-    if (!current || !current.sourcePanelId || sourceId !== workspaceName) return;
-    updateScannerSync({ enabled: !current.enabled });
-  }, [updateScannerSync, workspaceName]);
+    updateMonitoringSync(() => ({ enabled: true, sourceWorkspaceId: workspaceName, sourcePanelId: panelId }));
+  }, [updateMonitoringSync, workspaceName]);
+  const selectWatchlistSource = useCallback(() => {
+    updateMonitoringSync(() => ({ enabled: true, sourceKind: "watchlist" }));
+  }, [updateMonitoringSync]);
+  const toggleWatchlistSync = useCallback(() => {
+    updateMonitoringSync((current) => current?.sourceKind === "watchlist"
+      ? { ...current, enabled: !current.enabled } : undefined);
+  }, [updateMonitoringSync]);
+  const toggleScannerSync = useCallback((panelId: string) => {
+    updateMonitoringSync((current) => current?.sourceKind !== "watchlist"
+      && current?.sourcePanelId === panelId
+      && (current.sourceWorkspaceId ?? MONITORING_WORKSPACE_ID) === workspaceName
+      ? { ...current, enabled: !current.enabled } : undefined);
+  }, [updateMonitoringSync, workspaceName]);
   useEffect(() => {
     let alive = true;
     setWs(null);
@@ -287,17 +296,19 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       if (!alive) return;
       monitoringWorkspaceRef.current = w;
       observeScannerSync(w.scannerSync);
-      if (workspaceName === MONITORING_WORKSPACE_ID) {
-        linkGroups.hydrate(w.groups ?? {}, w.linkMarkets);
-        linkGroups.hydrateVenues(w.linkVenues ?? {});
-        wsRef.current = w;
-        setWs(w);
+      if (workspaceName === MONITORING_WORKSPACE_ID && wsRef.current) {
+        // Source controls live in other windows. Keep this window's pending layout edits.
+        const next = { ...wsRef.current };
+        delete next.scannerSync;
+        if (w.scannerSync) next.scannerSync = w.scannerSync;
+        wsRef.current = next;
+        setWs(next);
       }
     });
     const unwatch = workspaceStore.watch(MONITORING_WORKSPACE_ID, refresh);
     if (workspaceName !== MONITORING_WORKSPACE_ID) refresh();
     return () => { alive = false; unwatch(); };
-  }, [workspaceName, workspaceStore, linkGroups, observeScannerSync, commands]);
+  }, [workspaceName, workspaceStore, observeScannerSync, commands]);
   useEffect(() => {
     const sourceId = syncConfig?.sourceWorkspaceId ?? MONITORING_WORKSPACE_ID;
     if (!syncConfig?.sourcePanelId || sourceId === MONITORING_WORKSPACE_ID) {
@@ -667,27 +678,33 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     () => stores.scanner.getSnapshot(),
     () => stores.scanner.getSnapshot(),
   );
+  const watchlistSelected = syncConfig?.sourceKind === "watchlist";
+  const watchlistSymbols = useSyncExternalStore(
+    (cb) => watchlistSelected ? stores.watchlist.subscribe(cb) : () => {},
+    () => {
+      const snapshot = stores.watchlist.getSnapshot();
+      return watchlistSelected && snapshot.received ? snapshot.symbols : null;
+    },
+  );
   const sourceWorkspaceId = syncConfig?.sourceWorkspaceId ?? MONITORING_WORKSPACE_ID;
   const selectedSourceWorkspace = sourceWorkspaceId === MONITORING_WORKSPACE_ID ? ws : sourceWorkspace;
-  const selectedSource = selectedSourceWorkspace?.panels.find((panel) =>
+  const selectedSource = watchlistSelected ? undefined : selectedSourceWorkspace?.panels.find((panel) =>
     panel.id === syncConfig?.sourcePanelId && panel.panelId === "scanner");
   const selectedSourceScannerId = selectedSource ? `${sourceWorkspaceId}/${selectedSource.id}` : "legacy";
   const scannerView = useMemo(() => stores.scanner.currentView(selectedSourceScannerId), [scannerSnapshot, stores.scanner, selectedSourceScannerId]);
   const scannerPlan = useMemo<ScannerSyncPlan>(() => {
     const current = ws;
     const sync = syncConfig;
-    const panelsById = new Map(current?.panels.map((panel) => [panel.id, panel]) ?? []);
-    const layoutOrder = orderedPanelIds(current?.layout);
-    const panelOrder = [...layoutOrder, ...(current?.panels.map((panel) => panel.id) ?? [])];
-    const seenPanels = new Set<string>();
-    const slots = workspaceName === MONITORING_WORKSPACE_ID ? panelOrder.flatMap((id) => {
-      if (seenPanels.has(id)) return [];
-      seenPanels.add(id);
-      const panel = panelsById.get(id);
-      return panel?.panelId === "chart" && panel.group === null
-        ? [{ id: panel.id, symbol: typeof panel.settings.symbol === "string" ? panel.settings.symbol : undefined }]
-        : [];
-    }) : [];
+    const slots = workspaceName === MONITORING_WORKSPACE_ID ? monitoringSlots(current) : [];
+    if (watchlistSelected) {
+      return planScannerSync({
+        slots: workspaceName === MONITORING_WORKSPACE_ID ? slots : monitoringSlots(monitoringWorkspaceRef.current),
+        rankedSymbols: watchlistSymbols ?? [],
+        enabled: sync?.enabled === true,
+        sourceAvailable: engineState === "open" && watchlistSymbols !== null,
+        clearUnmatched: true,
+      });
+    }
     const rankedSymbols = selectedSource
       ? rankScannerRows(scannerView.rows, readScannerSort(selectedSource.settings)).map((row) => row.symbol)
       : [];
@@ -697,7 +714,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       enabled: workspaceName === MONITORING_WORKSPACE_ID && sync?.enabled === true,
       sourceAvailable: selectedSource !== undefined,
     });
-  }, [scannerView, selectedSource, syncConfig, workspaceName, ws]);
+  }, [engineState, scannerView, selectedSource, syncConfig, watchlistSymbols, watchlistSelected, workspaceName, ws]);
 
   const scannerRegistration = useMemo(() => {
     if (!ws) return null;
@@ -740,10 +757,23 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const applyScannerPlan = useCallback((plan: ScannerSyncPlan) => {
     if (workspaceName !== MONITORING_WORKSPACE_ID || plan.patches.length === 0) return;
     const current = wsRef.current;
-    if (!current?.scannerSync?.enabled || !current.scannerSync.sourcePanelId) return;
-    const sourceId = current.scannerSync.sourceWorkspaceId ?? MONITORING_WORKSPACE_ID;
-    const sourceDoc = sourceId === MONITORING_WORKSPACE_ID ? current : sourceWorkspaceRef.current;
-    if (!sourceDoc?.panels.some((panel) => panel.id === current.scannerSync?.sourcePanelId && panel.panelId === "scanner")) return;
+    const sync = syncConfigRef.current;
+    if (!current || !sync?.enabled || sync !== syncConfig) return;
+    if (sync.sourceKind === "watchlist") {
+      const snapshot = stores.watchlist.getSnapshot();
+      if (engineState !== "open" || !snapshot.received) return;
+      plan = planScannerSync({
+        slots: monitoringSlots(current),
+        rankedSymbols: snapshot.symbols,
+        enabled: true,
+        sourceAvailable: true,
+        clearUnmatched: true,
+      });
+    } else {
+      const sourceId = sync.sourceWorkspaceId ?? MONITORING_WORKSPACE_ID;
+      const sourceDoc = sourceId === MONITORING_WORKSPACE_ID ? current : sourceWorkspaceRef.current;
+      if (!sourceDoc?.panels.some((panel) => panel.id === sync.sourcePanelId && panel.panelId === "scanner")) return;
+    }
     const patches = new Map(plan.patches.map((patch) => [patch.slotId, patch.symbol]));
     let changed = false;
     const panels = current.panels.map((panel) => {
@@ -751,29 +781,33 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       if (symbol === undefined || panel.panelId !== "chart" || panel.group !== null || panel.settings.symbol === symbol) return panel;
       changed = true;
       panelSymbols.set(panel.id, symbol);
-      return { ...panel, settings: { ...panel.settings, symbol } };
+      const settings = { ...panel.settings };
+      if (symbol) settings.symbol = symbol;
+      else delete settings.symbol;
+      return { ...panel, settings };
     });
     if (!changed) return;
     const next = { ...current, panels };
     wsRef.current = next;
     setWs(next);
     workspaceStore.save(next);
-  }, [panelSymbols, sourceWorkspace, workspaceName, workspaceStore]);
+  }, [engineState, panelSymbols, stores.watchlist, syncConfig, workspaceName, workspaceStore]);
   const scannerPlanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingScannerPlanRef = useRef<ScannerSyncPlan | null>(null);
+  const pendingScannerPlanRef = useRef<(() => void) | null>(null);
   const lastScannerPlanAtRef = useRef(0);
   useEffect(() => {
     if (workspaceName !== MONITORING_WORKSPACE_ID || !ws) return;
-    pendingScannerPlanRef.current = scannerPlan;
+    pendingScannerPlanRef.current = scannerPlan.patches.length > 0
+      ? () => applyScannerPlan(scannerPlan) : null;
     if (scannerPlanTimerRef.current !== null) return;
     const wait = Math.max(0, 1000 - (Date.now() - lastScannerPlanAtRef.current));
     scannerPlanTimerRef.current = setTimeout(() => {
       scannerPlanTimerRef.current = null;
       const pending = pendingScannerPlanRef.current;
       pendingScannerPlanRef.current = null;
-      if (!pending || pending.patches.length === 0) return;
+      if (!pending) return;
       lastScannerPlanAtRef.current = Date.now();
-      applyScannerPlan(pending);
+      pending();
     }, wait);
   }, [applyScannerPlan, scannerPlan, workspaceName, ws]);
   useEffect(() => () => {
@@ -787,23 +821,33 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       const sync = syncConfig;
       const sourceId = sync?.sourceWorkspaceId ?? MONITORING_WORKSPACE_ID;
       for (const panel of ws.panels) {
+        if (panel.panelId === "watchlist") {
+          next.set(panel.id, {
+            selected: watchlistSelected,
+            enabled: watchlistSelected && sync?.enabled === true,
+            status: scannerPlan.status,
+            onSelect: selectWatchlistSource,
+            onToggle: toggleWatchlistSync,
+          });
+          continue;
+        }
         if (panel.panelId !== "scanner") continue;
-        const selected = sourceId === workspaceName
+        const selected = !watchlistSelected && sourceId === workspaceName
           && sync?.sourcePanelId === panel.id;
         next.set(panel.id, {
           selected,
           enabled: selected && sync?.enabled === true,
-          status: workspaceName === MONITORING_WORKSPACE_ID && sync?.enabled === true
+          status: !watchlistSelected && workspaceName === MONITORING_WORKSPACE_ID && sync?.enabled === true
             ? scannerPlan.status
             : { kind: selected && sync?.enabled === true ? "following" : "disabled", availableCount: 0, targetCount: 0 },
-          statusVisible: workspaceName === MONITORING_WORKSPACE_ID && sync?.enabled === true,
+          statusVisible: !watchlistSelected && workspaceName === MONITORING_WORKSPACE_ID && sync?.enabled === true,
           onSelect: () => selectScannerSource(panel.id),
-          onToggle: toggleScannerSync,
+          onToggle: () => toggleScannerSync(panel.id),
         });
       }
     }
     scannerSyncRuntime.replace(next);
-  }, [scannerPlan, scannerSyncRuntime, selectScannerSource, syncConfig, toggleScannerSync, workspaceName, ws]);
+  }, [scannerPlan, scannerSyncRuntime, selectScannerSource, selectWatchlistSource, syncConfig, toggleScannerSync, toggleWatchlistSync, watchlistSelected, workspaceName, ws]);
 
   // A stable per-panel onConfigChange MERGES a settings patch into
   // ws.panels[i].settings then saves. Merge, not replace: the panels below and
@@ -953,7 +997,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     setWs(next);
     wsRef.current = next;
     alertNavigation.sync(next.panels);
-    workspaceStore.save(next);
+    workspaceStore.save(next, true);
     // next.panels.length === 0 is deliberately excluded: the render right
     // after this setWs swaps <DockviewReact> out for <EmptyState> (same
     // ternary addPanel's comment above references for the reverse case),

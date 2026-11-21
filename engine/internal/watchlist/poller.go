@@ -38,6 +38,7 @@ type Poller struct {
 	clk      clock.Clock
 	interval time.Duration
 	poke     chan struct{}
+	moved    chan struct{}
 	rows     map[string]wsmsg.WatchlistRow // last-known row per symbol (cache)
 	lastRef  *string                       // RFC3339 of last successful poll; nil until first
 }
@@ -48,8 +49,9 @@ func New(list *List, r requester, pub Publisher, clk clock.Clock, interval time.
 	}
 	return &Poller{
 		list: list, r: r, pub: pub, clk: clk, interval: interval,
-		poke: make(chan struct{}, 1),
-		rows: map[string]wsmsg.WatchlistRow{},
+		poke:  make(chan struct{}, 1),
+		moved: make(chan struct{}, 1),
+		rows:  map[string]wsmsg.WatchlistRow{},
 	}
 }
 
@@ -68,6 +70,8 @@ func (p *Poller) Run(ctx context.Context) error {
 		case <-p.poke:
 			p.publishMembership() // instant: new symbols appear as dashes, removed vanish
 			p.pollAndPublish(ctx) // then fresh data
+		case <-p.moved:
+			p.publishMembership()
 		}
 	}
 }
@@ -76,6 +80,14 @@ func (p *Poller) Run(ctx context.Context) error {
 func (p *Poller) Poke() {
 	select {
 	case p.poke <- struct{}{}:
+	default:
+	}
+}
+
+// MembershipMoved publishes the new order using cached quote rows.
+func (p *Poller) MembershipMoved() {
+	select {
+	case p.moved <- struct{}{}:
 	default:
 	}
 }
@@ -109,7 +121,7 @@ func (p *Poller) pollAndPublish(ctx context.Context) {
 		ref := p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 		p.lastRef = &ref
 	}
-	p.pub.Publish(wsmsg.TopicWatchlistRows, watchlistKey, p.buildPayload(syms))
+	p.publishMembership()
 }
 
 // buildPayload assembles the snapshot: Symbols is always the full membership;

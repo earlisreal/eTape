@@ -326,8 +326,14 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || !symbol) return;
     ownSymbolRef.current = symbol;
+    if (!symbol) {
+      setChartSymbol("");
+      setSelection(null);
+      setMenu(null);
+      return;
+    }
+    if (!host) return;
     viewportModeRef.current = "live";
     const chart = createChart(host, { width, height });
     positionOrderPillLayer(host);
@@ -1365,7 +1371,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           )}
         </> : (
           <div data-testid="chart-empty-state" style={{ height: "100%", display: "grid", placeItems: "center", color: chrome.muted, fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 12 }}>
-            {monitoring ? "Waiting for Scanner Sync" : "Type a symbol to load"}
+            {monitoring ? "Waiting for Following" : "Type a symbol to load"}
           </div>
         )}
       </div>

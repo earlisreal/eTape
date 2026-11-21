@@ -3,6 +3,7 @@ package watchlist
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -19,6 +20,31 @@ func (f *fakeStore) GetConfig(key string) (string, bool, error) {
 }
 func (f *fakeStore) SetConfig(key, value string) { f.kv[key] = value }
 func (f *fakeStore) Flush()                      { f.flushes++ }
+
+func TestMoveKeepsMembershipAndPersistsOrder(t *testing.T) {
+	st := newFakeStore()
+	l, _ := NewList(st)
+	l.Seed([]string{"AAPL", "MSFT", "NVDA"})
+	if changed, err := l.Move("NVDA", "AAPL", "before"); err != nil || !changed {
+		t.Fatalf("Move: changed=%v err=%v", changed, err)
+	}
+	if changed, err := l.Move("NVDA", "AAPL", "before"); err != nil || changed {
+		t.Fatalf("repeated move: changed=%v err=%v", changed, err)
+	}
+	if _, err := l.Move("AAPL", "TSLA", "after"); err == nil {
+		t.Fatal("missing anchor should be rejected")
+	}
+	if changed, err := l.Move("AAPL", "MSFT", "after"); err != nil || !changed {
+		t.Fatalf("move to end: changed=%v err=%v", changed, err)
+	}
+	reloaded, err := NewList(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.Symbols(); !slices.Equal(got, []string{"US.NVDA", "US.MSFT", "US.AAPL"}) {
+		t.Fatalf("reloaded order: %v", got)
+	}
+}
 
 func TestNewListEmptyWhenAbsent(t *testing.T) {
 	l, err := NewList(newFakeStore())

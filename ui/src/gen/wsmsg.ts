@@ -681,6 +681,11 @@ export interface WatchlistAddArgs {
 export interface WatchlistRemoveArgs {
   symbol: string;
 }
+export interface WatchlistMoveArgs {
+  symbol: string;
+  target: string;
+  position: string;
+}
 /**
  * StockDetailPayload is the snapshot for the stock.detail topic: fundamentals
  * for the Stock Info panel. Nullable numerics follow the ScannerRow

@@ -111,3 +111,21 @@ describe("readScannerSort", () => {
 		expect(readScannerSort({ sort: { col: "volRatio", dir: "desc" } })).toEqual({ col: "relVol", dir: "desc" });
 	});
 });
+it("Watchlist Following clears duplicate and surplus slots only after membership arrives", () => {
+  const input = {
+    enabled: true,
+    clearUnmatched: true,
+    slots: [
+      { id: "first", symbol: "US.MSFT" },
+      { id: "second", symbol: "US.MSFT" },
+      { id: "third", symbol: "US.AAPL" },
+    ],
+    rankedSymbols: ["US.MSFT"],
+  };
+  expect(planScannerSync({ ...input, sourceAvailable: false, rankedSymbols: [] }).patches).toEqual([]);
+  expect(planScannerSync({ ...input, sourceAvailable: true }).patches).toEqual([
+    { slotId: "second", symbol: "" },
+    { slotId: "third", symbol: "" },
+  ]);
+  expect(planScannerSync({ ...input, sourceAvailable: true, rankedSymbols: [] }).patches).toHaveLength(3);
+});

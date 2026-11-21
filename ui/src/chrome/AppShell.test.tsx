@@ -95,10 +95,17 @@ function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApp
   };
   const demandRegistry = new DemandRegistry({ sendCommand: commands.sendCommand, onState: () => {} });
   const saved: Workspace[] = [];
+  const documents = new Map([[`workspace.${opts?.workspaceName ?? "default"}`, seed]]);
   const client = {
     sendCommand: vi.fn(async (name: string, args: unknown) => {
-      if (name === "GetConfig") return { status: "accepted" as const, value: seed };
-      if (name === "SetConfig") { saved.push(structuredClone((args as { value: Workspace }).value)); return { status: "accepted" as const }; }
+      if (name === "GetConfig") return { status: "accepted" as const, value: documents.get((args as { key: string }).key) };
+      if (name === "SetConfig") {
+        const { key, value } = args as { key: string; value: Workspace };
+        const copy = structuredClone(value);
+        documents.set(key, copy);
+        saved.push(copy);
+        return { status: "accepted" as const };
+      }
       return { status: "accepted" as const };
     }),
   };

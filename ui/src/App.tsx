@@ -154,6 +154,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
 
   useEffect(() => {
     const removeState = client.onState((s) => {
+      if (s !== "open") stores.watchlist.disconnect();
       stateRef.current = s;
       setState(s);
       stores.health.setUiEngine(makeEngineLink(s, client.rttMs()));

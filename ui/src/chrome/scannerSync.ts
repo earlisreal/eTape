@@ -26,6 +26,7 @@ export interface ScannerSyncPlanInput {
   rankedSymbols: readonly string[];
   enabled: boolean;
   sourceAvailable: boolean;
+  clearUnmatched?: boolean;
 }
 
 export const DEFAULT_SCANNER_SORT: SortState = { col: "changePct", dir: "desc" };
@@ -95,7 +96,7 @@ export function planScannerSync(input: ScannerSyncPlanInput): ScannerSyncPlan {
   }
 
   const ranked = usableSymbols(input.rankedSymbols);
-  if (ranked.length === 0) {
+  if (ranked.length === 0 && !input.clearUnmatched) {
     return { patches: [], status: { kind: "paused", availableCount: 0, targetCount, reason: "rows" } };
   }
 
@@ -105,7 +106,7 @@ export function planScannerSync(input: ScannerSyncPlanInput): ScannerSyncPlan {
   const open: number[] = [];
   for (let i = 0; i < input.slots.length; i++) {
     const symbol = input.slots[i].symbol?.trim();
-    if (symbol && relevantSet.has(symbol)) retained.add(symbol);
+    if (symbol && relevantSet.has(symbol) && (!input.clearUnmatched || !retained.has(symbol))) retained.add(symbol);
     else open.push(i);
   }
 
@@ -116,6 +117,12 @@ export function planScannerSync(input: ScannerSyncPlanInput): ScannerSyncPlan {
     if (index === undefined) break;
     if (input.slots[index].symbol !== symbol) patches.push({ slotId: input.slots[index].id, symbol });
     retained.add(symbol);
+  }
+
+  if (input.clearUnmatched) {
+    for (const index of open) {
+      if (input.slots[index].symbol) patches.push({ slotId: input.slots[index].id, symbol: "" });
+    }
   }
 
   return {

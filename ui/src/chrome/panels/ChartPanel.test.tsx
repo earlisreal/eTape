@@ -167,7 +167,7 @@ describe("ChartPanel", () => {
   it("keeps an unassigned Monitoring chart idle and shows the sync wait state", async () => {
     const { createChart } = await import("lightweight-charts");
     const { commands } = renderChart("empty", undefined, undefined, { symbol: undefined }, undefined, true);
-    expect(screen.getByTestId("chart-empty-state").textContent).toBe("Waiting for Scanner Sync");
+    expect(screen.getByTestId("chart-empty-state").textContent).toBe("Waiting for Following");
     expect(createChart).not.toHaveBeenCalled();
     expect(commands.sendQuery).not.toHaveBeenCalled();
   });

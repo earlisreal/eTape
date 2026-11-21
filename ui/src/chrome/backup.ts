@@ -91,6 +91,9 @@ export function parseImport(text: string): { ok: true; data: SettingsExport } | 
 // so already-ghosted exports are healed on import.
 export function prepareImportedWorkspace(imported: Workspace, currentName: string): Workspace {
   const workspace = withoutScreenerPanels({ ...imported, name: currentName });
+  if (workspace.scannerSync?.sourceKind === "watchlist") {
+    workspace.scannerSync = { enabled: workspace.scannerSync.enabled };
+  }
   return reconcileToGrid(workspace, workspace.layout);
 }
 

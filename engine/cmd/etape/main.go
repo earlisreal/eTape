@@ -1606,6 +1606,14 @@ func (a watchlistAdapter) Add(s string) (bool, error) { return a.l.Add(s) }
 func (a watchlistAdapter) Remove(s string) bool       { return a.l.Remove(s) }
 func (a watchlistAdapter) Poke()                      { a.p.Poke() }
 
+func (a watchlistAdapter) Move(symbol, target, position string) error {
+	changed, err := a.l.Move(symbol, target, position)
+	if changed {
+		a.p.MembershipMoved()
+	}
+	return err
+}
+
 func hasTZVenue(cfg config.Config) bool {
 	for _, v := range cfg.Venues {
 		if v.Broker == "tradezero" {

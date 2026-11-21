@@ -67,11 +67,18 @@ Dockview owns tabs, activation, native drag-and-drop, merge/split, floating/popo
 
 Persisted workspaces require `layoutVersion: 8`. `WorkspaceStore` replaces an unmarked or older saved workspace with a blank version-8 workspace and writes that reset immediately. Built-in presets are trusted version-8 layouts. Imported layout payloads must declare version 8 after envelope and shape checks; older or missing versions are rejected as `Invalid layout` and never applied. Hotkey-only imports remain independent.
 
-`monitoring` is a reserved workspace identity, not a replaceable preset. The catalog and New Window modal open it through the named popup target `etape-workspace-monitoring`; rename/delete controls are omitted. A missing Monitoring document is seeded once with four pinned, unassigned charts, a Scanner, and unassigned Stock Info. Existing Monitoring data is kept, and unassigned Monitoring charts show `Waiting for Scanner Sync` without creating a chart or symbol demand until a symbol is typed or linked.
+`monitoring` is a reserved workspace identity, not a replaceable preset. The catalog and New Window modal open it through the named popup target `etape-workspace-monitoring`; rename/delete controls are omitted. A missing Monitoring document is seeded once with four pinned, unassigned charts, a Scanner, and unassigned Stock Info. Existing Monitoring data is kept, and unassigned Monitoring charts show `Waiting for Following` without creating a chart or symbol demand until a symbol is typed or linked.
 
 General Layout downloads are structural: they keep panel arrangement, Link Group membership, focused venues, and non-symbol settings, but omit panel symbols, Link Group focused symbols, and cross-window Scanner Source identities. An enabled Monitoring Sync therefore imports paused until a source is selected. Existing saved workspaces and previously downloaded files are not rewritten.
 
 Monitoring Scanner Sync persists its enabled intent and the Scanner Source workspace/panel identity in the Monitoring workspace. Any Scanner header can select the source; AppShell reads the source workspace's persisted sort through workspace-change notifications, so closing its host window does not retarget or stop the relationship, while deleting the source pauses it. Its pure planner retains ranked symbols in their chart slots, fills departed slots from the source's visible sort, and leaves unmatched chart symbols in place when rows are scarce. Turnover, REL VOL, and Short Int are Scanner Source sorts, so Monitoring Sync follows the selected `turnover`, `relVol`, or `shortInterest` ranking automatically. AppShell coalesces successful symbol applications to one batch per second and patches only each chart's symbol; the panel-symbol runtime keeps mounted charts and their settings alive.
+
+Watchlist Following uses the saved engine membership order. Monitoring waits
+for a membership payload on the current engine connection before changing
+charts. A confirmed empty list clears all pinned chart symbols and releases
+their demand. Layout exports retain the enabled setting. Imported layouts
+wait for the trader to select a source. Workspace writes serialize source
+changes with layout saves so each edit is preserved.
 
 Scanner `Vol` and `Turnover` display the latest base daily totals reported by the
 snapshot, including valid zeroes and showing `—` when unavailable. `REL VOL` is a

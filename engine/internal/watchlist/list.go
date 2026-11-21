@@ -7,6 +7,7 @@ package watchlist
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -34,7 +35,7 @@ type configStore interface {
 type List struct {
 	st   configStore
 	mu   sync.Mutex
-	syms []string // insertion order; authoritative payload order
+	syms []string // saved manual order; authoritative payload order
 	cap  int
 }
 
@@ -113,7 +114,37 @@ func (l *List) Remove(symbol string) bool {
 	return false
 }
 
-// Symbols returns a copy in insertion order.
+// Move places an existing member immediately before or after another member.
+func (l *List) Move(symbol, target, position string) (bool, error) {
+	if position != "before" && position != "after" {
+		return false, errors.New("invalid watchlist move position")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	from := slices.Index(l.syms, Normalize(symbol))
+	to := slices.Index(l.syms, Normalize(target))
+	if from < 0 || to < 0 {
+		return false, errors.New("watchlist member no longer exists")
+	}
+	if from == to {
+		return false, nil
+	}
+	if position == "after" {
+		to++
+	}
+	if from < to {
+		to--
+	}
+	if from == to {
+		return false, nil
+	}
+	member := l.syms[from]
+	l.syms = slices.Insert(slices.Delete(l.syms, from, from+1), to, member)
+	l.persistLocked()
+	return true, nil
+}
+
+// Symbols returns a copy in saved manual order.
 func (l *List) Symbols() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()

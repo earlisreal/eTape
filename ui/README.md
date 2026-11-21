@@ -70,6 +70,16 @@ Alerts or History to load the panel's selected Link Group. Choose a color first;
 ungrouped Alerts and Watchlist panels cannot navigate. Watchlist retains its
 double-click row navigation and single-click selection.
 
+In Watchlist, drag the row handle or use the Move up and Move down buttons to
+set the saved order. Column sorting changes the view. Click **Manual order**
+to see the saved order and move rows again.
+
+Click **Use this Watchlist** to enable **Sync to Following** for stock
+Monitoring. Pinned charts fill from the top of the saved list. Symbols that
+still make the cut stay in their current charts, and surplus charts clear.
+**OFF** holds the charts where they are, and **Use this Scanner** switches the
+source. The selection is shared across windows and restored after restart.
+
 Popup symbols prefer the most recently used grouped Alerts Panel across open
 Workspaces in the same browser profile, including background windows and
 inactive tabs. Without a grouped Alerts Panel, they use the source color saved

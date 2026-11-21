@@ -79,6 +79,7 @@ type venueTester interface {
 // (satisfied by a *watchlist.List + *watchlist.Poller adapter, wired in
 // startPollers). Nil until SetWatchlist runs — guard in the handler.
 type watchlistCtl interface {
+	Move(symbol, target, position string) error
 	Add(symbol string) (added bool, err error)
 	Remove(symbol string) (removed bool)
 	Poke()
@@ -511,6 +512,13 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			}
 		}
 		cd.cfg.SetConfig(a.Key, string(a.Value))
+		if a.Key == "workspace.monitoring" {
+			// The browser serializes source and layout edits by reading after
+			// the preceding write is acknowledged.
+			if store, ok := cd.cfg.(interface{ Flush() }); ok {
+				store.Flush()
+			}
+		}
 		if cd.onConfigSet != nil {
 			cd.onConfigSet(a.Key, string(a.Value))
 		}
@@ -675,6 +683,19 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		}
 		wl.Remove(a.Symbol) // idempotent — always accepted
 		wl.Poke()
+		return wsmsg.AckMsg{Status: "accepted"}, false
+	case "WatchlistMove":
+		var a wsmsg.WatchlistMoveArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args"), false
+		}
+		wl := cd.watchlist()
+		if wl == nil {
+			return blocked("watchlist not ready"), false
+		}
+		if err := wl.Move(a.Symbol, a.Target, a.Position); err != nil {
+			return blocked(err.Error()), false
+		}
 		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "ReleaseSymbol":
 		var a wsmsg.ReleaseSymbolArgs

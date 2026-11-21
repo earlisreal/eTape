@@ -52,7 +52,7 @@ describe("WatchlistPanel", () => {
         { symbol: "US.AAA", changePct: 1, last: 10, volume: 100 },
         { symbol: "US.ZZZ", changePct: 2, last: 20, volume: 200 },
       ] } }));
-    const symbols = [...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
+    const symbols = [...document.querySelectorAll("tbody tr td:first-child > span:last-child")].map((td) => td.textContent);
     expect(symbols).toEqual(["ZZZ", "AAA"]);
   });
 
@@ -64,7 +64,8 @@ describe("WatchlistPanel", () => {
       ] } }));
     expect(screen.getByText("MISSING")).toBeTruthy();
     const cells = screen.getByText("MISSING").closest("tr")!.querySelectorAll("td");
-    expect([...cells].map((c) => c.textContent)).toEqual(["MISSING", "—", "—", "—"]);
+    expect(screen.getByText("MISSING").textContent).toBe("MISSING");
+    expect([...cells].slice(1).map((c) => c.textContent)).toEqual([ "—", "—", "—"]);
   });
 
   it("sign-colors %Chg via palette.up/down", () => {
@@ -89,9 +90,23 @@ describe("WatchlistPanel", () => {
         { symbol: "US.HIGH", changePct: 40, last: 1, volume: 1 },
       ] } }));
     // Default (unsorted) order matches payload order.
-    expect([...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent)).toEqual(["LOW", "HIGH"]);
+    expect([...document.querySelectorAll("tbody tr td:first-child > span:last-child")].map((td) => td.textContent)).toEqual(["LOW", "HIGH"]);
     fireEvent.click(screen.getByRole("columnheader", { name: /%Chg/ }));
-    expect([...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent)).toEqual(["HIGH", "LOW"]);
+    expect([...document.querySelectorAll("tbody tr td:first-child > span:last-child")].map((td) => td.textContent)).toEqual(["HIGH", "LOW"]);
+  });
+
+  it("sends a relative move in manual order and restores the controls after sorting", async () => {
+    const { watchlist, commands } = renderPanel();
+    act(() => watchlist.apply({ kind: "snapshot", topic: "watchlist.rows", payload: {
+      symbols: ["US.AAPL", "US.TSLA"], rows: [], refreshedAt: null,
+    } }));
+    fireEvent.click(screen.getByRole("columnheader", { name: "Symbol" }));
+    expect(screen.queryByRole("button", { name: "Move TSLA up" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Manual order" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Move TSLA up" })));
+    expect(commands.sendCommand).toHaveBeenCalledWith("WatchlistMove", {
+      symbol: "US.TSLA", target: "US.AAPL", position: "before",
+    });
   });
 
   it("double-click calls linkGroups.focus with the panel's group and the row's symbol", () => {

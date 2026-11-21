@@ -11,6 +11,24 @@ function fakeClient() {
 }
 
 describe("WorkspaceStore", () => {
+  it("preserves a source switch during a queued Monitoring layout save", async () => {
+    const seed = buildMonitoringWorkspace();
+    let stored = seed;
+    const client = {
+      sendCommand: vi.fn(async (name: string, args: unknown) => {
+        if (name === "GetConfig") return { status: "accepted", value: stored };
+        stored = (args as { value: Workspace }).value;
+        return { status: "accepted" };
+      }),
+    };
+    const owner = new WorkspaceStore(client);
+    const controls = new WorkspaceStore(client);
+    owner.save({ ...seed, groups: { red: "US.MSFT" } });
+    await controls.updateMonitoringSync(seed, () => ({ enabled: true, sourceKind: "watchlist" }));
+    await owner.flush();
+    expect(stored.scannerSync).toEqual({ enabled: true, sourceKind: "watchlist" });
+    expect(stored.groups).toEqual({ red: "US.MSFT" });
+  });
   it("returns a blank workspace when no doc is saved", async () => {
     const client = { sendCommand: vi.fn().mockResolvedValue({ status: "accepted", value: null }) };
     const store = new WorkspaceStore(client);

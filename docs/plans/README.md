@@ -4,6 +4,7 @@ Create one focused Markdown file per approved change. Name `YYYY-MM-DD-short-fea
 
 Implemented:
 
+- [Watchlist Sync to Following](2026-11-21-watchlist-following.md)
 - [Alpaca margin in Stock Info](2026-11-21-alpaca-stock-info-margin.md)
 - [BingX Chart Risk Entry](2026-11-20-bingx-chart-risk-entry.md)
 - [BingX private order updates](2026-11-20-bingx-fill-websocket.md)

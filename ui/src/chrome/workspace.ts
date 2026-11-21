@@ -1,3 +1,4 @@
+import { withLock } from "./catalogs";
 import type { LinkGroup, SavedLinkMarkets, SavedLinkVenues } from "./linkGroups";
 
 export interface PanelConfig {
@@ -8,6 +9,7 @@ export interface PanelConfig {
 }
 export interface ScannerSyncConfig {
   enabled: boolean;
+  sourceKind?: "watchlist";
   sourceWorkspaceId?: string;
   sourcePanelId?: string;
 }
@@ -141,7 +143,10 @@ interface CommandClient {
 // Auto-saves the dockview layout + panel configs to the engine's config store
 // (config key `workspace.<name>`), debounced. Loads the saved doc, or a blank
 // workspace when none exists (no seed fallback — seeds are opt-in presets, Task 7/10).
+const MONITORING_WRITE_LOCK = "etape.monitoring-write";
+
 export class WorkspaceStore {
+  private replaceMonitoringSource = false;
   private readonly pending = new Map<string, Workspace>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly changeListeners = new Map<string, Set<WorkspaceChangeListener>>();
@@ -159,6 +164,13 @@ export class WorkspaceStore {
   }
 
   async load(name: string, seed?: Workspace): Promise<Workspace> {
+    if (name === MONITORING_WORKSPACE_ID && seed) {
+      return withLock(MONITORING_WRITE_LOCK, () => this.loadWorkspace(name, seed));
+    }
+    return this.loadWorkspace(name, seed);
+  }
+
+  private async loadWorkspace(name: string, seed?: Workspace): Promise<Workspace> {
     const key = `workspace.${name}`;
     const ack = await this.client.sendCommand("GetConfig", { key });
     if (ack.status === "accepted" && ack.value && isCurrentWorkspace(ack.value)) {
@@ -186,7 +198,29 @@ export class WorkspaceStore {
     return blank;
   }
 
-  save(ws: Workspace): void {
+  async updateMonitoringSync(seed: Workspace, update: (current: ScannerSyncConfig | undefined) => ScannerSyncConfig | undefined): Promise<Workspace> {
+    return withLock(MONITORING_WRITE_LOCK, async () => {
+      const key = `workspace.${MONITORING_WORKSPACE_ID}`;
+      const ack = await this.client.sendCommand("GetConfig", { key });
+      if (ack.status !== "accepted") throw new Error("Could not read Monitoring settings.");
+      const savedWorkspace = ack.value as Partial<Workspace> | null | undefined;
+      const current = isCurrentWorkspace(savedWorkspace)
+        ? withoutScreenerPanels(savedWorkspace)
+        : savedWorkspace && Array.isArray(savedWorkspace.panels) && "layout" in savedWorkspace
+          ? withoutScreenerPanels({ ...savedWorkspace, name: seed.name, layoutVersion: seed.layoutVersion } as Workspace)
+          : seed;
+      const nextSync = update(current.scannerSync);
+      if (!nextSync) return current;
+      const next = { ...current, scannerSync: nextSync };
+      const saved = await this.client.sendCommand("SetConfig", { key, value: next });
+      if (saved.status !== "accepted") throw new Error("Could not save Monitoring source.");
+      this.notify(MONITORING_WORKSPACE_ID);
+      return next;
+    });
+  }
+
+  save(ws: Workspace, replaceMonitoringSource = false): void {
+    if (ws.name === MONITORING_WORKSPACE_ID && replaceMonitoringSource) this.replaceMonitoringSource = true;
     this.pending.set(ws.name, ws);
     const timer = this.timers.get(ws.name);
     if (timer) clearTimeout(timer);
@@ -221,6 +255,22 @@ export class WorkspaceStore {
     if (!ws) return;
     this.pending.delete(name);
     const key = `workspace.${ws.name}`;
+    if (name === MONITORING_WORKSPACE_ID) {
+      const replace = this.replaceMonitoringSource;
+      this.replaceMonitoringSource = false;
+      await withLock(MONITORING_WRITE_LOCK, async () => {
+        const saved = await this.client.sendCommand("GetConfig", { key });
+        if (saved.status !== "accepted") return;
+        const value = { ...ws };
+        if (!replace && isCurrentWorkspace(saved.value)) {
+          delete value.scannerSync;
+          if (saved.value.scannerSync) value.scannerSync = saved.value.scannerSync;
+        }
+        const ack = await this.client.sendCommand("SetConfig", { key, value });
+        if (ack.status === "accepted") this.notify(name);
+      });
+      return;
+    }
     const ack = await this.client.sendCommand("SetConfig", { key, value: ws });
     if (ack.status === "accepted") this.notify(ws.name);
   }
