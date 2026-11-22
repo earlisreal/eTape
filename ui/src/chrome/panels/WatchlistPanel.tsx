@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
 import type { PanelProps } from "./registry";
 import { ScannerSyncControl } from "./ScannerControls";
 import type { WatchlistMoveArgs, WatchlistRow } from "../../gen/wsmsg";
@@ -43,6 +43,11 @@ function toRowView(symbol: string, row: WatchlistRow | undefined): WatchlistRowV
   return { symbol, last: row.last, changePct: row.changePct, volume: row.volume };
 }
 
+function dropPosition(event: DragEvent<HTMLTableRowElement>): WatchlistMoveArgs["position"] {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  return event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+}
+
 export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSync, group: groupProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   // config.group is frozen at panel creation (dockview never re-invokes the panel
@@ -53,6 +58,7 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
   const toast = useToasts();
   const snap = useSyncExternalStore((cb) => stores.watchlist.subscribe(cb), () => stores.watchlist.getSnapshot());
   const draggedSymbol = useRef<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ symbol: string; position: WatchlistMoveArgs["position"] } | null>(null);
   const [sort, setSort] = useState<SortState>(null);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
@@ -75,7 +81,7 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
     return sortRows(views, sort, SORT_ACCESSORS);
   }, [snap.symbols, snap.rows, sort]);
 
-  const move = (symbol: string, target: string | undefined, position: "before" | "after") => {
+  const move = (symbol: string, target: string | undefined, position: WatchlistMoveArgs["position"]) => {
     if (!target || symbol === target) return;
     const args: WatchlistMoveArgs = { symbol, target, position };
     void commands.sendCommand("WatchlistMove", args).then((ack) => {
@@ -85,7 +91,12 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
     });
   };
 
-  const clickSort = (col: string) => setSort((s) => toggleSort(s, col));
+  const clickSort = (col: string) => setSort((s) => s?.col === col && s.dir === "asc" ? null : toggleSort(s, col));
+
+  const endDrag = () => {
+    draggedSymbol.current = null;
+    setDropTarget(null);
+  };
 
   const submitAdd = () => {
     const symbol = addValue.trim();
@@ -139,7 +150,6 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
       {following}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}` }}>
         {addInput}
-        {sort && <button type="button" onClick={() => setSort(null)}>Manual order</button>}
       </div>
       {!group && <p style={{ padding: "0 8px" }}>Choose a Link Group color to load symbols.</p>}
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -147,6 +157,8 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
           <tr style={{ color: palette.textMuted, textAlign: "right" }}>
             {COLUMNS.map((c) => (
               <th key={c.col} style={{ ...th, textAlign: c.align, cursor: "pointer" }} onClick={() => clickSort(c.col)}
+                aria-sort={sort?.col === c.col ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
+                title={sort?.col === c.col && sort.dir === "asc" ? "Click to show saved order" : undefined}
                 className={`col-head sortable${sort?.col === c.col ? " sort-active" : ""}`}>
                 {c.label} {sortIndicator(sort, c.col)}
               </th>
@@ -156,49 +168,56 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
         <tbody>
           {rows.map((r, index) => {
             const selected = r.symbol === selectedSymbol;
+            const insertion = dropTarget?.symbol === r.symbol ? dropTarget.position : null;
             return (
               <tr key={r.symbol}
+                draggable={!sort}
+                tabIndex={sort ? undefined : 0}
+                title={sort ? undefined : "Drag to reorder or use Alt+Up and Alt+Down"}
+                aria-keyshortcuts={sort ? undefined : "Alt+ArrowUp Alt+ArrowDown"}
+                onKeyDown={(event) => {
+                  if (sort || !event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+                  event.preventDefault();
+                  const up = event.key === "ArrowUp";
+                  move(r.symbol, snap.symbols[index + (up ? -1 : 1)], up ? "before" : "after");
+                }}
+                onDragStart={(event) => {
+                  draggedSymbol.current = r.symbol;
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("application/x-etape-watchlist-symbol", r.symbol);
+                }}
+                onDragEnd={endDrag}
                 onDragOver={(event) => {
                   if (!sort && draggedSymbol.current && draggedSymbol.current !== r.symbol) {
                     event.preventDefault();
                     event.dataTransfer.dropEffect = "move";
+                    const position = dropPosition(event);
+                    setDropTarget((current) => current?.symbol === r.symbol && current.position === position
+                      ? current : { symbol: r.symbol, position });
                   }
+                }}
+                onDragLeave={(event) => {
+                  if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+                  setDropTarget((current) => current?.symbol === r.symbol ? null : current);
                 }}
                 onDrop={(event) => {
                   const source = draggedSymbol.current;
                   if (sort || !source) return;
                   event.preventDefault();
-                  draggedSymbol.current = null;
-                  const bounds = event.currentTarget.getBoundingClientRect();
-                  move(source, r.symbol, event.clientY < bounds.top + bounds.height / 2 ? "before" : "after");
+                  endDrag();
+                  move(source, r.symbol, dropPosition(event));
                 }}
                 onClick={() => setSelectedSymbol(r.symbol)}
                 onDoubleClick={() => { if (group) linkGroups.focus(group, r.symbol); }}
                 onContextMenu={(e) => { e.preventDefault(); setMenu({ clientX: e.clientX, clientY: e.clientY, symbol: r.symbol }); }}
                 onMouseEnter={() => setHoveredSymbol(r.symbol)}
                 onMouseLeave={() => setHoveredSymbol((h) => (h === r.symbol ? null : h))}
-                style={{ cursor: "pointer", textAlign: "right", userSelect: "none",
+                style={{ cursor: sort ? "pointer" : "grab", textAlign: "right", userSelect: "none",
                   background: selected ? "rgba(154,106,27,.16)" : hoveredSymbol === r.symbol ? "rgba(154,106,27,.06)" : "transparent",
-                  boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : "none",
+                  boxShadow: insertion ? `inset 0 ${insertion === "before" ? 2 : -2}px 0 ${palette.accent}`
+                    : selected ? `inset 0 0 0 1px ${palette.accent}` : "none",
                   transition: "background 120ms ease" }}>
-                <td style={symCell}>
-                  {!sort && <span style={{ display: "inline-flex", alignItems: "center", gap: 2, marginRight: 4 }}
-                    onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
-                    <span draggable title={`Drag ${bareSymbol(r.symbol)} to reorder`} aria-hidden="true"
-                      style={{ cursor: "grab", color: palette.textMuted, padding: "0 2px" }}
-                      onDragStart={(event) => {
-                        draggedSymbol.current = r.symbol;
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", r.symbol);
-                      }}
-                      onDragEnd={() => { draggedSymbol.current = null; }}>⠿</span>
-                    <button type="button" disabled={index === 0} aria-label={`Move ${bareSymbol(r.symbol)} up`}
-                      onClick={() => move(r.symbol, snap.symbols[index - 1], "before")}>↑</button>
-                    <button type="button" disabled={index === rows.length - 1} aria-label={`Move ${bareSymbol(r.symbol)} down`}
-                      onClick={() => move(r.symbol, snap.symbols[index + 1], "after")}>↓</button>
-                  </span>}
-                  <span>{bareSymbol(r.symbol)}</span>
-                </td>
+                <td style={symCell}>{bareSymbol(r.symbol)}</td>
                 <td style={{ ...numCell, opacity: stale ? 0.55 : 1 }}>{r.last === null ? "—" : formatPrice(r.last, quoteDecimals(r.last, 2))}</td>
                 <td style={{ ...numCell, opacity: stale ? 0.55 : 1,
                   color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>

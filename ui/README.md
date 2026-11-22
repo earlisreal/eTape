@@ -70,9 +70,10 @@ Alerts or History to load the panel's selected Link Group. Choose a color first;
 ungrouped Alerts and Watchlist panels cannot navigate. Watchlist retains its
 double-click row navigation and single-click selection.
 
-In Watchlist, drag the row handle or use the Move up and Move down buttons to
-set the saved order. Column sorting changes the view. Click **Manual order**
-to see the saved order and move rows again.
+Drag from any cell in a Watchlist row and drop on another row's upper or lower
+half to save the move above or below it. With a row focused, use **Alt+Up** or
+**Alt+Down** to move it one place. Clicking a column header cycles through
+descending, ascending, and saved order. Return to saved order to move rows.
 
 Click **Use this Watchlist** to enable **Sync to Following** for stock
 Monitoring. Pinned charts fill from the top of the saved list. Symbols that

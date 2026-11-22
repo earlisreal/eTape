@@ -34,7 +34,8 @@ test("saved Watchlist order drives pinned charts across windows", async ({ conte
   await page.goto("/?workspace=e2e-watchlist-following");
   await page.getByRole("button", { name: /add panel/i }).click();
   await page.getByRole("dialog", { name: "Add panel" }).getByRole("button", { name: /watchlist your pinned/i }).click();
-  const rows = page.getByRole("row").filter({ has: page.getByRole("button", { name: /move .+ up/i }) });
+  const watchlist = page.locator("table").filter({ has: page.getByRole("columnheader", { name: "Volume", exact: true }) });
+  const rows = watchlist.locator("tbody tr");
   await expect(rows).toHaveCount(5);
   const symbols = [...members!].map((symbol) => symbol.slice(3));
 
@@ -48,15 +49,20 @@ test("saved Watchlist order drives pinned charts across windows", async ({ conte
   await expect(charts).toHaveCount(4);
   await expect(charts.filter({ hasText: symbols[4] })).toHaveCount(0);
 
-  await page.getByRole("button", { name: `Move ${symbols[4]} up` }).press("Enter");
+  const dragRow = async (sourceIndex: number, targetIndex: number, position: "before" | "after") => {
+    const source = rows.nth(sourceIndex).getByRole("cell").last();
+    const target = rows.nth(targetIndex);
+    const bounds = (await target.boundingBox())!;
+    await source.dragTo(target, {
+      targetPosition: { x: bounds.width / 2, y: bounds.height * (position === "before" ? 0.25 : 0.75) },
+    });
+  };
+
+  await dragRow(4, 3, "before");
   await expect(charts.filter({ hasText: symbols[4] })).toHaveCount(1);
   await expect(charts.filter({ hasText: symbols[3] })).toHaveCount(0);
   const assigned = await charts.allTextContents();
-  const second = rows.nth(1);
-  const bounds = await second.boundingBox();
-  await page.getByTitle(`Drag ${symbols[0]} to reorder`).dragTo(second, {
-    targetPosition: { x: 6, y: bounds!.height * 0.75 },
-  });
+  await dragRow(0, 1, "after");
   await expect(rows.first()).toContainText(symbols[1]);
   await expect(charts).toHaveText(assigned);
   await expect.poll(() => savedChartSymbols.slice().sort()).toEqual(assigned.slice().sort());
@@ -67,7 +73,7 @@ test("saved Watchlist order drives pinned charts across windows", async ({ conte
 
   await page.getByRole("button", { name: "Disable Watchlist Sync" }).click();
   await expect(page.getByRole("button", { name: "Enable Watchlist Sync" })).toBeVisible();
-  await page.getByRole("button", { name: `Move ${symbols[3]} up` }).press("Enter");
+  await dragRow(4, 3, "before");
   await expect(rows.nth(3)).toContainText(symbols[3]);
   await expect(charts).toHaveText(assigned);
   await page.getByRole("button", { name: "Enable Watchlist Sync" }).click();

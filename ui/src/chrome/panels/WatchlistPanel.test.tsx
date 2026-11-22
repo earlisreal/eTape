@@ -52,7 +52,7 @@ describe("WatchlistPanel", () => {
         { symbol: "US.AAA", changePct: 1, last: 10, volume: 100 },
         { symbol: "US.ZZZ", changePct: 2, last: 20, volume: 200 },
       ] } }));
-    const symbols = [...document.querySelectorAll("tbody tr td:first-child > span:last-child")].map((td) => td.textContent);
+    const symbols = [...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
     expect(symbols).toEqual(["ZZZ", "AAA"]);
   });
 
@@ -90,20 +90,29 @@ describe("WatchlistPanel", () => {
         { symbol: "US.HIGH", changePct: 40, last: 1, volume: 1 },
       ] } }));
     // Default (unsorted) order matches payload order.
-    expect([...document.querySelectorAll("tbody tr td:first-child > span:last-child")].map((td) => td.textContent)).toEqual(["LOW", "HIGH"]);
+    expect([...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent)).toEqual(["LOW", "HIGH"]);
     fireEvent.click(screen.getByRole("columnheader", { name: /%Chg/ }));
-    expect([...document.querySelectorAll("tbody tr td:first-child > span:last-child")].map((td) => td.textContent)).toEqual(["HIGH", "LOW"]);
+    expect([...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent)).toEqual(["HIGH", "LOW"]);
   });
 
-  it("sends a relative move in manual order and restores the controls after sorting", async () => {
+  it("restores dragging when the active header cycles back to saved order", async () => {
     const { watchlist, commands } = renderPanel();
     act(() => watchlist.apply({ kind: "snapshot", topic: "watchlist.rows", payload: {
       symbols: ["US.AAPL", "US.TSLA"], rows: [], refreshedAt: null,
     } }));
-    fireEvent.click(screen.getByRole("columnheader", { name: "Symbol" }));
-    expect(screen.queryByRole("button", { name: "Move TSLA up" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Manual order" }));
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Move TSLA up" })));
+    const row = screen.getByRole<HTMLTableRowElement>("row", { name: /^TSLA/ });
+    const header = screen.getByRole("columnheader", { name: /^Symbol/ });
+    expect(row.draggable).toBe(true);
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-sort")).toBe("descending");
+    expect(row.draggable).toBe(false);
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-sort")).toBe("ascending");
+    expect(row.draggable).toBe(false);
+    fireEvent.click(header);
+    expect(header.hasAttribute("aria-sort")).toBe(false);
+    expect(row.draggable).toBe(true);
+    await act(async () => fireEvent.keyDown(row, { key: "ArrowUp", altKey: true }));
     expect(commands.sendCommand).toHaveBeenCalledWith("WatchlistMove", {
       symbol: "US.TSLA", target: "US.AAPL", position: "before",
     });
