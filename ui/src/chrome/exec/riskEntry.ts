@@ -25,12 +25,17 @@ export function riskEntryProtection(orders: readonly Order[], qty: number, venue
 export function riskEntryAddTemplate(template: RiskEntryTemplate, owner?: Order, stop?: Order): RiskEntryTemplate {
     if (!owner?.riskEntry || !stop) return template;
     const protection = stop.held?.trail?.config;
-    return { ...template, sellCushion: protection?.cushion ?? owner.riskEntry.sellCushion,
+    return { ...template, sellCushion: protection?.cushion ?? owner.riskEntry.sellCushion, protectionStopDistancePct: undefined,
         ...(protection ? { protection } : { protection: undefined }) };
 }
 export function riskEntrySize(template: RiskEntryTemplate, buyStop: number, sellStop: number, cash: number, bp: number, savedBudget?: number, short = false, shortFunds = bp, fractional = false) {
-    const buyLimit = resolveLimitCushionPrice(short ? "SHORT" : "BUY", buyStop, template.buyCushion.value, template.buyCushion.unit === "%" ? "%" : "$");
-    const sellLimit = resolveLimitCushionPrice(short ? "COVER" : "SELL", sellStop, template.sellCushion.value, template.sellCushion.unit === "%" ? "%" : "$");
+    const gap = Math.abs(buyStop - sellStop);
+    const resolve = (cushion: RiskEntryTemplate["buyCushion"], pct: number | undefined) =>
+        pct === undefined ? cushion : { value: gap * pct / 100, unit: "$" };
+    const buyCushion = resolve(template.buyCushion, template.entryStopDistancePct);
+    const sellCushion = resolve(template.sellCushion, template.protectionStopDistancePct);
+    const buyLimit = resolveLimitCushionPrice(short ? "SHORT" : "BUY", buyStop, buyCushion.value, buyCushion.unit === "%" ? "%" : "$");
+    const sellLimit = resolveLimitCushionPrice(short ? "COVER" : "SELL", sellStop, sellCushion.value, sellCushion.unit === "%" ? "%" : "$");
     const budget = savedBudget ?? (template.mode === "Dollar" ? template.value : (template.mode === "CashPct" ? cash : bp) * template.value / 100);
     const funds = short ? shortFunds : template.mode === "CashPct" ? cash : bp;
     const distance = Math.round((short ? sellLimit - buyLimit : buyLimit - sellLimit) * 10000) / 10000;
@@ -38,5 +43,5 @@ export function riskEntrySize(template: RiskEntryTemplate, buyStop: number, sell
         ? Math.max(0, fractional && !short
             ? floorFractionalShares(Math.min(budget / distance, funds / buyLimit))
             : Math.min(Math.floor(budget / distance + 1e-9), Math.floor(funds / (short ? buyStop : buyLimit) + 1e-9))) : 0;
-    return { buyLimit, sellLimit, budget, qty, risk: qty * distance, notional: qty * buyLimit };
+    return { buyLimit, sellLimit, buyCushion, sellCushion, budget, qty, gap, risk: qty * distance, notional: qty * buyLimit };
 }

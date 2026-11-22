@@ -52,6 +52,20 @@ function wrapWithToastAndClose(onSave = vi.fn(), toast = { push: vi.fn(), dismis
 }
 
 describe("OrderSettingsSection", () => {
+  it("saves independent stock percentages and an Auto preset's perpetual cushion", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("add-template"));
+    fireEvent.click(screen.getByTestId("add-risk"));
+    fireEvent.change(screen.getByLabelText("Instrument and direction"), { target: { value: "auto" } });
+    fireEvent.change(screen.getByLabelText(/^buyCushion-unit-/), { target: { value: "stop" } });
+    fireEvent.change(screen.getByLabelText(/^buyCushion-risk-/), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText(/^sellCushion-unit-/), { target: { value: "stop" } });
+    fireEvent.change(screen.getByLabelText("Perpetual Entry Limit Cushion"), { target: { value: "0.25" } });
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].templates).toEqual(expect.arrayContaining([expect.objectContaining({
+      kind: "risk", entryStopDistancePct: 5, protectionStopDistancePct: 0, buyCushion: { value: 0.25, unit: "$" },
+    })]));
+  });
   it("saves a trailing protection mode with its explicit distance",()=>{
     const {onSave}=wrap();fireEvent.click(screen.getByTestId("add-template"));fireEvent.click(screen.getByTestId("add-risk"));
     fireEvent.change(screen.getByLabelText("Protection mode"),{target:{value:"PRICE"}});

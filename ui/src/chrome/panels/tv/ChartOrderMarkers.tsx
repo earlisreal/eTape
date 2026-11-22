@@ -165,9 +165,20 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     const sellTrigger=risk.sharedEntryId?(short ? Math.min : Math.max)(stop.stopPrice,risk.addStopPrice??stop.stopPrice):marker.order.id!==entry.id && trigger?price:stop.stopPrice;
     if(risk.sharedEntryId)sell=resolveLimitCushionPrice(short ? "COVER" : "SELL",sellTrigger,risk.sellCushion.value,risk.sellCushion.unit === "%"?"%":"$");
     const locked=!!entry.held?.childClientId;
-    const sized=riskEntrySize({kind:"risk",id:entry.id,label:"Risk",mode:risk.mode === "CashPct" ? "CashPct" : risk.mode === "BuyingPowerPct" ? "BuyingPowerPct" : "Dollar",value:risk.budget,buyCushion:risk.buyCushion,sellCushion:risk.sellCushion},
-      marker.order.id===entry.id && trigger?price:entry.stopPrice,sellTrigger,latest.current.availableCash ?? 0,latest.current.buyingPower ?? 0,risk.budget,short,undefined,risk.fractional);
-    const qty=locked?entry.qty:sized.qty;
+    const stopDistance = !locked && trigger && (risk.entryStopDistancePct !== undefined || risk.protectionStopDistancePct !== undefined);
+    const entryTrigger = isEntry && trigger ? price : entry.stopPrice;
+    if (stopDistance && (short ? entryTrigger >= sellTrigger : entryTrigger <= sellTrigger)) {
+      return {qty:0,plannedQty:entry.qty,limit,detail:"Choose a protective stop on the loss side of the entry."};
+    }
+    const sized=riskEntrySize({kind:"risk",id:entry.id,label:"Risk",mode:risk.mode === "CashPct" ? "CashPct" : risk.mode === "BuyingPowerPct" ? "BuyingPowerPct" : "Dollar",value:risk.budget,buyCushion:risk.buyCushion,sellCushion:risk.sellCushion,
+      ...(stopDistance ? {entryStopDistancePct:risk.entryStopDistancePct,protectionStopDistancePct:risk.protectionStopDistancePct} : {})},
+      entryTrigger,sellTrigger,latest.current.availableCash ?? 0,latest.current.buyingPower ?? 0,risk.budget,short,undefined,risk.fractional);
+    const qty=locked?entry.qty:risk.sharedEntryId && stopDistance?Math.min(entry.qty,sized.qty):sized.qty;
+    if (stopDistance) {
+      const money = (amount:number) => amount.toLocaleString("en-US", {style:"currency",currency:"USD"});
+      return {qty,plannedQty:entry.qty,limit:isEntry?sized.buyLimit:sized.sellLimit,
+        detail:`${formatExecutionQuantity(qty)} shares · Entry limit ${priceText(sized.buyLimit)} · Protection limit ${priceText(sized.sellLimit)} · Est. risk ${money(qty * Math.abs(sized.buyLimit-sized.sellLimit))} · Loss at drawn prices ${money(qty * sized.gap)}`};
+    }
     const aboveBudget=qty*Math.max(0,short ? sell-buy : buy-sell)>risk.budget+0.005;
     return {qty,plannedQty:entry.qty,limit,aboveBudget,detail:`${qty} shares${aboveBudget?" · ABOVE ORIGINAL BUDGET":""}`};
   };

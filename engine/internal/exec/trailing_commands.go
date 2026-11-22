@@ -64,6 +64,32 @@ func (c *Core) configureTrail(ctx context.Context, venue VenueID, id string, obs
 		_ = c.acquireHeldDemand(ctx, previous)
 		return blocked("execution evidence expired while acquiring subscriptions")
 	}
+	owner := c.riskOwner(o)
+	if owner.RiskEntry != nil && owner.RiskEntry.usesStopDistance() && owner.Held != nil && owner.Held.ChildClientID == "" {
+		if config.Pricing != "CUSHION" {
+			_ = c.acquireHeldDemand(ctx, previous)
+			return blocked("pending Chart Risk Entry requires stop-relative Limit Cushion protection")
+		}
+		risk := *owner.RiskEntry
+		if config.Cushion != previous.Held.Trail.Config.Cushion {
+			risk.ProtectionStopDistancePct = nil
+			risk.SellCushion = config.Cushion
+		}
+		if err := repricePendingStockRisk(&owner, &o, &risk); err != nil {
+			_ = c.acquireHeldDemand(ctx, previous)
+			return blocked(err.Error())
+		}
+		if reason := c.resizePendingStockRisk(ctx, &owner, o, owner.Qty); reason != "" {
+			_ = c.acquireHeldDemand(ctx, previous)
+			return blocked(reason)
+		}
+		owner.UpdatedMs, o.UpdatedMs = c.now(), c.now()
+		if err := c.appendAndFold(RiskEntryChanged{Entry: owner, Stop: o}, SrcLocal); err != nil {
+			_ = c.acquireHeldDemand(ctx, previous)
+			return blocked(err.Error())
+		}
+		return CmdAck{Accepted: true, OrderID: id}
+	}
 	if err := c.saveTrail(o, t, o.Held.Phase, ""); err != nil {
 		return blocked(err.Error())
 	}

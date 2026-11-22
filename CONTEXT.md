@@ -326,6 +326,10 @@ _Avoid_: Planned buy quantity, linked entry sizing
 The non-negative distance applied to set an execution limit, added for BUY/COVER and subtracted for SELL/SHORT. A perpetual Chart Risk Entry applies it to the ask for a buy or the bid for a short when the entry triggers. Stock Chart Risk Entry applies it to the corresponding trigger price.
 _Avoid_: Price offset, slippage
 
+A stock Chart Risk Entry can set the Limit Cushion as a percentage of the
+distance between the entry and protective triggers. After entry dispatch,
+protection uses the resolved dollar cushion.
+
 **Quote Offset**:
 A signed dollar or percentage adjustment to a selected market-price reference, such as Bid or Ask, used to calculate an execution limit.
 _Avoid_: Trail Distance, Limit Cushion

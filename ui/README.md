@@ -177,6 +177,13 @@ trigger. BingX Auto uses the configured isolated leverage and can use the
 exchange ceiling as its cap. The chart warms signed opening terms before the
 gesture. With **Auto-send Chart Risk Entry** enabled, completing the drawing
 arms the entry immediately when its opening data is ready.
+Stock Chart Risk Entry offers **% of stop distance** independently for entry
+and protection. For example, 5% of the distance between a $100 entry and a
+$99 stop gives a $0.05 cushion. The chart shows the rounded limits, estimated
+risk at those limits, and loss if filled at the drawn prices. Editing an armed
+trigger recalculates the setup before dispatch. A dispatched entry leaves
+protection with the last reviewed dollar cushion.
+
 The selected Protection Mode applies to stocks. Only brief setup instructions and actionable
 warnings float over the bottom Volume area. The two axis chips expose planned
 shares, execution limits, custody, expiry and Enter/Escape shortcuts on hover.

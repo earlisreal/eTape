@@ -160,35 +160,39 @@ type LimitCushion struct {
 }
 
 type RiskEntry struct {
-	Fractional         bool         `json:"fractional,omitempty"`
-	SharedEntryID      string       `json:"sharedEntryId,omitempty"`
-	AddStopPrice       float64      `json:"addStopPrice,omitempty"`
-	StopApplied        bool         `json:"stopApplied,omitempty"`
-	Protection         *TrailConfig `json:"protection,omitempty"`
-	StopID             string       `json:"stopId"`
-	Budget             float64      `json:"budget"`
-	Mode               string       `json:"mode"`
-	BuyCushion         LimitCushion `json:"buyCushion"`
-	SellCushion        LimitCushion `json:"sellCushion"`
-	Closing            bool         `json:"closing,omitempty"`
-	ProtectionCanceled bool         `json:"protectionCanceled,omitempty"`
-	Failure            string       `json:"failure,omitempty"`
+	EntryStopDistancePct      *float64     `json:"entryStopDistancePct,omitempty"`
+	ProtectionStopDistancePct *float64     `json:"protectionStopDistancePct,omitempty"`
+	Fractional                bool         `json:"fractional,omitempty"`
+	SharedEntryID             string       `json:"sharedEntryId,omitempty"`
+	AddStopPrice              float64      `json:"addStopPrice,omitempty"`
+	StopApplied               bool         `json:"stopApplied,omitempty"`
+	Protection                *TrailConfig `json:"protection,omitempty"`
+	StopID                    string       `json:"stopId"`
+	Budget                    float64      `json:"budget"`
+	Mode                      string       `json:"mode"`
+	BuyCushion                LimitCushion `json:"buyCushion"`
+	SellCushion               LimitCushion `json:"sellCushion"`
+	Closing                   bool         `json:"closing,omitempty"`
+	ProtectionCanceled        bool         `json:"protectionCanceled,omitempty"`
+	Failure                   string       `json:"failure,omitempty"`
 }
 
 type SubmitRiskEntryArgs struct {
-	ExpectedSession OrderSession `json:"expectedSession,omitempty"`
-	Side            string       `json:"side,omitempty" tstype:"\"BUY\" | \"SHORT\""`
-	SharedEntryID   string       `json:"sharedEntryId,omitempty"`
-	Protection      *TrailConfig `json:"protection,omitempty"`
-	Venue           string       `json:"venue"`
-	Symbol          string       `json:"symbol"`
-	BuyStop         float64      `json:"buyStop"`
-	SellStop        float64      `json:"sellStop"`
-	Mode            string       `json:"mode"`
-	Value           float64      `json:"value"`
-	MaxQty          float64      `json:"maxQty"`
-	BuyCushion      LimitCushion `json:"buyCushion"`
-	SellCushion     LimitCushion `json:"sellCushion"`
+	EntryStopDistancePct      *float64     `json:"entryStopDistancePct,omitempty"`
+	ProtectionStopDistancePct *float64     `json:"protectionStopDistancePct,omitempty"`
+	ExpectedSession           OrderSession `json:"expectedSession,omitempty"`
+	Side                      string       `json:"side,omitempty" tstype:"\"BUY\" | \"SHORT\""`
+	SharedEntryID             string       `json:"sharedEntryId,omitempty"`
+	Protection                *TrailConfig `json:"protection,omitempty"`
+	Venue                     string       `json:"venue"`
+	Symbol                    string       `json:"symbol"`
+	BuyStop                   float64      `json:"buyStop"`
+	SellStop                  float64      `json:"sellStop"`
+	Mode                      string       `json:"mode"`
+	Value                     float64      `json:"value"`
+	MaxQty                    float64      `json:"maxQty"`
+	BuyCushion                LimitCushion `json:"buyCushion"`
+	SellCushion               LimitCushion `json:"sellCushion"`
 }
 
 type CryptoScannerRow struct {

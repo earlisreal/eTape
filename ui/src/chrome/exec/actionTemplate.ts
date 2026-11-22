@@ -47,6 +47,8 @@ export interface RiskEntryTemplate {
   kind: "risk"; id: string; label: string; hotkey?: string; deck?: boolean; deckColor?: DeckColor;
   mode: "Dollar" | "CashPct" | "BuyingPowerPct"; value: number;
   buyCushion: LimitCushion; sellCushion: LimitCushion;
+  entryStopDistancePct?: number | undefined;
+  protectionStopDistancePct?: number | undefined;
 }
 export type ActionTemplate = PlaceOrderTemplate | ManagementTemplate | RiskEntryTemplate;
 
@@ -96,7 +98,9 @@ function normalizeTemplate(t: ActionTemplate): ActionTemplate {
     return {...t, mode: t.auto && mode === "BuyingPowerPct" ? "CashPct" : mode,
       value: Number.isFinite(t.value) ? Math.max(0, t.mode === "Dollar" ? t.value : Math.min(100,t.value)) : 0,
       buyCushion: cushion(t.buyCushion), sellCushion,
-      ...(t.protection?{protection:normalizeTrail(t.protection,{...newTrailConfig(),pricing:"CUSHION",cushion:sellCushion})}:{})};
+      entryStopDistancePct: typeof t.entryStopDistancePct === "number" && Number.isFinite(t.entryStopDistancePct) && t.entryStopDistancePct >= 0 ? t.entryStopDistancePct : undefined,
+      protectionStopDistancePct: typeof t.protectionStopDistancePct === "number" && Number.isFinite(t.protectionStopDistancePct) && t.protectionStopDistancePct >= 0 ? t.protectionStopDistancePct : undefined,
+      ...(t.protection?{protection:normalizeTrail({...t.protection,cushion:sellCushion},{...newTrailConfig(),pricing:"CUSHION",cushion:sellCushion})}:{})};
   }
   if (t.kind !== "place") return t;
   let sizing = t.sizing;

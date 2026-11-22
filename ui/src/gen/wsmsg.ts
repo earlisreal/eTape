@@ -252,6 +252,8 @@ export interface LimitCushion {
   unit: string;
 }
 export interface RiskEntry {
+  entryStopDistancePct?: number /* float64 */;
+  protectionStopDistancePct?: number /* float64 */;
   fractional?: boolean;
   sharedEntryId?: string;
   addStopPrice?: number /* float64 */;
@@ -267,6 +269,8 @@ export interface RiskEntry {
   failure?: string;
 }
 export interface SubmitRiskEntryArgs {
+  entryStopDistancePct?: number /* float64 */;
+  protectionStopDistancePct?: number /* float64 */;
   expectedSession?: OrderSession;
   side?: "BUY" | "SHORT";
   sharedEntryId?: string;

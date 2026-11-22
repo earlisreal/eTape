@@ -190,7 +190,9 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             }
             const stock = draft && riskEntrySize(riskEntryAddTemplate(draft.template, context.owner, context.stop),
                 draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0, undefined, short(), shortFunds, draft.route?.fractionalRisk);
-            return stock && { ...stock, kind: "stock" as const };
+            return stock && { ...stock, kind: "stock" as const,
+                entryStopDistancePct: draft?.template.entryStopDistancePct,
+                protectionStopDistancePct: context.owner ? undefined : draft?.template.protectionStopDistancePct };
         };
         const sizingError = () => {
             const a = latest.current.stores.exec.accounts().find(a => a.venue === venue);
@@ -319,8 +321,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 const amount = s?.qty ? s.risk * qty / s.qty : 0;
                 const unit = draft.template.perpetual ? bingx() ? "lots" : "contracts" : "shares";
                 const currency = bingx() && executionVenue()?.broker === "bingx-vst" ? "VST" : "USDT";
-                readout.textContent = sizingError() || !s ? `— ${unit} · Est. risk —` :
+                const blocked = sizingError();
+                readout.textContent = blocked || !s ? `— ${unit} · Est. risk —` :
                     `${formatExecutionQuantity(qty)} ${unit} · Est. risk ${s.kind === "perpetual" ? `${amount.toFixed(2)} ${currency} · ${s.leverage}×${s.autoLeverage ? " Auto" : ""}` : amount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
+                if (s?.kind === "stock" && qty > 0 && (s.entryStopDistancePct !== undefined || s.protectionStopDistancePct !== undefined) && !blocked) {
+                    readout.textContent += `\nEntry limit ${pxText(s.buyLimit)} · Protection limit ${pxText(s.sellLimit)}\nLoss at drawn prices ${(qty * s.gap).toLocaleString("en-US", {style:"currency",currency:"USD"})}`;
+                }
                 if (s?.kind === "perpetual" && qty > 0) {
                     readout.textContent += `\nEst. initial margin ${(s.margin * qty / s.qty).toFixed(2)} ${currency}`;
                     if (bingx()) {
@@ -482,10 +488,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return;
             }
             const context = protection(), effective = riskEntryAddTemplate(current.template, context.owner, context.stop);
-            const args: SubmitRiskEntryArgs = { venue, symbol, ...(current.route?.fractionalRisk ? { expectedSession: current.route.effectiveSession } : {}), ...(short() ? {side: "SHORT" as const} : {}), buyStop: current.buy!, sellStop: current.sell!, mode: current.template.mode, value: current.template.value,
+            const args: SubmitRiskEntryArgs | undefined = s.kind === "stock" ? { venue, symbol, ...(current.route?.fractionalRisk ? { expectedSession: current.route.effectiveSession } : {}), ...(short() ? {side: "SHORT" as const} : {}), buyStop: current.buy!, sellStop: current.sell!, mode: current.template.mode, value: current.template.value,
                 ...(current.sharedEntryId ? { sharedEntryId: current.sharedEntryId } : {}),
-                maxQty: Math.min(current.maxQty, s.qty), buyCushion: current.template.buyCushion, sellCushion: effective.sellCushion,
-                ...(effective.protection?{protection:effective.protection}:{}) };
+                maxQty: Math.min(current.maxQty, s.qty), buyCushion: s.buyCushion, sellCushion: s.sellCushion,
+                ...(s.entryStopDistancePct !== undefined ? {entryStopDistancePct: s.entryStopDistancePct} : {}),
+                ...(s.protectionStopDistancePct !== undefined ? {protectionStopDistancePct: s.protectionStopDistancePct} : {}),
+                ...(effective.protection?{protection:{...effective.protection,cushion:s.sellCushion}}:{}) } : undefined;
             try {
                 const ack = s.kind === "perpetual" ? await latest.current.sendCommand("SubmitPerpetualRiskEntry", {
                     venue, symbol, side: s.side, trigger: current.buy, stop: current.sell, leverage: s.leverage,

@@ -532,6 +532,23 @@ it("uses cushions and funding caps, preserves the completed quantity cap, and se
     fireEvent.keyDown(window,{key:"Enter"});
     await waitFor(()=>expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry",expect.objectContaining({maxQty:99})));
 });
+it("previews rounded stop-distance cushions and sends the recipe with reviewed dollar limits", async () => {
+    const preset: RiskEntryTemplate = {...template, entryStopDistancePct:5, protectionStopDistancePct:0};
+    const {host, sendCommand} = mount(false, preset);
+    initiateChartRiskEntry(preset);
+    fireEvent.pointerDown(host,{pointerId:1,button:0,clientX:100,clientY:200});
+    fireEvent.pointerUp(window,{pointerId:1});
+    fireEvent.pointerMove(host,{pointerId:1,clientX:200,clientY:220});
+    flushFrames();
+    expect(host.querySelector("[data-risk-readout]")?.textContent).toContain("Loss at drawn prices $95.20");
+    fireEvent.pointerDown(host,{pointerId:2,button:0,clientX:200,clientY:220});
+    fireEvent.pointerUp(window,{pointerId:2});
+    fireEvent.keyDown(window,{key:"Enter"});
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry",expect.objectContaining({
+        entryStopDistancePct:5, protectionStopDistancePct:0, maxQty:476,
+        buyCushion:{unit:"$",value:expect.closeTo(0.01)}, sellCushion:{unit:"$",value:0},
+    })));
+});
 it("shows blocked sizing while selecting an invalid SELL or a zero-share setup", () => {
     const {host,stores} = mount();
     initiateChartRiskEntry(template);

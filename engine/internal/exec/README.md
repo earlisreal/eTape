@@ -200,8 +200,13 @@ the local cycle ledger and remains visible after flattening. Test:
 Stock Chart Risk Entry admits a linked BUY/SELL or SHORT/COVER STOP_LIMIT pair
 as one durable local event. Both triggers stay engine-held through PRE/RTH/POST until scheduled
 DataClose. `SubmitRiskEntry` uses fixed dollars, Cash %, or BP % as a loss budget;
-whole-share sizing uses cushion-adjusted execution limits and the funding cap,
-and `MaxQty` prevents increasing the approved preview. Admission requires fresh
+stock sizing uses cushion-adjusted execution limits and the funding cap,
+including stock-only percentages of the entry-to-stop gap. A pending trigger
+edit updates both limits, the resolved cushions, and the approved quantity
+in one journal event. Dispatch locks the dollar cushion for subsequent
+protective moves. Adds use the cushion of the existing shared stop.
+
+`MaxQty` prevents increasing the approved preview. Admission requires fresh
 account data, a confirmed flat position or fully protected same-side position,
 no unrelated working orders, opening gates,
 the live held-stop acknowledgement, and successful ticker subscriptions. Missing

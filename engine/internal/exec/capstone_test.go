@@ -45,6 +45,62 @@ func buildMultiCore(t *testing.T, st *store.Store, clk clock.Clock, global exec.
 	return exec.NewCore(cfg), sims
 }
 
+type simulatorRiskDemand struct{}
+
+func (simulatorRiskDemand) Acquire(context.Context, string, string) error { return nil }
+func (simulatorRiskDemand) Release(string)                                {}
+func (simulatorRiskDemand) TrailBookCoverage(string) uint64               { return 1 }
+
+func TestSimulatorStopDistanceRiskEntryRoundTrip(t *testing.T) {
+	const symbol = "AAPL"
+	clk := clock.NewFake(time.Date(2026, 11, 20, 15, 0, 0, 0, time.UTC))
+	st, err := store.Open(store.Options{Path: filepath.Join(t.TempDir(), "risk.db"), Clock: clk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	c, sims := buildMultiCore(t, st, clk,
+		exec.GlobalLimits{MaxDayLoss: 1000, MaxSymbolPositionShares: 1000, MaxSymbolPositionValue: 100_000},
+		exec.VenueLimits{MaxOrderValue: 100_000, MaxPositionValue: 100_000, MaxPositionShares: 1000, MaxOpenOrders: 10})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := c.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = c.Run(ctx) }()
+	c.Do(exec.ConfigureHeldDemand{Demand: simulatorRiskDemand{}})
+	c.Do(exec.Arm{})
+	c.PublishBrokerEvent(exec.BrokerAccount{Account: exec.AccountSnapshot{Venue: "sim-1", AvailableCash: 100_000, BuyingPower: 100_000, TsMs: clk.Now().UnixMilli()}})
+	waitFor(t, c, func(u exec.Update) bool {
+		a, ok := u.(exec.AccountUpdate)
+		return ok && a.Account.Venue == "sim-1" && a.Account.TsMs == clk.Now().UnixMilli()
+	})
+	pct := 5.0
+	ack := c.Do(exec.SubmitRiskEntry{Venue: "sim-1", Symbol: symbol, Side: exec.SideBuy, BuyStop: 100, SellStop: 99,
+		Mode: "Dollar", Value: 100, MaxQty: 100, EntryStopDistancePct: &pct, ProtectionStopDistancePct: &pct})
+	if !ack.Accepted {
+		t.Fatalf("stock risk entry rejected: %+v", ack)
+	}
+	print := func(seq int64, price float64) {
+		clk.Advance(time.Millisecond)
+		at := clk.Now().UnixMilli()
+		seedMarketableBook(sims["sim-1"], symbol, price)
+		c.FeedTrailBook(ctx, exec.TrailBook{Symbol: symbol, Bid: price, Ask: price, Coverage: 1, Generation: 1,
+			ReceiptMs: at, BidTsMs: &at, AskTsMs: &at})
+		c.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: symbol, Price: price, Seq: seq, TsMs: at, RecvTsMs: at, ReceiptMs: at})
+	}
+	print(1, 100)
+	waitFor(t, c, func(u exec.Update) bool {
+		o, ok := u.(exec.OrderUpdate)
+		return ok && o.Order.RiskEntryID == ack.OrderID && o.Order.Qty == 90 && o.Order.Held != nil && o.Order.Held.Phase == exec.HeldArmed
+	})
+	print(2, 99)
+	waitFor(t, c, func(u exec.Update) bool {
+		o, ok := u.(exec.OrderUpdate)
+		return ok && o.Order.RiskEntryID == ack.OrderID && o.Order.ExecutedQty == 90
+	})
+}
+
 // TestCapstoneAggregateGateBlocksCrossVenue: a submit within per-venue caps but
 // over the global symbol cap must be blocked by the aggregate layer. Positions
 // are driven through the broker (real fills), never poked into State directly

@@ -403,7 +403,7 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
           </>}
           {!t.perpetual && <label style={fieldGroup}>Protection mode <select aria-label="Protection mode" className="field" value={t.protection?.mode??"FIXED"} onChange={e=>patch(t.id,{protection:e.target.value==="FIXED"?undefined:{...(t.protection??newTrailConfig()),mode:e.target.value,pricing:"CUSHION",cushion:t.sellCushion}})}>
             <option value="FIXED">Fixed</option><option value="PRICE">Trail Price</option><option value="PERCENT">Trail Percent</option><option value="CANDLE">Candle Trail</option></select></label>}
-          {t.protection && <TrailEditor value={t.protection} lockMode lockSessions cushionOnly onChange={c=>patch(t.id,{protection:c,sellCushion:c.cushion})}/>}
+          {t.protection && <TrailEditor value={t.protection} lockMode lockSessions cushionOnly hideCushion onChange={c=>patch(t.id,{protection:c})}/>}
           <label style={fieldGroup}>Risk budget
             <select aria-label={`risk-mode-${t.id}`} className="field" value={t.mode}
               onChange={(e) => patch(t.id,{mode:e.target.value as RiskEntryTemplate["mode"]})}>
@@ -417,15 +417,39 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
               value={rawEdits[`${t.id}:risk`] ?? t.value} onBlur={() => clearRawEdit(`${t.id}:risk`)}
               onChange={(e) => {setRawEdit(`${t.id}:risk`,e.target.value); patch(t.id,{value:Number(e.target.value)});}} />
           </label>
-          {(["buyCushion","sellCushion"] as const).filter(key => !t.perpetual || key === "buyCushion").map((key) => <label key={key} style={fieldGroup}>
-            {key === "buyCushion" ? (t.perpetual || t.auto ? "Entry" : "Buy") : t.auto ? "Stock Protection" : "Sell"} Limit Cushion
+          {(["buyCushion","sellCushion"] as const).filter(key => !t.perpetual || key === "buyCushion").map(key => {
+            const pctKey = key === "buyCushion" ? "entryStopDistancePct" : "protectionStopDistancePct";
+            const pct = t.perpetual ? undefined : t[pctKey];
+            const rawKey = `${t.id}:${key}`;
+            return <label key={key} style={fieldGroup}>
+            {key === "buyCushion" ? (t.auto && pct !== undefined ? "Stock Entry" : "Entry") : "Stock Protection"} Limit Cushion
             <input className="field" aria-label={`${key}-${t.id}`} type="number" min="0" step="any"
-              value={rawEdits[`${t.id}:${key}`] ?? t[key].value} onBlur={() => clearRawEdit(`${t.id}:${key}`)}
-              onChange={(e) => {setRawEdit(`${t.id}:${key}`,e.target.value); patch(t.id,{[key]:{...t[key],value:Number(e.target.value)}});}} />
-            <select className="field" aria-label={`${key}-unit-${t.id}`} value={t[key].unit} onChange={(e) => patch(t.id,{[key]:{...t[key],unit:e.target.value}})}>
-              <option value="$">{t.auto && key === "buyCushion" ? "USD / USDT" : t.perpetual ? "USDT" : "$"}</option><option>%</option>
+              value={rawEdits[rawKey] ?? pct ?? t[key].value} onBlur={() => clearRawEdit(rawKey)}
+              onChange={e => {
+                setRawEdit(rawKey, e.target.value);
+                const value = Number(e.target.value);
+                if (Number.isFinite(value) && value >= 0) patch(t.id, pct === undefined ? {[key]: {...t[key], value}} : {[pctKey]: value});
+              }} />
+            <select className="field" aria-label={`${key}-unit-${t.id}`} value={pct === undefined ? t[key].unit : "stop"} onChange={e => {
+              clearRawEdit(rawKey);
+              if (e.target.value === "stop") patch(t.id, {[pctKey]: t[key].value});
+              else patch(t.id, {...(!t.perpetual ? {[pctKey]: undefined} : {}), [key]: {...t[key], unit: e.target.value}});
+            }}>
+              <option value="$">{t.auto && key === "buyCushion" && pct === undefined ? "USD / USDT" : t.perpetual ? "USDT" : "$"}</option>
+              <option value="%">% of price</option>
+              {!t.perpetual && <option value="stop">% of stop distance</option>}
             </select>
-          </label>)}
+          </label>;
+          })}
+          {t.auto && t.entryStopDistancePct !== undefined && <label style={fieldGroup}>
+            Perpetual Entry Limit Cushion
+            <input className="field" aria-label="Perpetual Entry Limit Cushion" type="number" min="0" step="any" value={t.buyCushion.value}
+              onChange={e => patch(t.id, {buyCushion: {...t.buyCushion, value: Math.max(0, Number(e.target.value))}})} />
+            <select className="field" aria-label="Perpetual entry cushion unit" value={t.buyCushion.unit}
+              onChange={e => patch(t.id, {buyCushion: {...t.buyCushion, unit: e.target.value}})}>
+              <option value="$">USDT</option><option value="%">% of price</option>
+            </select>
+          </label>}
           <small>{t.auto ? "Draw the stop below entry for a long or above entry for a short on supported venues. Stocks use the selected Protection Mode. MEXC and BingX use a fixed mark-price stop." :
             t.perpetual ? "24-hour entry. A mark-price stop covers confirmed fills on MEXC and the entire protected position on BingX." : "Loss budget, excluding fees and execution risk. Whole shares; DAY until market data close. Both triggers are held by eTape."}</small>
         </div>

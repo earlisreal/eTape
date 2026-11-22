@@ -127,7 +127,9 @@ func (c *Core) replaceRiskAdd(ctx context.Context, cm ReplaceOrder, entry, stop 
 	if !riskAccountFresh(c.state, entry.Venue) || account.TsMs <= 0 || c.now()-account.TsMs > 30_000 {
 		return blocked("fresh account data required")
 	}
-	limit, err := riskLimit(cm.StopPrice, entry.RiskEntry.BuyCushion, entry.Side == SideBuy)
+	risk := *entry.RiskEntry
+	risk.BuyCushion = resolveStockCushion(risk.BuyCushion, risk.EntryStopDistancePct, cm.StopPrice, stopPrice)
+	limit, err := riskLimit(cm.StopPrice, risk.BuyCushion, entry.Side == SideBuy)
 	if err != nil {
 		return blocked(err.Error())
 	}
@@ -151,6 +153,7 @@ func (c *Core) replaceRiskAdd(ctx context.Context, cm ReplaceOrder, entry, stop 
 		return blocked(why)
 	}
 	entry.StopPrice, entry.LimitPrice, entry.Qty, entry.LeavesQty, entry.UpdatedMs = cm.StopPrice, limit, qty, qty, c.now()
+	entry.RiskEntry = &risk
 	if err := c.appendAndFold(RiskEntryChanged{Entry: entry}, SrcLocal); err != nil {
 		return blocked("event append failed: " + err.Error())
 	}

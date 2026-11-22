@@ -117,6 +117,67 @@ func TestRiskEntryWaitsForFreshPrint(t *testing.T) {
 	}
 }
 
+func TestStopDistanceRiskEntryRepricesPairBeforeDispatch(t *testing.T) {
+	c, clk, broker, ctx := newRiskCore(t)
+	entryPct, stopPct := 5.0, 10.0
+	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 20, SellStop: 19.8,
+		Mode: "Dollar", Value: 100, MaxQty: 1000, EntryStopDistancePct: &entryPct, ProtectionStopDistancePct: &stopPct})
+	if !ack.Accepted {
+		t.Fatalf("admission: %+v", ack)
+	}
+	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
+	stopID := entry.RiskEntry.StopID
+	if edit := c.Do(ReplaceOrder{Venue: "v", OrderID: stopID, Qty: 1000, StopPrice: 19.6,
+		ExpectedHeldPhase: HeldWaiting, ExpectedRiskEntryPhase: "WAITING"}); !edit.Accepted {
+		t.Fatalf("waiting edit: %+v", edit)
+	}
+	stop := waitOrder(t, c, stopID, func(o Order) bool { return o.StopPrice == 19.6 })
+	if math.Abs(stop.LimitPrice-19.56) > 1e-8 {
+		t.Fatalf("pending protection limit: %g", stop.LimitPrice)
+	}
+	clk.Advance(time.Millisecond)
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 20))
+	select {
+	case req := <-broker.submits:
+		if req.Qty != 217 || math.Abs(req.LimitPrice-20.02) > 1e-8 {
+			t.Fatalf("dispatched entry: %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("entry did not dispatch")
+	}
+	if edit := c.Do(ReplaceOrder{Venue: "v", OrderID: stopID, StopPrice: 19.5,
+		ExpectedHeldPhase: HeldWaiting, ExpectedRiskEntryPhase: "ACTIVATED"}); !edit.Accepted {
+		t.Fatalf("post-dispatch edit: %+v", edit)
+	}
+	stop = waitOrder(t, c, stopID, func(o Order) bool { return o.StopPrice == 19.5 })
+	if math.Abs(stop.LimitPrice-19.46) > 1e-8 {
+		t.Fatalf("protection should use the dispatched dollar cushion: %g", stop.LimitPrice)
+	}
+}
+
+func TestStopDistanceRiskEntryTrailEditRechecksBudget(t *testing.T) {
+	c, _, _, _ := newRiskCore(t)
+	pct := 5.0
+	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 20, SellStop: 19,
+		Mode: "Dollar", Value: 100, MaxQty: 100, EntryStopDistancePct: &pct,
+		ProtectionStopDistancePct: &pct, Protection: &TrailConfig{Mode: "PRICE", Value: 0.5, Pricing: "CUSHION"}})
+	if !ack.Accepted {
+		t.Fatalf("admission: %+v", ack)
+	}
+	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
+	stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Held != nil })
+	config := stop.Held.Trail.Config
+	config.Cushion = LimitCushion{Unit: "$", Value: 0.95}
+	if edit := c.Do(EditTrail{Venue: "v", OrderID: stop.ID, ExpectedHeldPhase: HeldWaiting, ExpectedStop: 19, Config: config}); !edit.Accepted {
+		t.Fatalf("trail edit: %+v", edit)
+	}
+	entry = waitOrder(t, c, entry.ID, func(o Order) bool { return o.Qty == 50 })
+	stop = waitOrder(t, c, stop.ID, func(o Order) bool { return math.Abs(o.LimitPrice-18.05) < 1e-8 })
+	if entry.RiskEntry.ProtectionStopDistancePct != nil || entry.RiskEntry.EntryStopDistancePct == nil || stop.Held.Trail.Config.Cushion != config.Cushion {
+		t.Fatalf("edited recipe: %+v, trail: %+v", entry.RiskEntry, stop.Held.Trail)
+	}
+}
+
 type riskEntryTestDemand struct {
 	heldDemandStub
 	beforeAcquire func()

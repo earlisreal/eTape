@@ -15,34 +15,37 @@ type LimitCushion struct {
 
 // RiskEntry retains per-entry sizing; adds link to the original protection owner.
 type RiskEntry struct {
-	Fractional         bool         `json:"fractional,omitempty"`
-	SharedEntryID      string       `json:"sharedEntryId,omitempty"`
-	AddStopPrice       float64      `json:"addStopPrice,omitempty"`
-	StopApplied        bool         `json:"stopApplied,omitempty"`
-	StopID             string       `json:"stopId"`
-	Budget             float64      `json:"budget"`
-	Mode               string       `json:"mode"`
-	BuyCushion         LimitCushion `json:"buyCushion"`
-	SellCushion        LimitCushion `json:"sellCushion"`
-	Closing            bool         `json:"closing,omitempty"`
-	ProtectionCanceled bool         `json:"protectionCanceled,omitempty"`
-	Failure            string       `json:"failure,omitempty"`
-	FlatConfirmedQty   float64      `json:"flatConfirmedQty,omitempty"`
-	Protection         *TrailConfig `json:"protection,omitempty"`
-	RetiredQty         float64      `json:"retiredQty,omitempty"`
+	EntryStopDistancePct      *float64     `json:"entryStopDistancePct,omitempty"`
+	ProtectionStopDistancePct *float64     `json:"protectionStopDistancePct,omitempty"`
+	Fractional                bool         `json:"fractional,omitempty"`
+	SharedEntryID             string       `json:"sharedEntryId,omitempty"`
+	AddStopPrice              float64      `json:"addStopPrice,omitempty"`
+	StopApplied               bool         `json:"stopApplied,omitempty"`
+	StopID                    string       `json:"stopId"`
+	Budget                    float64      `json:"budget"`
+	Mode                      string       `json:"mode"`
+	BuyCushion                LimitCushion `json:"buyCushion"`
+	SellCushion               LimitCushion `json:"sellCushion"`
+	Closing                   bool         `json:"closing,omitempty"`
+	ProtectionCanceled        bool         `json:"protectionCanceled,omitempty"`
+	Failure                   string       `json:"failure,omitempty"`
+	FlatConfirmedQty          float64      `json:"flatConfirmedQty,omitempty"`
+	Protection                *TrailConfig `json:"protection,omitempty"`
+	RetiredQty                float64      `json:"retiredQty,omitempty"`
 }
 
 type SubmitRiskEntry struct {
-	ExpectedSession         *OrderSession
-	Side                    Side
-	SharedEntryID           string
-	Venue                   VenueID
-	Symbol                  string
-	BuyStop, SellStop       float64
-	Mode                    string
-	Value, MaxQty           float64
-	BuyCushion, SellCushion LimitCushion
-	Protection              *TrailConfig
+	EntryStopDistancePct, ProtectionStopDistancePct *float64
+	ExpectedSession                                 *OrderSession
+	Side                                            Side
+	SharedEntryID                                   string
+	Venue                                           VenueID
+	Symbol                                          string
+	BuyStop, SellStop                               float64
+	Mode                                            string
+	Value, MaxQty                                   float64
+	BuyCushion, SellCushion                         LimitCushion
+	Protection                                      *TrailConfig
 }
 
 func (SubmitRiskEntry) isCommand() {}
@@ -91,6 +94,17 @@ func riskShares(budget, buyLimit, sellLimit, funds float64) float64 {
 		return 0
 	}
 	return math.Min(math.Floor(budget/distance+1e-9), math.Floor(funds/buyLimit+1e-9))
+}
+
+func resolveStockCushion(cushion LimitCushion, pct *float64, entry, stop float64) LimitCushion {
+	if pct == nil {
+		return cushion
+	}
+	return LimitCushion{Value: math.Abs(entry-stop) * *pct / 100, Unit: "$"}
+}
+
+func (r RiskEntry) usesStopDistance() bool {
+	return r.EntryStopDistancePct != nil || r.ProtectionStopDistancePct != nil
 }
 
 func riskExitSide(side Side) Side {
@@ -162,6 +176,7 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 			return blocked("add stop must keep or raise the shared stop")
 		}
 		cm.SellCushion, cm.Protection = owner.RiskEntry.SellCushion, owner.RiskEntry.Protection
+		cm.ProtectionStopDistancePct = nil
 		if sharedStop.Held.Trail != nil {
 			config := sharedStop.Held.Trail.Config
 			cm.Protection, cm.SellCushion = &config, config.Cushion
@@ -191,6 +206,8 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	if cm.Mode != "Dollar" && cm.Value > 100 {
 		return blocked("risk percentage must be at most 100")
 	}
+	cm.BuyCushion = resolveStockCushion(cm.BuyCushion, cm.EntryStopDistancePct, cm.BuyStop, cm.SellStop)
+	cm.SellCushion = resolveStockCushion(cm.SellCushion, cm.ProtectionStopDistancePct, cm.BuyStop, cm.SellStop)
 	buyLimit, err := riskLimit(cm.BuyStop, cm.BuyCushion, cm.Side == SideBuy)
 	if err != nil {
 		return blocked(err.Error())
@@ -264,6 +281,8 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 		stop.Held.Trail = &TrailState{Config: config, Stop: cm.SellStop, Limit: sellLimit, Floor: cm.SellStop}
 	}
 	entry.RiskEntry = &RiskEntry{Fractional: fractional, StopID: stop.ID, Budget: budget, Mode: cm.Mode, BuyCushion: cm.BuyCushion, SellCushion: cm.SellCushion}
+	entry.RiskEntry.EntryStopDistancePct = cm.EntryStopDistancePct
+	entry.RiskEntry.ProtectionStopDistancePct = cm.ProtectionStopDistancePct
 	entry.RiskEntry.Protection = cm.Protection
 	stop.RiskEntryID = entry.ID
 	acquire := []Order{entry, stop}
@@ -575,15 +594,23 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 		return blocked("invalid trigger price")
 	}
 	risk := *entry.RiskEntry
+	pendingDistance := entry.Held.ChildClientID == "" && risk.usesStopDistance()
 	if o.ID == entry.ID {
 		entry.StopPrice = cm.StopPrice
+	} else {
+		stop.StopPrice = cm.StopPrice
+	}
+	if pendingDistance {
+		if err := repricePendingStockRisk(&entry, &stop, &risk); err != nil {
+			return blocked(err.Error())
+		}
+	} else if o.ID == entry.ID {
 		price, err := riskLimit(cm.StopPrice, risk.BuyCushion, entry.Side == SideBuy)
 		if err != nil {
 			return blocked(err.Error())
 		}
 		entry.LimitPrice = price
 	} else {
-		stop.StopPrice = cm.StopPrice
 		price, err := riskLimit(cm.StopPrice, risk.SellCushion, stop.Side == SideCover)
 		if err != nil {
 			return blocked(err.Error())
@@ -597,26 +624,9 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 		if riskPosition(entry.Side, entry.StopPrice-stop.StopPrice) <= 0 {
 			return blocked("choose a protective stop on the loss side of the entry")
 		}
-		account := c.state.Venue(entry.Venue).Account
-		if !riskAccountFresh(c.state, entry.Venue) || account.TsMs <= 0 || c.now()-account.TsMs > 30_000 {
-			return blocked("fresh account data required")
-		}
-		funds := account.BuyingPower
-		if risk.Mode == "CashPct" {
-			funds = account.AvailableCash
-		}
-		qty, reason := c.sizeStockRisk(ctx, entry.Venue, entry.Symbol, entry.ID, entry.Side, risk.Budget, entry.LimitPrice, stop.LimitPrice, entry.StopPrice, funds, cm.Qty, risk.Fractional)
-		if reason != "" {
+		if reason := c.resizePendingStockRisk(ctx, &entry, stop, cm.Qty); reason != "" {
 			return blocked(reason)
 		}
-		if !finitePositive(qty) {
-			return blocked("risk or funding budget rounds to zero shares")
-		}
-		req := OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: entry.Side, Type: TypeStopLimit, TIF: TIFDay, Session: entry.Session, Qty: qty, LimitPrice: entry.LimitPrice, StopPrice: entry.StopPrice, ClientOrderID: entry.ID}
-		if good, reason := c.heldGate(req, entry.ID); !good {
-			return blocked(reason)
-		}
-		entry.Qty, entry.LeavesQty = qty, qty
 	} else if o.ID != entry.ID && !c.state.PositionsReady(entry.Venue) {
 		return blocked("position data unavailable")
 	}
@@ -646,6 +656,54 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 		c.activateProtectedStop(ctx, current, last)
 	}
 	return CmdAck{Accepted: true, OrderID: o.ID}
+}
+
+func repricePendingStockRisk(entry, stop *Order, risk *RiskEntry) error {
+	risk.BuyCushion = resolveStockCushion(risk.BuyCushion, risk.EntryStopDistancePct, entry.StopPrice, stop.StopPrice)
+	risk.SellCushion = resolveStockCushion(risk.SellCushion, risk.ProtectionStopDistancePct, entry.StopPrice, stop.StopPrice)
+	var err error
+	entry.LimitPrice, err = riskLimit(entry.StopPrice, risk.BuyCushion, entry.Side == SideBuy)
+	if err != nil {
+		return err
+	}
+	stop.LimitPrice, err = riskLimit(stop.StopPrice, risk.SellCushion, stop.Side == SideCover)
+	if err != nil {
+		return err
+	}
+	if stop.Held.Trail != nil {
+		held := *stop.Held
+		trail := *held.Trail
+		trail.Config.Cushion, trail.Limit = risk.SellCushion, stop.LimitPrice
+		held.Trail, risk.Protection = &trail, &trail.Config
+		stop.Held = &held
+	}
+	entry.RiskEntry = risk
+	return nil
+}
+
+func (c *Core) resizePendingStockRisk(ctx context.Context, entry *Order, stop Order, cap float64) string {
+	account := c.state.Venue(entry.Venue).Account
+	if !riskAccountFresh(c.state, entry.Venue) || account.TsMs <= 0 || c.now()-account.TsMs > 30_000 {
+		return "fresh account data required"
+	}
+	risk := entry.RiskEntry
+	funds := account.BuyingPower
+	if risk.Mode == "CashPct" {
+		funds = account.AvailableCash
+	}
+	qty, reason := c.sizeStockRisk(ctx, entry.Venue, entry.Symbol, entry.ID, entry.Side, risk.Budget, entry.LimitPrice, stop.LimitPrice, entry.StopPrice, funds, cap, risk.Fractional)
+	if reason != "" {
+		return reason
+	}
+	if !finitePositive(qty) {
+		return "risk or funding budget rounds to zero shares"
+	}
+	req := OrderRequest{Venue: entry.Venue, Symbol: entry.Symbol, Side: entry.Side, Type: TypeStopLimit, TIF: TIFDay, Session: entry.Session, Qty: qty, LimitPrice: entry.LimitPrice, StopPrice: entry.StopPrice, ClientOrderID: entry.ID}
+	if good, reason := c.heldGate(req, entry.ID); !good {
+		return reason
+	}
+	entry.Qty, entry.LeavesQty = qty, qty
+	return ""
 }
 
 func (c *Core) disarmRiskEntries(ctx context.Context, venue VenueID, protection bool) {
