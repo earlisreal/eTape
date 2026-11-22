@@ -63,11 +63,19 @@ func TestSimulatorStopDistanceRiskEntryRoundTrip(t *testing.T) {
 		exec.GlobalLimits{MaxDayLoss: 1000, MaxSymbolPositionShares: 1000, MaxSymbolPositionValue: 100_000},
 		exec.VenueLimits{MaxOrderValue: 100_000, MaxPositionValue: 100_000, MaxPositionShares: 1000, MaxOpenOrders: 10})
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	stopped := make(chan struct{})
+	defer func() {
+		cancel()
+		<-stopped
+	}()
 	if err := c.Recover(ctx); err != nil {
+		close(stopped)
 		t.Fatal(err)
 	}
-	go func() { _ = c.Run(ctx) }()
+	go func() {
+		defer close(stopped)
+		_ = c.Run(ctx)
+	}()
 	c.Do(exec.ConfigureHeldDemand{Demand: simulatorRiskDemand{}})
 	c.Do(exec.Arm{})
 	c.PublishBrokerEvent(exec.BrokerAccount{Account: exec.AccountSnapshot{Venue: "sim-1", AvailableCash: 100_000, BuyingPower: 100_000, TsMs: clk.Now().UnixMilli()}})
