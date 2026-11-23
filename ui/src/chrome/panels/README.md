@@ -39,7 +39,8 @@ Account price columns, Scanner Last, and Watchlist Last show four decimal
 places for positive prices below $1, including trailing zeros. Prices at $1
 and above and numeric zero keep each column's existing precision; unavailable
 or inapplicable prices keep `—`. Trade History Diff uses four places for
-nonzero magnitudes below $1, preserving its sign. Balances, total P&L, fees,
+nonzero magnitudes below $1, preserving its sign. Trade History Qty displays
+up to four decimal places. Balances, total P&L, fees,
 and Dollar Turnover retain their existing formats. Formatting never changes
 stored values, numeric sorting, or exported trade data.
 Open QTY remains the remaining share count when available; Closed QTY is the

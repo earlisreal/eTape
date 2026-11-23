@@ -50,6 +50,20 @@ function renderHarness(props: ReturnType<typeof mkProps>["props"], venue: string
 }
 
 describe("TradeHistoryTable", () => {
+  it("rounds displayed quantities to at most four decimal places", () => {
+    const { props, stores } = mkProps();
+    stores.trades.apply(snap([
+      row({ seq: 1, qty: 2.083333339 }),
+      row({ seq: 2, qty: 1.818181818 }),
+      row({ seq: 3, qty: 30 }),
+    ]));
+    renderHarness(props, "alpaca-paper");
+
+    expect(screen.getByText("2.0833")).toBeTruthy();
+    expect(screen.getByText("1.8182")).toBeTruthy();
+    expect(screen.getByText("30")).toBeTruthy();
+  });
+
   it("preserves sub-dollar Entry, Exit and signed Diff precision without changing total P&L", () => {
     const { props, stores } = mkProps();
     stores.trades.apply(snap([

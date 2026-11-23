@@ -101,7 +101,7 @@ export function TradeHistoryTable({
             {rows.map((r) => (
               <tr key={r.seq} data-testid={`trade-${r.seq}`} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
                 <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
-                <td data-column="qty">{formatExecutionQuantity(r.qty)}</td>
+                <td data-column="qty">{formatExecutionQuantity(r.qty, 4)}</td>
                 <td data-column="entryPrice">{formatPrice(r.entryPrice, quoteDecimals(r.entryPrice, 2))}</td>
                 <td data-column="exitPrice">{formatPrice(r.exitPrice, quoteDecimals(r.exitPrice, 2))}</td>
                 <td data-column="diff">{formatPrice(r.exitPrice - r.entryPrice, quoteDecimals(Math.abs(r.exitPrice - r.entryPrice), 2))}</td>

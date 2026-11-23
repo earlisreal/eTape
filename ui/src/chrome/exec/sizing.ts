@@ -20,8 +20,8 @@ export function floorFractionalShares(qty: number): number {
   return Math.floor(qty * 1e9) / 1e9;
 }
 
-export function formatExecutionQuantity(qty: number): string {
-  return qty.toLocaleString("en-US", { maximumFractionDigits: 9 });
+export function formatExecutionQuantity(qty: number, maximumFractionDigits = 9): string {
+  return qty.toLocaleString("en-US", { maximumFractionDigits });
 }
 
 export function resolveShares(spec: SizingSpec, ctx: SizingContext): SizedShares {
