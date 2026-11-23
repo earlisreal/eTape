@@ -30,8 +30,8 @@ test("stock and crypto Following windows run independently", async ({ context, p
     });
   });
   await page.goto("/?workspace=monitoring");
-  await page.getByRole("button", { name: "Use this Scanner as Monitoring Source" }).click();
-  await expect(page.getByRole("button", { name: "Disable Scanner Sync" })).toBeVisible();
+  await page.getByRole("button", { name: "Use this Scanner" }).click();
+  await expect(page.getByRole("button", { name: "Following", exact: true })).toHaveAttribute("aria-pressed", "true");
 
   await page.getByRole("button", { name: /new window/i }).click();
   const [crypto] = await Promise.all([
@@ -51,5 +51,5 @@ test("stock and crypto Following windows run independently", async ({ context, p
   await expect(crypto.getByRole("row", { name: /BTC\/USDT/ }).getByRole("cell", { name: "—" })).toHaveCount(3);
   await crypto.getByRole("button", { name: "Disable Scanner Sync" }).click();
   await expect(crypto.getByRole("button", { name: "Enable Scanner Sync" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Disable Scanner Sync" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Following", exact: true })).toHaveAttribute("aria-pressed", "true");
 });

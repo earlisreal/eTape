@@ -146,7 +146,7 @@ interface CommandClient {
 const MONITORING_WRITE_LOCK = "etape.monitoring-write";
 
 export class WorkspaceStore {
-  private replaceMonitoringSource = false;
+  private readonly writes = new Map<string, Promise<void>>();
   private readonly pending = new Map<string, Workspace>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly changeListeners = new Map<string, Set<WorkspaceChangeListener>>();
@@ -198,35 +198,21 @@ export class WorkspaceStore {
     return blank;
   }
 
-  async updateMonitoringSync(seed: Workspace, update: (current: ScannerSyncConfig | undefined) => ScannerSyncConfig | undefined): Promise<Workspace> {
-    return withLock(MONITORING_WRITE_LOCK, async () => {
-      const key = `workspace.${MONITORING_WORKSPACE_ID}`;
-      const ack = await this.client.sendCommand("GetConfig", { key });
-      if (ack.status !== "accepted") throw new Error("Could not read Monitoring settings.");
-      const savedWorkspace = ack.value as Partial<Workspace> | null | undefined;
-      const current = isCurrentWorkspace(savedWorkspace)
-        ? withoutScreenerPanels(savedWorkspace)
-        : savedWorkspace && Array.isArray(savedWorkspace.panels) && "layout" in savedWorkspace
-          ? withoutScreenerPanels({ ...savedWorkspace, name: seed.name, layoutVersion: seed.layoutVersion } as Workspace)
-          : seed;
-      const nextSync = update(current.scannerSync);
-      if (!nextSync) return current;
-      const next = { ...current, scannerSync: nextSync };
-      const saved = await this.client.sendCommand("SetConfig", { key, value: next });
-      if (saved.status !== "accepted") throw new Error("Could not save Monitoring source.");
-      this.notify(MONITORING_WORKSPACE_ID);
-      return next;
-    });
+  saveNow(ws: Workspace): Promise<void> {
+    this.pending.set(ws.name, ws);
+    const timer = this.timers.get(ws.name);
+    if (timer !== undefined) clearTimeout(timer);
+    this.timers.delete(ws.name);
+    return this.writeNow(ws.name);
   }
 
-  save(ws: Workspace, replaceMonitoringSource = false): void {
-    if (ws.name === MONITORING_WORKSPACE_ID && replaceMonitoringSource) this.replaceMonitoringSource = true;
+  save(ws: Workspace): void {
     this.pending.set(ws.name, ws);
     const timer = this.timers.get(ws.name);
     if (timer) clearTimeout(timer);
     this.timers.set(ws.name, setTimeout(() => {
       this.timers.delete(ws.name);
-      void this.writeNow(ws.name);
+      void this.writeNow(ws.name).catch(() => {});
     }, this.debounceMs));
   }
 
@@ -247,31 +233,29 @@ export class WorkspaceStore {
   async flush(): Promise<void> {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
-    while (this.pending.size > 0) await Promise.all([...this.pending.keys()].map((name) => this.writeNow(name)));
+    while (this.pending.size > 0 || this.writes.size > 0) {
+      await Promise.all([
+        ...this.writes.values(),
+        ...[...this.pending.keys()].map((name) => this.writeNow(name)),
+      ]);
+    }
   }
 
   private async writeNow(name: string): Promise<void> {
-    const ws = this.pending.get(name);
-    if (!ws) return;
+    const workspace = this.pending.get(name);
+    if (!workspace) return;
     this.pending.delete(name);
-    const key = `workspace.${ws.name}`;
-    if (name === MONITORING_WORKSPACE_ID) {
-      const replace = this.replaceMonitoringSource;
-      this.replaceMonitoringSource = false;
-      await withLock(MONITORING_WRITE_LOCK, async () => {
-        const saved = await this.client.sendCommand("GetConfig", { key });
-        if (saved.status !== "accepted") return;
-        const value = { ...ws };
-        if (!replace && isCurrentWorkspace(saved.value)) {
-          delete value.scannerSync;
-          if (saved.value.scannerSync) value.scannerSync = saved.value.scannerSync;
-        }
-        const ack = await this.client.sendCommand("SetConfig", { key, value });
-        if (ack.status === "accepted") this.notify(name);
-      });
-      return;
+    const previous = this.writes.get(name);
+    const write = (previous?.catch(() => {}) ?? Promise.resolve()).then(async () => {
+      const ack = await this.client.sendCommand("SetConfig", { key: `workspace.${name}`, value: workspace });
+      if (ack.status !== "accepted") throw new Error("Could not save workspace.");
+      this.notify(name);
+    });
+    this.writes.set(name, write);
+    try {
+      await write;
+    } finally {
+      if (this.writes.get(name) === write) this.writes.delete(name);
     }
-    const ack = await this.client.sendCommand("SetConfig", { key, value: ws });
-    if (ack.status === "accepted") this.notify(ws.name);
   }
 }

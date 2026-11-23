@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
+import { createPortal } from "react-dom";
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
 import type { PanelProps } from "./registry";
 import { ScannerSyncControl } from "./ScannerControls";
+import { PanelHeaderActionsSlotContext } from "./headerSlot";
 import type { WatchlistMoveArgs, WatchlistRow } from "../../gen/wsmsg";
 import { useTheme } from "../ThemeProvider";
 import { FONTS } from "../../render/palette";
@@ -130,7 +132,10 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
     />
   );
 
-  const following = scannerSync && <ScannerSyncControl sync={scannerSync} sourceName="Watchlist" />;
+  const headerActions = useContext(PanelHeaderActionsSlotContext);
+  const sourceControl = scannerSync && <ScannerSyncControl sync={scannerSync} sourceName="Watchlist" />;
+  const following = headerActions === undefined ? sourceControl
+    : headerActions && sourceControl ? createPortal(sourceControl, headerActions) : null;
 
   if (snap.symbols.length === 0) {
     return (

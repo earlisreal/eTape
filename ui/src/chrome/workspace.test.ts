@@ -11,7 +11,7 @@ function fakeClient() {
 }
 
 describe("WorkspaceStore", () => {
-  it("preserves a source switch during a queued Monitoring layout save", async () => {
+  it("preserves a source switch during a queued workspace layout save", async () => {
     const seed = buildMonitoringWorkspace();
     let stored = seed;
     const client = {
@@ -22,9 +22,9 @@ describe("WorkspaceStore", () => {
       }),
     };
     const owner = new WorkspaceStore(client);
-    const controls = new WorkspaceStore(client);
-    owner.save({ ...seed, groups: { red: "US.MSFT" } });
-    await controls.updateMonitoringSync(seed, () => ({ enabled: true, sourceKind: "watchlist" }));
+    const layout = { ...seed, groups: { red: "US.MSFT" } };
+    owner.save(layout);
+    await owner.saveNow({ ...layout, scannerSync: { enabled: true, sourceKind: "watchlist" } });
     await owner.flush();
     expect(stored.scannerSync).toEqual({ enabled: true, sourceKind: "watchlist" });
     expect(stored.groups).toEqual({ red: "US.MSFT" });

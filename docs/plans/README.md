@@ -4,6 +4,8 @@ Create one focused Markdown file per approved change. Name `YYYY-MM-DD-short-fea
 
 Implemented:
 
+- [Window-scoped stock Following](2026-11-23-window-scoped-stock-following.md)
+
 - [Stock Chart Risk Entry cushion as a percent of stop distance](2026-11-22-stock-stop-distance-cushion.md)
 
 - [Watchlist Sync to Following](2026-11-21-watchlist-following.md)

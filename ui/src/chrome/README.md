@@ -71,14 +71,22 @@ Persisted workspaces require `layoutVersion: 8`. `WorkspaceStore` replaces an un
 
 General Layout downloads are structural: they keep panel arrangement, Link Group membership, focused venues, and non-symbol settings, but omit panel symbols, Link Group focused symbols, and cross-window Scanner Source identities. An enabled Monitoring Sync therefore imports paused until a source is selected. Existing saved workspaces and previously downloaded files are not rewritten.
 
-Monitoring Scanner Sync persists its enabled intent and the Scanner Source workspace/panel identity in the Monitoring workspace. Any Scanner header can select the source; AppShell reads the source workspace's persisted sort through workspace-change notifications, so closing its host window does not retarget or stop the relationship, while deleting the source pauses it. Its pure planner retains ranked symbols in their chart slots, fills departed slots from the source's visible sort, and leaves unmatched chart symbols in place when rows are scarce. Turnover, REL VOL, and Short Int are Scanner Source sorts, so Monitoring Sync follows the selected `turnover`, `relVol`, or `shortInterest` ranking automatically. AppShell coalesces successful symbol applications to one batch per second and patches only each chart's symbol; the panel-symbol runtime keeps mounted charts and their settings alive.
+Stock Following saves its switch and source in each workspace document.
+The named-workspace dialog can seed copies of the Monitoring layout. Each copy
+has its own workspace ID. Source panel shortcuts select locally and enable the
+switch in the window's Top Bar. The original Monitoring workspace can retain a
+saved remote Scanner Source until the user replaces it. Its host window can
+close while the original Monitoring window continues to follow it.
 
-Watchlist Following uses the saved engine membership order. Monitoring waits
-for a membership payload on the current engine connection before changing
-charts. A confirmed empty list clears all pinned chart symbols and releases
-their demand. Layout exports retain the enabled setting. Imported layouts
-wait for the trader to select a source. Workspace writes serialize source
-changes with layout saves so each edit is preserved.
+Each stock workspace fills its pinned charts from the selected Scanner's sort
+or the shared Watchlist's saved order. The planner holds qualifying symbols in
+their slots, applies assignments in coalesced batches, and keeps unmatched
+charts when Scanner rows run short. Watchlist Following waits for membership
+on the current connection and clears surplus slots after membership arrives.
+Removing a selected Scanner pauses assignments. A Watchlist selection can
+outlive the panel because the list is shared. Layout imports restore enabled
+intent and wait for a new stock source selection. Workspace writes are
+serialized by ID so source changes and queued layout edits persist in order.
 
 Scanner `Vol` and `Turnover` display the latest base daily totals reported by the
 snapshot, including valid zeroes and showing `—` when unavailable. `REL VOL` is a

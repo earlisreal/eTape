@@ -3,6 +3,7 @@ import { LatencyReadout } from "./LatencyReadout";
 import { SessionClock } from "./SessionClock";
 import type { HealthStore } from "../data/HealthStore";
 import { useTheme } from "./ThemeProvider";
+import { scannerSyncStatusText, type ScannerSyncStatus } from "./scannerSync";
 import { Button } from "./controls/Button";
 import type { LinkGroup } from "./linkGroups";
 import type { HotkeyTarget } from "./hotkeyTarget";
@@ -47,6 +48,12 @@ export interface TopBarProps {
   commands?: TopBarCommands;
   targetCue?: HotkeyTargetCue;
   targetVenue?: VenueStatus | undefined;
+  following?: {
+    enabled: boolean;
+    source: string | undefined;
+    status: ScannerSyncStatus;
+    onToggle: () => void;
+  } | undefined;
 }
 
 export type HotkeyTargetCueState = "ready" | "no-target" | "ungrouped" | "missing-symbol" | "missing-venue";
@@ -180,6 +187,11 @@ function TargetCue({ cue, venueStatus, palette, commands }: { cue: HotkeyTargetC
 export function TopBar(p: TopBarProps): JSX.Element {
   const { palette } = useTheme();
   const cue = p.targetCue ?? targetCueFor(null);
+  const following = p.following;
+  const followingStatus = following?.source
+    ? following.source === "Watchlist" && following.status.reason === "source"
+      ? "Waiting for Watchlist" : scannerSyncStatusText(following.status)
+    : "Choose a Scanner or Watchlist";
   return (
     <div className="top-bar" data-testid="top-bar" style={{ display: "grid", gridTemplateColumns: "minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr)", alignItems: "center", gap: 10,
       padding: "7px 12px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
@@ -193,6 +205,15 @@ export function TopBar(p: TopBarProps): JSX.Element {
         <TargetCue cue={cue} venueStatus={p.targetVenue} palette={palette} commands={p.commands} />
       </div>
       <div className="top-bar-actions" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, minWidth: 0 }}>
+        {following && <Button aria-label="Following" aria-pressed={following.enabled}
+          disabled={!following.source && !following.enabled} onClick={following.onToggle}
+          title={followingStatus}>
+          {following.enabled
+            ? !following.source || following.status.kind === "paused" ? "Following paused" : followingStatus
+            : "Following"}
+          {following.source ? ` · ${following.source}` : " · Choose source"}
+          {!following.enabled && following.source ? " · Off" : ""}
+        </Button>}
         <Button ref={p.addPanelRef} aria-expanded={p.addPanelOpen ?? false} aria-haspopup="dialog" onClick={p.onAddPanel}>+ Add panel</Button>
         <Button onClick={p.onNewWindow}>⧉ New window</Button>
         <Button aria-label="Practice" title="Practice: synthetic demo market" onClick={p.onOpenPractice}>▶ Practice</Button>

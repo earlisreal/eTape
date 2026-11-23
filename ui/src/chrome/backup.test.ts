@@ -589,6 +589,17 @@ describe("backup: reconcileToGrid", () => {
   });
 });
 
+it("imports stock Following enabled without carrying a source into the destination", () => {
+  const workspace = {
+    ...makeWorkspace("monitoring"),
+    scannerSync: { enabled: true, sourcePanelId: "scanner-1", sourceWorkspaceId: "other" },
+  };
+  const imported = prepareImportedWorkspace(workspace, "desk");
+  expect(imported.name).toBe("desk");
+  expect(imported.scannerSync).toEqual({ enabled: true });
+  expect(imported.panels).toEqual(workspace.panels);
+});
+
 describe("backup: Dockview panel constraint normalization", () => {
   it("renames an imported Crypto Scanner tab while keeping layout and source identity", () => {
     const seed: Workspace = {

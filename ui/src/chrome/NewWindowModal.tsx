@@ -1,16 +1,18 @@
+import { buildMonitoringWorkspace } from "./presets";
 import { useEffect, useState } from "react";
 import { Button } from "./controls/Button";
 import { mutateWindows, readWindows, validateName, type CommandClient, type WindowCatalogV1 } from "./catalogs";
 import { Dialog } from "./controls/Dialog";
 import { blankWorkspace, CRYPTO_MONITORING_WORKSPACE_ID, CRYPTO_MONITORING_WORKSPACE_NAME, isMonitoringWorkspace, MONITORING_WORKSPACE_ID, MONITORING_WORKSPACE_NAME, type WorkspaceStore } from "./workspace";
-import { openWorkspaceWindow, workspaceUrl, workspaceWindowFeatures } from "./windows";
+import { openWorkspaceWindow, workspaceUrl, workspaceWindowFeatures, workspaceWindowTarget } from "./windows";
 
 export function NewWindowModal({ open, currentId, commands, workspaceStore, onClose }: { open: boolean; currentId: string; commands: CommandClient; workspaceStore?: WorkspaceStore; onClose: () => void }): JSX.Element | null {
   const [catalog, setCatalog] = useState<WindowCatalogV1>({ version: 1, entries: [] });
+  const [monitoringLayout, setMonitoringLayout] = useState(false);
   const [name, setName] = useState(""); const [error, setError] = useState("");
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   useEffect(() => { if (open) void readWindows(commands).then(setCatalog); }, [open, commands]);
-  useEffect(() => { if (open) { setName(""); setError(""); setEditing(null); } }, [open]);
+  useEffect(() => { if (open) { setName(""); setMonitoringLayout(false); setError(""); setEditing(null); } }, [open]);
   if (!open) return null;
   const entries = [
     { id: MONITORING_WORKSPACE_ID, name: MONITORING_WORKSPACE_NAME },
@@ -19,11 +21,13 @@ export function NewWindowModal({ open, currentId, commands, workspaceStore, onCl
   ];
   const select = (id: string) => { if (openWorkspaceWindow(id)) onClose(); };
   const create = async () => {
-    setError(""); const placeholder = window.open("about:blank", "_blank", workspaceWindowFeatures());
+    setError("");
+    const id = crypto.randomUUID();
+    const placeholder = window.open("about:blank", workspaceWindowTarget(id), workspaceWindowFeatures());
     try {
-      const clean = validateName(name, catalog.entries.map((e) => e.name), ["main", MONITORING_WORKSPACE_NAME, CRYPTO_MONITORING_WORKSPACE_NAME]); const id = crypto.randomUUID();
+      const clean = validateName(name, catalog.entries.map((e) => e.name), ["main", MONITORING_WORKSPACE_NAME, CRYPTO_MONITORING_WORKSPACE_NAME]);
       const next = await mutateWindows(commands, (fresh) => ({ ...fresh, entries: [...fresh.entries, { id, name: validateName(clean, fresh.entries.map((e) => e.name), ["main", MONITORING_WORKSPACE_NAME, CRYPTO_MONITORING_WORKSPACE_NAME]) }] }));
-      const saved = await commands.sendCommand("SetConfig", { key: `workspace.${id}`, value: blankWorkspace(id) });
+      const saved = await commands.sendCommand("SetConfig", { key: `workspace.${id}`, value: monitoringLayout ? buildMonitoringWorkspace(id) : blankWorkspace(id) });
       if (saved.status !== "accepted") {
         await mutateWindows(commands, (fresh) => ({ ...fresh, entries: fresh.entries.filter((e) => e.id !== id) }));
         throw new Error(saved.reason ?? "Could not create empty workspace.");
@@ -50,7 +54,7 @@ export function NewWindowModal({ open, currentId, commands, workspaceStore, onCl
     });
   };
   return <Dialog title="New window" onClose={onClose} width={500}
-    footer={<><span className="dialog-hint">Open a saved workspace or create an empty one.</span><Button onClick={onClose}>Done</Button></>}>
+    footer={<><span className="dialog-hint">Open a saved workspace or choose a starting layout.</span><Button onClick={onClose}>Done</Button></>}>
     {entries.sort((a,b)=>a.name.localeCompare(b.name)).map((e)=><div key={e.id} className="workspace-row">
       {editing?.id === e.id ? <form style={{ display: "flex", gap: 6, width: "100%" }} onSubmit={(event) => { event.preventDefault(); void rename(e.id, editing.name); }}>
         <input className="field" aria-label="Rename workspace" autoFocus value={editing.name} maxLength={64} style={{ flex: 1, minWidth: 0 }} onChange={(event) => setEditing({ id: e.id, name: event.target.value })}/>
@@ -62,6 +66,11 @@ export function NewWindowModal({ open, currentId, commands, workspaceStore, onCl
     </div>)}
     <form style={{display:"flex",gap:8,marginTop:20}} onSubmit={(event) => { event.preventDefault(); void create(); }}>
       <input className="field" aria-label="Workspace name" placeholder="New workspace name" value={name} onChange={(e)=>setName(e.target.value)} maxLength={64} style={{ flex: 1, minWidth: 0 }}/>
+      <select className="field" aria-label="Starting layout" value={monitoringLayout ? "monitoring" : "blank"}
+        onChange={(event) => setMonitoringLayout(event.target.value === "monitoring")}>
+        <option value="blank">Blank</option>
+        <option value="monitoring">Monitoring layout</option>
+      </select>
       <Button variant="primary" type="submit" disabled={!name.trim()}>Create new</Button>
     </form>{error&&<p role="alert" style={{ color: "var(--danger)" }}>{error}</p>}
   </Dialog>;

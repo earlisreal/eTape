@@ -43,6 +43,13 @@ export function ScannerSyncControl({ sync, sourceLabel = "Monitoring source", so
   sourceLabel?: string;
   sourceName?: "Scanner" | "List" | "Watchlist";
 }): JSX.Element {
+  if (sync.selectionOnly) {
+    const label = `Use this ${sourceName}`;
+    return (
+      <button type="button" className="mono scanner-sync-source"
+        aria-pressed={sync.selected} disabled={sync.enabled} onClick={sync.onSelect}>{label}</button>
+    );
+  }
   const { status } = sync;
   const syncName = sourceName === "Watchlist" ? "Watchlist Sync" : "Scanner Sync";
   const toggleLabel = `${sync.enabled ? "Disable" : "Enable"} ${syncName}`;

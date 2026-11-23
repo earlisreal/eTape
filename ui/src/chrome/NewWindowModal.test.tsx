@@ -64,7 +64,7 @@ describe("NewWindowModal", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("creates a workspace in a popup window", async () => {
+  it("creates a named Monitoring layout in its own popup window", async () => {
     const commands = {
       sendCommand: vi.fn(async (name: string) => name === "GetConfig"
         ? { status: "accepted", value: { version: 1, entries: [] } }
@@ -78,9 +78,18 @@ describe("NewWindowModal", () => {
     render(<ThemeProvider><NewWindowModal open currentId="main" commands={commands} onClose={onClose} /></ThemeProvider>);
     await waitFor(() => expect(screen.getByRole("button", { name: "Create new" })).toBeTruthy());
     fireEvent.change(screen.getByLabelText("Workspace name"), { target: { value: "Desk" } });
+    fireEvent.change(screen.getByLabelText("Starting layout"), { target: { value: "monitoring" } });
     fireEvent.click(screen.getByRole("button", { name: "Create new" }));
 
-    await waitFor(() => expect(open).toHaveBeenCalledWith("about:blank", "_blank", expect.stringContaining("popup=yes,width=")));
+    await waitFor(() => expect(open).toHaveBeenCalledWith("about:blank", "etape-workspace-123e4567-e89b-12d3-a456-426614174000", expect.stringContaining("popup=yes,width=")));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(commands.sendCommand).toHaveBeenCalledWith("SetConfig", {
+      key: "workspace.123e4567-e89b-12d3-a456-426614174000",
+      value: expect.objectContaining({
+        name: "123e4567-e89b-12d3-a456-426614174000",
+        scannerSync: { enabled: false },
+        panels: expect.arrayContaining([expect.objectContaining({ panelId: "scanner" })]),
+      }),
+    });
   });
 });

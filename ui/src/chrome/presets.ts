@@ -104,9 +104,9 @@ export function buildCryptoMonitoringWorkspace(): Workspace {
   };
 }
 
-export function buildMonitoringWorkspace(): Workspace {
+export function buildMonitoringWorkspace(name = MONITORING_WORKSPACE_ID): Workspace {
   return {
-    name: MONITORING_WORKSPACE_ID,
+    name,
     layoutVersion: WORKSPACE_LAYOUT_VERSION,
     panels: [
       unassignedChart("m-chart-red"),

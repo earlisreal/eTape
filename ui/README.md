@@ -75,11 +75,12 @@ half to save the move above or below it. With a row focused, use **Alt+Up** or
 **Alt+Down** to move it one place. Clicking a column header cycles through
 descending, ascending, and saved order. Return to saved order to move rows.
 
-Click **Use this Watchlist** to enable **Sync to Following** for stock
-Monitoring. Pinned charts fill from the top of the saved list. Symbols that
-still make the cut stay in their current charts, and surplus charts clear.
-**OFF** holds the charts where they are, and **Use this Scanner** switches the
-source. The selection is shared across windows and restored after restart.
+In a stock workspace, click **Use this Watchlist** or **Use this Scanner** to
+fill that window's pinned charts. Each window has its own **Following** switch
+in the top bar and saves its own selection. The Watchlist uses the shared
+saved order and clears surplus charts after membership loads. Turning
+Following off holds the current symbols. To build a second chart wall, choose
+**New window → Monitoring layout**, or start with **Blank** and add panels.
 
 Popup symbols prefer the most recently used grouped Alerts Panel across open
 Workspaces in the same browser profile, including background windows and
@@ -134,7 +135,7 @@ Older saved or imported layouts drop the retired end-of-day Screener tabs and
 keep the other panels in their existing groups.
 
 Closing a workspace pauses its Scanner demand; an enabled Monitoring workspace
-keeps following its selected Scanner Source, including when that source window
+keeps a saved legacy cross-window Scanner Source active while its host window
 is closed. Session Volume sorts by current session shares and reports the age
 of its shared top-200 discovery page.
 The oldest quote timestamp appears inside the Scanner's filter settings.

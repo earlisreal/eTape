@@ -179,6 +179,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "★",
     description: "Your pinned symbols, quote snapshots",
     symbolBearing: false,
+    headerActions: true,
   },
   "stock-info": stockInfoPanel,
   // Saved workspaces may still carry the former panel id.

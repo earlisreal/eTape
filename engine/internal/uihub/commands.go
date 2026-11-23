@@ -494,6 +494,12 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		if err := json.Unmarshal(args, &a); err != nil {
 			return blocked("bad args"), false
 		}
+		if strings.HasPrefix(a.Key, "workspace.") || a.Key == "windows.v1" {
+			// Workspace readers can run immediately after an acknowledged queued save.
+			if store, ok := cd.cfg.(interface{ Flush() }); ok {
+				store.Flush()
+			}
+		}
 		v, ok, err := cd.cfg.GetConfig(a.Key)
 		if err != nil {
 			return blocked("config read error"), false

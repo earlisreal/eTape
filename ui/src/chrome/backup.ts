@@ -3,7 +3,7 @@
 // — same machine or a fresh one. Pure module, no React/DOM, so every rule
 // here (envelope shape, id regeneration, activeVenue scrubbing) is directly
 // unit-testable; BackupSection.tsx (Task 2) is a thin UI shell around this.
-import { WORKSPACE_LAYOUT_VERSION, isCurrentWorkspace, withoutScreenerPanels, type PanelConfig, type Workspace } from "./workspace";
+import { CRYPTO_MONITORING_WORKSPACE_ID, WORKSPACE_LAYOUT_VERSION, isCurrentWorkspace, withoutScreenerPanels, type PanelConfig, type Workspace } from "./workspace";
 import { normalizeChartBinding, normalizeOrderConfig, type ActionTemplate, type HotkeyDeckConfig, type OrderConfig } from "./exec/actionTemplate";
 
 export const SETTINGS_EXPORT_VERSION = 1;
@@ -91,7 +91,7 @@ export function parseImport(text: string): { ok: true; data: SettingsExport } | 
 // so already-ghosted exports are healed on import.
 export function prepareImportedWorkspace(imported: Workspace, currentName: string): Workspace {
   const workspace = withoutScreenerPanels({ ...imported, name: currentName });
-  if (workspace.scannerSync?.sourceKind === "watchlist") {
+  if (workspace.scannerSync && (currentName !== CRYPTO_MONITORING_WORKSPACE_ID || workspace.scannerSync.sourceKind === "watchlist")) {
     workspace.scannerSync = { enabled: workspace.scannerSync.enabled };
   }
   return reconcileToGrid(workspace, workspace.layout);
