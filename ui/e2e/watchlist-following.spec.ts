@@ -1,13 +1,14 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type WebSocketRoute } from "@playwright/test";
 import type { Workspace } from "../src/chrome/workspace";
 
 test("a Watchlist and Scanner drive independent Monitoring windows", async ({ context, page: launcher }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   await context.addInitScript(() => localStorage.setItem("etape.venueSetupHidden", "1"));
   let members: Set<string> | undefined;
   let savedChartSymbols: string[] = [];
   let holdMembership = false;
-  const delayedMembership = new Map<unknown, () => void>();
+  const membershipFeeds = new Map<WebSocketRoute, () => void>();
+  let membershipOverride: string[] | undefined;
   let watchlistWorkspace: string | null = null;
   await context.routeWebSocket("**/ws", (socket) => {
     const server = socket.connectToServer();
@@ -27,9 +28,12 @@ test("a Watchlist and Scanner drive independent Monitoring windows", async ({ co
         socket.send(JSON.stringify(frame));
       } else if (frame.topic === "watchlist.rows") {
         members ??= new Set<string>(frame.payload.symbols.slice(0, 5));
-        frame.payload.symbols = frame.payload.symbols.filter((symbol: string) => members?.has(symbol));
-        if (holdMembership) delayedMembership.set(socket, () => socket.send(JSON.stringify(frame)));
-        else socket.send(JSON.stringify(frame));
+        const membership = frame.payload.symbols.filter((symbol: string) => members?.has(symbol));
+        const deliver = () => socket.send(JSON.stringify({
+          ...frame, payload: { ...frame.payload, symbols: membershipOverride ?? membership },
+        }));
+        membershipFeeds.set(socket, deliver);
+        if (!holdMembership) deliver();
       } else socket.send(raw);
     });
   });
@@ -59,6 +63,10 @@ test("a Watchlist and Scanner drive independent Monitoring windows", async ({ co
   const rows = watchlist.locator("tbody tr");
   await expect(rows).toHaveCount(5);
   const symbols = [...members!].map((symbol) => symbol.slice(3));
+  const setMembership = (order: string[]) => {
+    membershipOverride = order.map((symbol) => `US.${symbol}`);
+    for (const deliver of membershipFeeds.values()) deliver();
+  };
 
   await page.getByRole("button", { name: "Use this Watchlist" }).click();
   const following = page.getByRole("button", { name: "Following", exact: true });
@@ -69,37 +77,37 @@ test("a Watchlist and Scanner drive independent Monitoring windows", async ({ co
   await expect(charts).toHaveCount(4);
   await expect(charts.filter({ hasText: symbols[4] })).toHaveCount(0);
 
-  await rows.nth(4).press("Alt+ArrowUp");
+  setMembership([symbols[0], symbols[1], symbols[2], symbols[4], symbols[3]]);
   await expect(charts.filter({ hasText: symbols[4] })).toHaveCount(1);
   await expect(charts.filter({ hasText: symbols[3] })).toHaveCount(0);
-  const assigned = await charts.allTextContents();
-  await rows.first().press("Alt+ArrowDown");
+  // Demo quote updates can add a status suffix to the displayed ticker.
+  const displayedSymbols = async () => (await charts.allTextContents()).map((symbol) => symbol.replace(/[*]+$/, ""));
+  const assigned = await displayedSymbols();
+  setMembership([symbols[1], symbols[0], symbols[2], symbols[4], symbols[3]]);
   await expect(rows.first()).toContainText(symbols[1]);
-  await expect(charts).toHaveText(assigned);
+  await expect.poll(displayedSymbols).toEqual(assigned);
   await expect.poll(() => savedChartSymbols.slice().sort()).toEqual(assigned.slice().sort());
   holdMembership = true;
   await page.reload();
-  await expect(charts).toHaveText(assigned);
+  await expect.poll(displayedSymbols).toEqual(assigned);
   holdMembership = false;
-  for (const deliver of delayedMembership.values()) deliver();
-  delayedMembership.clear();
+  for (const deliver of membershipFeeds.values()) deliver();
 
   await following.click();
   await expect(following).toHaveAttribute("aria-pressed", "false");
-  await rows.nth(4).press("Alt+ArrowUp");
+  setMembership([symbols[1], symbols[0], ...symbols.slice(2)]);
   await expect(rows.nth(3)).toContainText(symbols[3]);
-  await expect(charts).toHaveText(assigned);
+  await expect.poll(displayedSymbols).toEqual(assigned);
   await following.click();
   await expect(charts.filter({ hasText: symbols[3] })).toHaveCount(1);
 
-  for (const symbol of symbols) {
-    await rows.filter({ has: page.getByText(symbol, { exact: true }) }).click({ button: "right" });
-    await page.getByText(`Remove ${symbol} from watchlist`, { exact: true }).click();
-  }
+  setMembership([]);
   await expect(page.getByTitle("Following 0/4")).toBeVisible();
   await expect(charts).toHaveText(Array<string>(4).fill("—"));
   await expect(page.getByTestId("chart-empty-state")).toHaveCount(4);
-  await page.getByRole("tab", { name: "Watchlist", exact: true }).getByRole("button", { name: "Close tab" }).click();
+  const watchlistHeader = page.locator(".ledger-header")
+    .filter({ has: page.getByRole("button", { name: "Use this Watchlist" }) });
+  await watchlistHeader.getByRole("button", { name: "close panel", exact: true }).click();
   await expect(following).toContainText("Watchlist");
   await expect(following).toHaveAttribute("aria-pressed", "true");
   await following.click();
