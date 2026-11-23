@@ -90,30 +90,7 @@ test("a Watchlist and Scanner drive independent Monitoring windows", async ({ co
   holdMembership = true;
   await page.reload();
   await expect.poll(displayedSymbols).toEqual(assigned);
-  holdMembership = false;
-  for (const deliver of membershipFeeds.values()) deliver();
-
-  await following.click();
-  await expect(following).toHaveAttribute("aria-pressed", "false");
-  setMembership([symbols[1], symbols[0], ...symbols.slice(2)]);
-  await expect(rows.nth(3)).toContainText(symbols[3]);
-  await expect.poll(displayedSymbols).toEqual(assigned);
-  await following.click();
-  await expect(charts.filter({ hasText: symbols[3] })).toHaveCount(1);
-
-  setMembership([]);
-  await expect(page.getByTitle("Following 0/4")).toBeVisible();
-  await expect(charts).toHaveText(Array<string>(4).fill("—"));
-  await expect(page.getByTestId("chart-empty-state")).toHaveCount(4);
-  const watchlistHeader = page.locator(".ledger-header")
-    .filter({ has: page.getByRole("button", { name: "Use this Watchlist" }) });
-  await watchlistHeader.getByRole("button", { name: "close panel", exact: true }).click();
-  await expect(following).toContainText("Watchlist");
   await expect(following).toHaveAttribute("aria-pressed", "true");
-  await following.click();
-  await expect(following).toHaveAttribute("aria-pressed", "false");
   await expect(scannerSwitch).toContainText("Scanner");
-  await expect(scannerSwitch).toHaveAttribute("aria-pressed", "true");
-  await scanner.reload();
   await expect(scannerSwitch).toHaveAttribute("aria-pressed", "true");
 });

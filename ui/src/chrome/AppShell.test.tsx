@@ -689,6 +689,29 @@ describe("AppShell Monitoring Scanner Sync", () => {
     restarted.unmount();
   });
 
+  it("holds local Watchlist charts while off and clears them when an empty list is followed", async () => {
+    const workspaceName = "watchlist-desk";
+    const { saved, stores } = mount({
+      ...buildMonitoringWorkspace(workspaceName),
+      scannerSync: { enabled: true, sourceKind: "watchlist" },
+    }, { workspaceName });
+    const following = await screen.findByRole("button", { name: "Following" });
+    const chartSymbol = () => saved.at(-1)?.panels.find((panel) => panel.id === "m-chart-red")?.settings.symbol;
+
+    publishWatchlist(stores, ["US.AAPL"]);
+    await waitFor(() => expect(chartSymbol()).toBe("US.AAPL"));
+    fireEvent.click(following);
+    await waitFor(() => expect(saved.at(-1)?.scannerSync?.enabled).toBe(false));
+    publishWatchlist(stores, []);
+    expect(chartSymbol()).toBe("US.AAPL");
+
+    fireEvent.click(following);
+    await waitFor(() => {
+      expect(saved.at(-1)?.scannerSync?.enabled).toBe(true);
+      expect(chartSymbol()).toBeUndefined();
+    }, { timeout: 2000 });
+  });
+
   it("persists source selection, follows ranked rows, preserves chart settings, and remembers Sync off", async () => {
     const { saved, stores } = mount(buildMonitoringWorkspace(), { workspaceName: "monitoring" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Use this Scanner" })).toBeTruthy());
