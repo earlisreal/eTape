@@ -104,6 +104,10 @@ eventually align with those anchors.
 A symbol open waits for the engine's `chart-ready` barrier, queries the prepared
 archive/seed once, and calls `setData` once; pan and zoom do not request history.
 Older provider backfill is archive-only and appears on the next symbol open.
+After a WebSocket reconnect, the chart restores the candle window without
+resetting its viewport and re-subscribes engine-computed indicators. It pulls
+their values through the newest candle after their individual ready barriers,
+then resumes processing live candle and indicator updates.
 Main-pane indicators autoscale against visible candles, while live bars continue
 through imperative store/controller updates. Preserve chronological merge/dedupe
 and controller disposal. Focused tests run with `npm exec vitest -- run

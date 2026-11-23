@@ -175,8 +175,8 @@ func TestIndicatorLifecycleThroughCore(t *testing.T) {
 		t.Fatalf("indicator readiness ordering: snapshot=%d ready=%d updates=%#v", snapshotIndex, readyIndex, updates)
 	}
 	snaps, deltas, snap := countEma(updates)
-	if snaps != 1 || snap.SeriesKey != "ema-1" || len(snap.Points) != 1 {
-		t.Fatalf("snapshots=%d last=%+v, want 1 snapshot with 1 seeded point (bars 0-1 finalized; EMA(2) warm from bar 1)", snaps, snap)
+	if snaps != 1 || snap.SeriesKey != "ema-1" || len(snap.Points) != 2 || snap.Points[1].TimeMs != t0Ms+120_000 {
+		t.Fatalf("snapshots=%d last=%+v, want 1 snapshot with a finalized point and forming-bar preview", snaps, snap)
 	}
 	if deltas == 0 {
 		t.Fatal("no delta point for the forming-bar update")
@@ -188,6 +188,43 @@ func TestIndicatorLifecycleThroughCore(t *testing.T) {
 	snaps2, deltas2, _ := countEma(drain())
 	if snaps2 != snaps || deltas2 != deltas {
 		t.Fatalf("released instance still emitting: snapshots %d->%d deltas %d->%d", snaps, snaps2, deltas, deltas2)
+	}
+}
+
+func TestIndicatorSnapshotIncludesFormingMinute(t *testing.T) {
+	const symbol = "US.AAPL"
+	c := New(Config{})
+	history := make([]feed.Bar, 9)
+	for i := range history {
+		history[i] = bar1m(i, 100, 100, 100, 100, 100)
+	}
+	c.apply(seedHistory1mMsg{symbol: symbol, bars: history})
+	forming := bar1m(9, 110, 110, 110, 110, 100)
+	c.apply(eventMsg{ev: feed.Bars1mEvent{Bars: []feed.Bar{forming}}})
+
+	for _, tc := range []struct {
+		spec IndicatorSpec
+		want float64
+	}{
+		{IndicatorSpec{Symbol: symbol, TF: session.TF1m, Type: IndVWAP}, 101},
+		{IndicatorSpec{Symbol: symbol, TF: session.TF1m, Type: IndEMA, Params: map[string]float64{"period": 9}}, 102},
+	} {
+		id := string(tc.spec.Type)
+		c.apply(ensureIndicatorMsg{connID: 1, id: id, spec: tc.spec})
+		var snapshot IndicatorUpdate
+		for len(c.updates) > 0 {
+			if update, ok := (<-c.updates).(IndicatorUpdate); ok && update.SeriesKey == id && update.Snapshot {
+				snapshot = update
+			}
+		}
+		if len(snapshot.Points) == 0 {
+			t.Errorf("%s snapshot has no points", id)
+			continue
+		}
+		last := snapshot.Points[len(snapshot.Points)-1]
+		if last.TimeMs != forming.BucketMs || math.Abs(last.Value-tc.want) > 1e-9 {
+			t.Errorf("%s snapshot ends at %+v, want forming minute %d at %g", id, last, forming.BucketMs, tc.want)
+		}
 	}
 }
 
@@ -252,6 +289,7 @@ func TestSeedHistory10sReseedsExistingVWAP(t *testing.T) {
 		{H: 7.5, L: 7.3, C: 7.4, V: 1_000},
 		{H: 7.4, L: 7.2, C: 7.3, V: 1_000},
 		{H: 6.6, L: 6.5, C: 6.6, V: 20},
+		{H: 6.55, L: 6.55, C: 6.55, V: 5},
 	}
 	want := expectedVWAP(full)
 	if len(last.Points) == 0 {
@@ -309,6 +347,7 @@ func TestSeedChartHistoryColdSymbolVWAPUsesFull10sHistory(t *testing.T) {
 		{H: 7.5, L: 7.3, C: 7.4, V: 1_000},
 		{H: 7.4, L: 7.2, C: 7.3, V: 1_000},
 		{H: 6.6, L: 6.5, C: 6.6, V: 20},
+		{H: 6.55, L: 6.55, C: 6.55, V: 5},
 	})
 	got := last.Points[len(last.Points)-1].Value
 	if math.Abs(got-want) > 1e-9 {
@@ -384,11 +423,11 @@ func TestEnsureExistingIdAdoptsNewSpec(t *testing.T) {
 	if len(lastSnap.Points) == 0 {
 		t.Fatal("no snapshot after re-ensure with a new symbol")
 	}
-	// Typical price == close for these bars, equal volumes: NVDA VWAP after the
-	// three finalized bars is (140+141+142)/3 = 141. The stale-AAPL value was 191.
+	// Typical price equals close and volumes are equal. Through the forming
+	// bar, NVDA VWAP is (140+141+142+143)/4 = 141.5.
 	got := lastSnap.Points[len(lastSnap.Points)-1].Value
-	if math.Abs(got-141) > 1e-9 {
-		t.Fatalf("last snapshot point = %g, want 141 (NVDA domain); stale-spec value would be 191", got)
+	if math.Abs(got-141.5) > 1e-9 {
+		t.Fatalf("last snapshot point = %g, want 141.5 (NVDA domain)", got)
 	}
 
 	// Forward streaming must now follow NVDA (delta on its forming bar) and
@@ -433,11 +472,10 @@ func TestParamEditAfterRefInflation(t *testing.T) {
 	if len(lastSnap.Points) == 0 {
 		t.Fatal("no snapshot after param re-ensure")
 	}
-	// Finalized closes are 10,11,12,13 (bucket 4 still forming). SMA(4) over
-	// them = 11.5; a stale SMA(2) would end at 12.5.
+	// Include the forming close (14) in the last SMA(4) window of 11,12,13,14.
 	got := lastSnap.Points[len(lastSnap.Points)-1].Value
-	if math.Abs(got-11.5) > 1e-9 {
-		t.Fatalf("last snapshot point = %g, want SMA(4)=11.5; stale SMA(2) would be 12.5", got)
+	if math.Abs(got-12.5) > 1e-9 {
+		t.Fatalf("last snapshot point = %g, want SMA(4)=12.5", got)
 	}
 }
 
@@ -504,18 +542,20 @@ func TestInvalidParamsRejected(t *testing.T) {
 		}
 	}
 
-	c, drain := runCore(t)
-	c.EnsureIndicator(1, "bad-1", cases[0])
-	for _, u := range drain() { // must not panic and must not emit anything for bad-1
-		if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == "bad-1" {
+	c := New(Config{})
+	c.apply(ensureIndicatorMsg{connID: 1, id: "bad-1", spec: cases[0]})
+	for len(c.updates) > 0 {
+		if iu, ok := (<-c.updates).(IndicatorUpdate); ok && iu.InstanceID == "bad-1" {
 			t.Fatalf("rejected spec still emitted: %+v", iu)
 		}
 	}
 	// The registry must still work normally afterward.
-	c.EnsureIndicator(1, "good-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndEMA, Params: map[string]float64{"period": 2}})
+	c.apply(ensureIndicatorMsg{connID: 1, id: "good-1", spec: IndicatorSpec{
+		Symbol: "US.AAPL", TF: session.TF1m, Type: IndEMA, Params: map[string]float64{"period": 2},
+	}})
 	found := false
-	for _, u := range drain() {
-		if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == "good-1" && iu.Snapshot {
+	for len(c.updates) > 0 {
+		if iu, ok := (<-c.updates).(IndicatorUpdate); ok && iu.InstanceID == "good-1" && iu.Snapshot {
 			found = true
 		}
 	}
@@ -585,10 +625,11 @@ func TestBackfillRewritesPastTriggersReseed(t *testing.T) {
 	if snaps == 0 {
 		t.Fatal("rewriting a folded bucket produced no re-snapshot")
 	}
-	// EMA(2) seeded from bars [bucket0(C=999), bucket1(C=101)]: seed=999,
-	// warm value at bucket1 = (999+101)/2 = 550.
-	if len(lastSnap.Points) != 1 || math.Abs(lastSnap.Points[0].Value-550) > 1e-9 {
-		t.Fatalf("re-snapshot after rewrite = %+v, want 1 point with value 550", lastSnap)
+	// EMA(2) warms at (999+101)/2 = 550. Preview the forming close of 102
+	// from that revised, finalized EMA state.
+	if len(lastSnap.Points) != 2 || math.Abs(lastSnap.Points[0].Value-550) > 1e-9 ||
+		math.Abs(lastSnap.Points[1].Value-(102*2.0/3+550.0/3)) > 1e-9 {
+		t.Fatalf("re-snapshot after rewrite = %+v, want revised final point and preview", lastSnap)
 	}
 }
 

@@ -200,6 +200,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     sendCommand: (name: string, args: unknown) => client.sendCommand(name, args),
     sendQuery: (name: string, args: unknown) => client.sendQuery(name, args),
     isConnected: () => client.isConnected(),
+    onState: (listener: Parameters<WsClient["onState"]>[0]) => client.onState(listener),
   }), [client]);
 
   useEffect(() => trackWindowState(workspaceName, client), [workspaceName, client]);

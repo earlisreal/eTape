@@ -43,7 +43,10 @@ export interface IndicatorController extends IndicatorReader {
   reset(instanceId: string): void;
   getRev(instanceId: string): number;
 }
-export interface CommandSender { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }> }
+export interface CommandSender {
+  sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }>;
+  isConnected?(): boolean;
+}
 
 export interface ChartConfig { symbol: string; timeframe: string }
 export type ManagedViewportMode = "historical" | "live" | "futureDetached";
@@ -993,10 +996,17 @@ export class ChartController {
   }
 
   private subscribeIndicator(inst: IndicatorInstance): void {
+    if (this.deps.commands.isConnected?.() === false) return; // reconnect announces the current specs
     void this.deps.commands.sendCommand("SubscribeIndicator", {
       instanceId: inst.instanceId, symbol: this.config.symbol, timeframe: this.config.timeframe,
       type: inst.type, params: inst.params,
     }).then((ack) => { if (ack.status === "accepted") this.deps.onIndicatorSubscribed?.(); });
+  }
+
+  resubscribeIndicators(): void {
+    for (const { inst } of this.indicators.values()) {
+      if (!isLocalIndicator(inst.type)) this.subscribeIndicator(inst);
+    }
   }
 
   removeIndicator(instanceId: string): void {
@@ -1119,7 +1129,7 @@ export class ChartController {
       }
     }
     // Re-subscribe every live indicator for the new (symbol, timeframe).
-    for (const { inst } of this.indicators.values()) if (!isLocalIndicator(inst.type)) this.subscribeIndicator(inst);
+    this.resubscribeIndicators();
     if (this.watermarkOn) this.facade.setWatermark(bareSymbol(this.config.symbol));
   }
 

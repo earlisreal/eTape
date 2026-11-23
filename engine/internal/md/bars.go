@@ -176,6 +176,13 @@ func (e *barEngine) finalizedBars(symbol string, tf session.Timeframe) []Bar {
 	return sb.series[tf].finalized()
 }
 
+func (e *barEngine) latestBar(symbol string, tf session.Timeframe) *Bar {
+	if sb := e.symbols[symbol]; sb != nil {
+		return sb.series[tf].last()
+	}
+	return nil
+}
+
 // applyTicks drives the 10s series (displayed) and the shadow 1m (internal:
 // validation + delta). Ticks arrive deduped from the core.
 func (e *barEngine) applyTicks(c *Core, ticks []feed.Tick) {

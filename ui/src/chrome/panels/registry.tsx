@@ -1,6 +1,7 @@
 import type { FC } from "react";
 import type { AckMsg, TopicName } from "../../wire/contract";
 import type { DemandProfile } from "../../wire/DemandRegistry";
+import type { ConnState } from "../../wire/WsClient";
 import type { PanelConfig } from "../workspace";
 import type { Stores } from "../../data/registry";
 import type { Scheduler } from "../../render/Scheduler";
@@ -29,7 +30,12 @@ export interface PanelProps {
   width: number;
   height: number;
   linkGroups: LinkGroups;
-  commands: { sendCommand(name: string, args: unknown): Promise<AckMsg>; sendQuery(name: string, args: unknown): Promise<unknown>; isConnected?(): boolean };
+  commands: {
+    sendCommand(name: string, args: unknown): Promise<AckMsg>;
+    sendQuery(name: string, args: unknown): Promise<unknown>;
+    isConnected?(): boolean;
+    onState?(listener: (state: ConnState) => void): () => void;
+  };
   // Persist a PATCH of this panel's settings (send only the keys being changed —
   // e.g. { timeframe } or { indicators }). AppShell merges the patch into the
   // workspace doc's matching panel entry and debounce-saves via WorkspaceStore.

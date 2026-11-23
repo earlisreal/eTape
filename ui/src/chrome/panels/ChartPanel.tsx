@@ -368,6 +368,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     let indicatorReloadPending = false;
     let chartSnapshotLoaded = false;
     let chartSnapshotPending = false;
+    let reconnectRefresh = false;
     let disposed = false;
     let extremaDirty = true;
 
@@ -376,7 +377,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       .flatMap((inst) => describeIndicator(inst, paletteRef.current).map((series) => series.key));
     const queryIndicatorHydration = async (instanceId: string) => {
       const pending = pendingIndicatorHydrationRef.current.get(instanceId);
-      if (!pending || pending.readyDebt !== 0 || pending.querying || !chartSnapshotLoaded) return;
+      if (!pending || pending.readyDebt !== 0 || pending.querying || !chartSnapshotLoaded || reconnectRefresh) return;
       if (pending.generation !== chartGenerationRef.current) {
         pendingIndicatorHydrationRef.current.delete(instanceId);
         return;
@@ -432,12 +433,13 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       return true;
     };
     const querySnapshot = async () => {
-	  if (chartSnapshotLoaded || chartSnapshotPending) return;
+      if (chartSnapshotPending || (chartSnapshotLoaded && !reconnectRefresh) || commands.isConnected?.() === false) return;
       chartSnapshotPending = true;
+      const generation = ++viewportGeneration;
       try {
-        const generation = ++viewportGeneration;
         const startedAt = performance.now();
-        const keys = indicatorReloadPending ? [] : indicatorKeys();
+        // On reconnect each indicator hydrates after its own ready barrier.
+        const keys = indicatorReloadPending || reconnectRefresh ? [] : indicatorKeys();
         const result = await commands.sendQuery("QueryChartWindow", {
           symbol: currentSymbol, timeframe: tfRef.current, fromMs: 0, toMs: 0, tailBars: ALL_CHART_BARS,
           indicatorSeriesKeys: keys,
@@ -445,10 +447,13 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         if (mergeSnapshot(result, generation)) {
           stores.bars.expandWindow(result.symbol, result.timeframe, result.fromMs, Number.POSITIVE_INFINITY);
           for (const key of keys) stores.indicators.expandWindow(key, result.fromMs, Number.POSITIVE_INFINITY);
-          facade.resetPriceScale();
-          viewportModeRef.current = "live";
-          facade.scrollToRealTime();
+          if (!chartSnapshotLoaded) {
+            facade.resetPriceScale();
+            viewportModeRef.current = "live";
+            facade.scrollToRealTime();
+          }
           chartSnapshotLoaded = true;
+          reconnectRefresh = false;
           flushPendingIndicatorHydration();
           uiLog.debug("chart snapshot loaded", {
             symbol: result.symbol,
@@ -457,11 +462,11 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
           });
         }
-	  } catch {
-		// A disconnected request is settled by WsClient; reconnect triggers the normal snapshot path.
-	  } finally {
-		chartSnapshotPending = false;
-	  }
+      } catch {
+        // A disconnected request is settled by WsClient; reconnect reopens the chart.
+      } finally {
+        if (generation === viewportGeneration) chartSnapshotPending = false;
+      }
     };
 
     const clampRight = (range: LogicalRange | null) => {
@@ -715,6 +720,24 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       // HealthStore retains only its bounded event window. Mirroring that window
       // here keeps this dedup state bounded too.
       seenEventKeys = nextSeen;
+    });
+    const offConnection = commands.onState?.((state) => {
+      if (state === "reconnecting" || (state === "connecting" && !reconnectRefresh)) {
+        reconnectRefresh = true;
+        viewportGeneration++;
+        chartGenerationRef.current++;
+        chartSnapshotPending = false;
+        pendingIndicatorHydrationRef.current.clear();
+      }
+      if (state !== "open" || !reconnectRefresh) return;
+      // Wait for WsClient to restore its topic handlers and send any queued
+      // releases. The old socket's indicator ownership is already gone.
+      queueMicrotask(() => {
+        if (disposed || commands.isConnected?.() === false) return;
+        pendingIndicatorHydrationRef.current.clear();
+        for (const inst of instancesRef.current) queueIndicatorHydration(inst);
+        controller.resubscribeIndicators();
+      });
     });
 
     const updateLegend = () => {
@@ -977,7 +1000,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       chartGenerationRef.current++;
       pendingIndicatorHydrationRef.current.clear();
       profile.dispose(); offProfileSession(); refreshProfileRef.current = () => {};
-      off(); offLink(); offHistoryReady(); offCrosshair(); syncHandle.dispose(); ro.disconnect();
+      off(); offLink(); offHistoryReady(); offConnection?.(); offCrosshair(); syncHandle.dispose(); ro.disconnect();
       if (crosshairSyncHandleRef.current === syncHandle) crosshairSyncHandleRef.current = null;
       remoteCursorRef.current = null;
       remoteCrosshairRenderedRef.current = false;

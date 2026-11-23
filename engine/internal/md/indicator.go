@@ -176,12 +176,26 @@ func (s *indicatorSet) foldFinal(in *instance, b Bar) {
 }
 
 func (s *indicatorSet) emitSnapshots(c *Core, in *instance) {
+	// A chart can subscribe or reload between feed pushes. Include the current
+	// candle as a preview without folding it into the rolling calculator state.
+	var previews map[string]Point
+	if b := c.bars.latestBar(in.spec.Symbol, in.spec.TF); b != nil && b.InProgress && b.BucketMs > in.lastFolded {
+		previews = make(map[string]Point)
+		for _, p := range in.c.points(*b) {
+			if p.ok {
+				previews[p.slot] = Point{TimeMs: b.BucketMs, Value: p.value}
+			}
+		}
+	}
 	for _, slot := range in.c.slots() {
-		pts := in.series[slot]
+		pts := append([]Point(nil), in.series[slot]...)
+		if preview, ok := previews[slot]; ok {
+			pts = append(pts, preview)
+		}
 		c.emit(IndicatorUpdate{
 			InstanceID: in.id,
 			SeriesKey:  in.seriesKey(slot),
-			Points:     append([]Point(nil), pts...),
+			Points:     pts,
 			Snapshot:   true,
 		})
 	}
