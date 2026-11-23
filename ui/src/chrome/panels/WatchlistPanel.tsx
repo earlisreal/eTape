@@ -217,7 +217,7 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
                 onContextMenu={(e) => { e.preventDefault(); setMenu({ clientX: e.clientX, clientY: e.clientY, symbol: r.symbol }); }}
                 onMouseEnter={() => setHoveredSymbol(r.symbol)}
                 onMouseLeave={() => setHoveredSymbol((h) => (h === r.symbol ? null : h))}
-                style={{ cursor: sort ? "pointer" : "grab", textAlign: "right", userSelect: "none",
+                style={{ cursor: sort ? "pointer" : "default", textAlign: "right", userSelect: "none",
                   background: selected ? "rgba(154,106,27,.16)" : hoveredSymbol === r.symbol ? "rgba(154,106,27,.06)" : "transparent",
                   boxShadow: insertion ? `inset 0 ${insertion === "before" ? 2 : -2}px 0 ${palette.accent}`
                     : selected ? `inset 0 0 0 1px ${palette.accent}` : "none",
