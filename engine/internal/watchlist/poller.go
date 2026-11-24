@@ -44,11 +44,17 @@ type Poller struct {
 	rows     map[string]wsmsg.WatchlistRow // last-known row per symbol (cache)
 	lastRef  *string                       // RFC3339 of last successful poll; nil until first
 	session  sessionKey
+	extended map[string]extendedEvidence
 }
 
 type sessionKey struct {
 	phase session.Phase
 	day   int64
+}
+
+type extendedEvidence struct {
+	block     *qotcommon.PreAfterMarketData
+	confirmed bool
 }
 
 func sessionAt(t time.Time) sessionKey {
@@ -60,6 +66,7 @@ func (p *Poller) updateSession(current sessionKey) {
 		return
 	}
 	p.session = current
+	clear(p.extended)
 	for symbol, row := range p.rows {
 		row.SessionChangePct, row.SessionVolume = nil, nil
 		p.rows[symbol] = row
@@ -72,9 +79,10 @@ func New(list *List, r requester, pub Publisher, clk clock.Clock, interval time.
 	}
 	return &Poller{
 		list: list, r: r, pub: pub, clk: clk, interval: interval,
-		poke:  make(chan struct{}, 1),
-		moved: make(chan struct{}, 1),
-		rows:  map[string]wsmsg.WatchlistRow{},
+		poke:     make(chan struct{}, 1),
+		moved:    make(chan struct{}, 1),
+		rows:     map[string]wsmsg.WatchlistRow{},
+		extended: make(map[string]extendedEvidence),
 	}
 }
 
@@ -144,7 +152,7 @@ func (p *Poller) pollAndPublish(ctx context.Context) {
 				row.ChangePct = &cp
 			}
 			if start == p.session {
-				row.SessionChangePct, row.SessionVolume = sessionMetrics(b, p.session, completed)
+				row.SessionChangePct, row.SessionVolume = p.sessionMetrics(sym, b, completed)
 			}
 			p.rows[sym] = row
 		}
@@ -154,27 +162,35 @@ func (p *Poller) pollAndPublish(ctx context.Context) {
 	p.publishMembership()
 }
 
-func sessionMetrics(b *snappb.SnapshotBasicData, current sessionKey, now time.Time) (*float64, *int64) {
-	if current.phase == session.Closed || b == nil {
+func (p *Poller) sessionMetrics(symbol string, b *snappb.SnapshotBasicData, now time.Time) (*float64, *int64) {
+	if p.session.phase == session.Closed || b == nil {
 		return nil, nil
 	}
 	observed := snapshotTime(b)
-	if observed.IsZero() || observed.After(now) || sessionAt(observed) != current {
+	if observed.IsZero() || observed.After(now) {
 		return nil, nil
+	}
+	current := sessionAt(observed) == p.session
+	if current && p.session.phase == session.PostMarket && observed.Equal(session.Schedule(observed).Close) {
+		// The final regular print can be stamped exactly at the close.
+		current = false
 	}
 
 	var change *float64
 	var volume *int64
-	if current.phase == session.RTH {
+	if p.session.phase == session.RTH {
+		if !current {
+			return nil, nil
+		}
 		price, closePrice := b.GetCurPrice(), b.GetLastClosePrice()
-		if price > 0 && closePrice > 0 && !math.IsInf(price, 0) && !math.IsInf(closePrice, 0) {
+		if positivePrice(price) && positivePrice(closePrice) {
 			pct := (price - closePrice) / closePrice * 100
 			change = &pct
 		}
 		volume = b.Volume
 	} else {
 		var extended *qotcommon.PreAfterMarketData
-		switch current.phase {
+		switch p.session.phase {
 		case session.PreMarket:
 			extended = b.GetPreMarket()
 		case session.PostMarket:
@@ -182,9 +198,10 @@ func sessionMetrics(b *snappb.SnapshotBasicData, current sessionKey, now time.Ti
 		case session.Overnight:
 			extended = b.GetOvernight()
 		}
-		if extended != nil {
-			change, volume = extended.ChangeRate, extended.Volume
+		if extended == nil || !p.confirmExtended(symbol, extended, current, observed, now) {
+			return nil, nil
 		}
+		change, volume = extended.ChangeRate, extended.Volume
 	}
 	if change != nil && (math.IsNaN(*change) || math.IsInf(*change, 0)) {
 		change = nil
@@ -193,6 +210,44 @@ func sessionMetrics(b *snappb.SnapshotBasicData, current sessionKey, now time.Ti
 		volume = nil
 	}
 	return change, volume
+}
+
+// OpenD can stamp the snapshot with the latest regular price time while the
+// extended block updates independently. In that case, wait for the matching
+// block to change during this session before using it.
+func (p *Poller) confirmExtended(symbol string, block *qotcommon.PreAfterMarketData, current bool, observed, now time.Time) bool {
+	if !current && !matchesLatestRegularDate(p.session.phase, observed, now) {
+		return false
+	}
+	previous := p.extended[symbol]
+	confirmed := current || previous.confirmed
+	if !current && previous.block != nil {
+		before, after := previous.block.Volume, block.Volume
+		switch {
+		case before != nil && after != nil && *after < *before:
+			confirmed = false
+		case before != nil && after != nil && *after > *before:
+			confirmed = true
+		case positivePrice(previous.block.GetPrice()) && positivePrice(block.GetPrice()) && previous.block.GetPrice() != block.GetPrice():
+			confirmed = true
+		}
+	}
+	p.extended[symbol] = extendedEvidence{block: block, confirmed: confirmed}
+	return confirmed
+}
+
+func positivePrice(price float64) bool {
+	return price > 0 && !math.IsInf(price, 0)
+}
+
+func matchesLatestRegularDate(phase session.Phase, observed, now time.Time) bool {
+	nowET := now.In(session.Loc())
+	regularDate := session.Schedule(nowET).Date
+	if phase == session.PreMarket || (phase == session.Overnight && nowET.Hour() < 4) {
+		regularDate = session.PreviousTradingDay(regularDate)
+	}
+	regular := session.Schedule(regularDate)
+	return regular.TradingDay && !observed.Before(regular.Open) && !observed.After(regular.Close)
 }
 
 func snapshotTime(b *snappb.SnapshotBasicData) time.Time {
@@ -220,6 +275,7 @@ func (p *Poller) buildPayload(syms []string) wsmsg.WatchlistRowsPayload {
 	for s := range p.rows {
 		if !live[s] {
 			delete(p.rows, s)
+			delete(p.extended, s)
 		}
 	}
 	return wsmsg.WatchlistRowsPayload{RefreshedAt: p.lastRef, Symbols: syms, Rows: rows, Session: p.session.phase.String()}

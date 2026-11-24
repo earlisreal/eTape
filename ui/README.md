@@ -79,9 +79,10 @@ descending, ascending, and saved order. Return to saved order to move rows.
 change and share volume. Regular trading compares price with the prior regular
 close. Pre-market, after-hours, and overnight use moomoo’s matching session
 figures. The label above the table identifies the session, and dashes mark
-closed or unavailable values. Use **Columns** in a Watchlist header to show or
-hide metrics for that panel. **Reset columns** restores the defaults. Hiding
-the sorted column returns the Watchlist to saved row order.
+closed or unavailable values. Some extended-hours quotes need another trade
+to confirm that the figures belong to the active session. Use **Columns** in
+a Watchlist header to show or hide metrics for that panel. **Reset columns**
+restores the defaults. Hiding the sorted column returns to saved row order.
 
 In a stock workspace, click **Use this Watchlist** or **Use this Scanner** to
 fill that window's pinned charts. Each window has its own **Following** switch

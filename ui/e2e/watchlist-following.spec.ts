@@ -22,6 +22,7 @@ test("a Watchlist and Scanner drive independent Monitoring windows", async ({ co
     });
     server.onMessage((raw) => {
       const frame = JSON.parse(raw.toString());
+      if (frame.kind === "delta" && frame.topic?.startsWith("md.")) return;
       if (frame.topic === "sys.session" && frame.payload) {
         frame.payload.mode = "live";
         socket.send(JSON.stringify(frame));
@@ -39,6 +40,7 @@ test("a Watchlist and Scanner drive independent Monitoring windows", async ({ co
 
   await launcher.goto("/");
   const openMonitor = async (name: string) => {
+    await launcher.bringToFront();
     await launcher.getByRole("button", { name: /New window/ }).click();
     await launcher.getByLabel("Workspace name").fill(name);
     await launcher.getByLabel("Starting layout").selectOption("monitoring");
@@ -74,6 +76,7 @@ test("a Watchlist and Scanner drive independent Monitoring windows", async ({ co
   await expect(page.getByTitle("Waiting for Watchlist")).toBeVisible();
   await expect(charts.filter({ hasText: watchlistSymbol!.slice(3) })).toHaveCount(1);
   await expect(following).toHaveAttribute("aria-pressed", "true");
+  await scanner.bringToFront();
   await expect(scannerSwitch).toContainText("Scanner");
   await expect(scannerSwitch).toHaveAttribute("aria-pressed", "true");
 });

@@ -48,6 +48,9 @@ so a missing change percentage can appear alongside a valid share count.
 1. Extend the Watchlist poller’s existing OpenD 3203 snapshot projection.
    Derive the active phase and trading-cycle day from the engine clock. Use the
    snapshot observation time to check that values belong to that phase and day.
+   If OpenD stamps an extended-hours snapshot with the latest regular quote
+   time, check for a change in that session block’s price or cumulative volume
+   across polls before showing it.
    Compare poll start and completion across a boundary so an in-flight response
    cannot publish under the new session. Keep the existing daily Last, %Chg,
    and Volume calculations and the single batched request path.
@@ -103,7 +106,8 @@ Ship with the six default columns and use the current workspace layout version.
 Saved visibility uses additive panel settings, so reverting the feature removes
 its controls and columns while older builds can still read the workspace.
 
-OpenD’s extended-session blocks have no per-block timestamp. Check the
-top-level timestamp against available read-only extended-hours snapshots
-when implementing freshness validation. If the snapshot cannot establish that
-a value belongs to the active session, show a dash.
+OpenD’s extended-session blocks have no per-block timestamp. Live pre-market
+snapshots for AAPL, NVDA, and TSLA carried the previous regular close timestamp
+alongside the pre-market block. The Watchlist can confirm current data through
+updates to the matching block. A symbol without that evidence displays dashes
+until the poller sees activity.

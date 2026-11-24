@@ -282,6 +282,45 @@ func TestSessionRolloverClearsCachedAndInFlightRows(t *testing.T) {
 	assertCleared()
 }
 
+func TestExtendedSnapshotWithRegularCloseTimestampRequiresCurrentActivity(t *testing.T) {
+	now := time.Date(2026, time.November, 24, 8, 30, 0, 0, session.Loc())
+	fc := clock.NewFake(now)
+	l, _ := NewList(newFakeStore())
+	l.Seed([]string{"AAPL"})
+	pb := &pub{}
+	volume := int64(100)
+	stamp := time.Date(2026, time.November, 23, 16, 0, 0, 0, session.Loc())
+	r := &fakeReq{prepare: func(b *snappb.SnapshotBasicData) bool {
+		b.UpdateTimestamp = proto.Float64(float64(stamp.Unix()))
+		b.PreMarket = &qotcommon.PreAfterMarketData{Volume: proto.Int64(volume), ChangeRate: proto.Float64(2.5)}
+		b.AfterMarket = &qotcommon.PreAfterMarketData{Volume: proto.Int64(volume), ChangeRate: proto.Float64(2.5)}
+		return true
+	}}
+	p := New(l, r, pb, fc, time.Second)
+	for _, step := range []struct {
+		volume int64
+		show   bool
+	}{{100, false}, {100, false}, {101, true}, {101, true}, {40, false}, {41, true}} {
+		volume = step.volume
+		p.pollAndPublish(context.Background())
+		row := pb.last().Rows[0]
+		if (row.SessionVolume != nil) != step.show || (row.SessionChangePct != nil) != step.show {
+			t.Fatalf("volume=%d: displayed volume=%v change=%v, want displayed=%t", volume, row.SessionVolume, row.SessionChangePct, step.show)
+		}
+	}
+	fc.Advance(8 * time.Hour)
+	stamp = time.Date(2026, time.November, 24, 16, 0, 0, 0, session.Loc())
+	p.pollAndPublish(context.Background())
+	if got := pb.last().Rows[0]; got.SessionVolume != nil || got.SessionChangePct != nil {
+		t.Fatalf("regular-close timestamp confirmed the first after-hours block: %+v", got)
+	}
+	volume++
+	p.pollAndPublish(context.Background())
+	if got := pb.last().Rows[0].SessionVolume; got == nil || *got != volume {
+		t.Fatalf("advancing after-hours volume unavailable: %v", got)
+	}
+}
+
 func TestPokePublishesMembershipImmediately(t *testing.T) {
 	// Poke's "publish membership, then fresh poll" behavior lives in Run's
 	// select loop, so this test drives Run with a REAL clock + a poll-until

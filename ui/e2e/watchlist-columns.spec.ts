@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 import type { Workspace } from "../src/chrome/workspace";
 
 test("Watchlist session columns persist independently and survive layout export and import", async ({ context, page }) => {
   test.setTimeout(90_000);
   await context.addInitScript(() => localStorage.setItem("etape.venueSetupHidden", "1"));
-  const tab = await context.newPage();
   let saved: Workspace | undefined;
   await context.routeWebSocket("**/ws", (socket) => {
     const server = socket.connectToServer();
@@ -17,6 +17,7 @@ test("Watchlist session columns persist independently and survive layout export 
     });
     server.onMessage((raw) => {
       const frame = JSON.parse(raw.toString());
+      if (frame.kind === "delta" && frame.topic?.startsWith("md.")) return;
       if (frame.topic === "sys.session" && frame.payload) frame.payload.mode = "live";
       if (frame.topic === "watchlist.rows") {
         frame.payload = {
@@ -28,15 +29,15 @@ test("Watchlist session columns persist independently and survive layout export 
     });
   });
 
-  const addWatchlist = async (target: typeof page, id: string) => {
-    await target.goto(`/?workspace=${id}`);
-    await target.getByRole("button", { name: /add panel/i }).first().click();
-    await target.getByRole("dialog", { name: "Add panel" }).getByRole("button", { name: /watchlist your pinned/i }).click();
-    await expect(target.getByRole("columnheader")).toHaveCount(6);
+  const addWatchlist = async (id: string) => {
+    await page.goto(`/?workspace=${id}`);
+    await page.getByRole("button", { name: /add panel/i }).first().click();
+    await page.getByRole("dialog", { name: "Add panel" }).getByRole("button", { name: /watchlist your pinned/i }).click();
+    await expect(page.getByRole("columnheader")).toHaveCount(6);
   };
 
   await page.setViewportSize({ width: 480, height: 600 });
-  await addWatchlist(page, "e2e-watchlist-columns");
+  await addWatchlist("e2e-watchlist-columns");
   await expect(page.getByText("After-hours", { exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "−1.2%", exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "4K", exact: true })).toBeVisible();
@@ -49,22 +50,27 @@ test("Watchlist session columns persist independently and survive layout export 
   await page.reload();
   await expect(page.getByRole("columnheader")).toHaveCount(5);
 
-  await addWatchlist(tab, "e2e-watchlist-columns-import");
-  await tab.setViewportSize({ width: 1000, height: 750 });
   await page.setViewportSize({ width: 1000, height: 750 });
-  const openGeneral = async (target: typeof page) => {
-    await target.getByRole("button", { name: "Settings", exact: true }).click();
-    await target.getByRole("button", { name: "General", exact: true }).click();
+  const openGeneral = async () => {
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "General", exact: true }).click();
   };
-  await openGeneral(page);
+  await openGeneral();
   const downloading = page.waitForEvent("download");
   await page.getByTestId("download-json").click();
-  const file = await (await downloading).path();
-  await openGeneral(tab);
-  await tab.getByTestId("import-file").setInputFiles(file);
-  await tab.getByTestId("apply-import").click();
-  await tab.getByRole("button", { name: "Replace layout", exact: true }).click();
-  await expect(tab.getByRole("alert").filter({ hasText: "Imported layout." })).toBeVisible();
-  await tab.getByRole("button", { name: "Close settings" }).click();
-  await expect(tab.getByRole("columnheader")).toHaveCount(5);
+  const download = await downloading;
+  const buffer = await readFile(await download.path());
+
+  await addWatchlist("e2e-watchlist-columns-import");
+  await openGeneral();
+  await page.getByTestId("import-file").setInputFiles({
+    name: download.suggestedFilename(),
+    mimeType: "application/json",
+    buffer,
+  });
+  await page.getByTestId("apply-import").click();
+  await page.getByRole("button", { name: "Replace layout", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Imported layout." })).toBeVisible();
+  await page.getByRole("button", { name: "Close settings" }).click();
+  await expect(page.getByRole("columnheader")).toHaveCount(5);
 });
