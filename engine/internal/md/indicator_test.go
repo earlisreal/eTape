@@ -3,6 +3,7 @@ package md
 import (
 	"math"
 	"math/rand"
+	"slices"
 	"testing"
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
@@ -225,6 +226,53 @@ func TestIndicatorSnapshotIncludesFormingMinute(t *testing.T) {
 		if last.TimeMs != forming.BucketMs || math.Abs(last.Value-tc.want) > 1e-9 {
 			t.Errorf("%s snapshot ends at %+v, want forming minute %d at %g", id, last, forming.BucketMs, tc.want)
 		}
+	}
+}
+
+func TestSeedChartHistoryFiveMinuteVWAPIncludesCompletedBuckets(t *testing.T) {
+	const symbol, id = "US.AAPL", "vwap-5m"
+	c := New(Config{})
+	c.apply(ensureIndicatorMsg{connID: 1, id: id, spec: IndicatorSpec{Symbol: symbol, TF: session.TF5m, Type: IndVWAP}})
+	c.apply(seedChartHistoryMsg{
+		symbol: symbol,
+		bars1m: []feed.Bar{
+			bar1m(0, 100, 100, 100, 100, 100),
+			bar1m(5, 110, 110, 110, 110, 100),
+			bar1m(15, 120, 120, 120, 120, 100), // skips an empty 5m bucket
+		},
+		done: make(chan struct{}),
+	})
+
+	var snapshot []Point
+	updates := drainUpdates(c)
+	for _, update := range updates {
+		if iu, ok := update.(IndicatorUpdate); ok && iu.InstanceID == id && iu.Snapshot {
+			snapshot = iu.Points
+		}
+	}
+	want := []Point{
+		{TimeMs: t0Ms, Value: 100},
+		{TimeMs: t0Ms + 5*60_000, Value: 105},
+		{TimeMs: t0Ms + 15*60_000, Value: 110},
+	}
+	if !slices.Equal(snapshot, want) {
+		t.Fatalf("seeded 5m VWAP = %+v, want %+v", snapshot, want)
+	}
+	bars := snapshotBars(updates, symbol, session.TF5m)
+	if len(bars) != 3 || bars[0].InProgress || bars[1].InProgress || !bars[2].InProgress {
+		t.Fatalf("seeded 5m bars = %+v, want two finalized and one forming", bars)
+	}
+
+	c.apply(eventMsg{ev: feed.Bars1mEvent{Bars: []feed.Bar{bar1m(20, 130, 130, 130, 130, 100)}}})
+	var live []Point
+	for _, update := range drainUpdates(c) {
+		if iu, ok := update.(IndicatorUpdate); ok && iu.InstanceID == id && !iu.Snapshot {
+			live = append(live, iu.Points...)
+		}
+	}
+	want = []Point{want[2], {TimeMs: t0Ms + 20*60_000, Value: 115}}
+	if !slices.Equal(live, want) {
+		t.Fatalf("5m VWAP after first live minute = %+v, want %+v", live, want)
 	}
 }
 

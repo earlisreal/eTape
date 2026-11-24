@@ -279,10 +279,6 @@ func (e *barEngine) apply1m(c *Core, bars []feed.Bar) {
 		}
 		if finalizedPrev >= 0 {
 			e.validate(c, sb, finalizedPrev)
-			// The finalized bar's HIGHER buckets must recompute too — the new
-			// bucket may have crossed a 5m/15m/... boundary, and only
-			// next-bucket evidence (now present) can flip them to final.
-			e.cascade(c, sb, finalizedPrev)
 		}
 		e.cascade(c, sb, nb.BucketMs)
 		e.deriveDaily(c, sb, nb.BucketMs)
@@ -520,9 +516,11 @@ func (e *barEngine) emitSeedSnapshots(c *Core, sb *symbolBars, tfs []session.Tim
 	}
 }
 
-// cascade recomputes the higher intraday bars containing the 1m bucket m.
+// cascade recomputes the higher intraday bars containing the 1m bucket m
+// and closes the previous aggregate when the minute watermark crosses its end.
 func (e *barEngine) cascade(c *Core, sb *symbolBars, m int64) {
 	oneM := sb.series[session.TF1m]
+	watermark := oneM.maxBucket()
 	for _, tf := range cascadeTFs {
 		span, _ := session.IntradaySpanSecs(tf)
 		spanMs := span * 1000
@@ -535,8 +533,15 @@ func (e *barEngine) cascade(c *Core, sb *symbolBars, m int64) {
 			continue
 		}
 		nb := foldBars(sb.symbol, tf, hb, members)
-		nb.InProgress = oneM.maxBucket() < hb+spanMs // next-bucket evidence
-		if sb.series[tf].upsert(nb) {
+		nb.InProgress = watermark < hb+spanMs // next-bucket evidence
+		bars := sb.series[tf]
+		// The previous bucket's OHLCV is already complete. Close it even
+		// when the 1m input was seeded as finalized or skipped empty buckets.
+		if prev := bars.last(); prev != nil && prev.InProgress && prev.BucketMs < hb && prev.BucketMs+spanMs <= watermark {
+			prev.InProgress = false
+			c.barOut(*prev)
+		}
+		if bars.upsert(nb) {
 			c.barOut(nb)
 		}
 	}

@@ -51,6 +51,9 @@ Builds books, quotes, bars, ticks, and engine-computed indicators from normalize
 Indicator snapshots include a preview for the current real candle when the
 study is warmed up. The calculator folds only closed candles, so repeated
 updates to a forming candle recompute its value from the same closed history.
+When a later one-minute candle crosses the end of a 5-, 15-, 30-, or 60-minute
+candle, the aggregate closes during history loading and live updates. Indicator
+snapshots include these completed candles and preview the current aggregate.
 
 Volume-Only Bars retain eligible volume and use the trusted candle close.
 Basic quotes can supply a fallback until a Last-Eligible Print or a trade bar
