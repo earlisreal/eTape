@@ -83,6 +83,17 @@ export const DEFAULT_TEMPLATES: ActionTemplate[] = [];
 
 export const DEFAULT_ORDER_CONFIG: OrderConfig = { templates: DEFAULT_TEMPLATES, activeVenue: "" };
 
+function unusedTemplateId(baseId: string, usedIds: ReadonlySet<string>): string {
+  let id = baseId;
+  for (let suffix = 2; usedIds.has(id); suffix++) id = `${baseId}-${suffix}`;
+  return id;
+}
+
+export function nextTemplateId(prefix: string, templates: readonly ActionTemplate[]): string {
+  const count = templates.length;
+  return unusedTemplateId(`${prefix}-${count + 1}-${Math.max(1, count)}`, new Set(templates.map((t) => t.id)));
+}
+
 // normalizeOrderConfig is the single migration point applied where a config
 // enters the app (OrderConfigProvider on load, and to DEFAULT_ORDER_CONFIG).
 // It converts legacy PositionFraction `fraction` to `pct`, defaults a missing
@@ -190,11 +201,19 @@ export function normalizeOrderConfig(config: OrderConfig): OrderConfig {
   });
   const hotkeyDeck = normalizeHotkeyDeck((config as { hotkeyDeck?: unknown }).hotkeyDeck, templates);
   const placed = new Set(hotkeyDeck.rows.flat());
+  // The Deck resolves duplicate IDs to the last template with that ID. Keep
+  // that ID on the same template so repairing settings preserves the action.
+  const lastIndexById = new Map(templates.map((t, index) => [t.id, index]));
+  const usedIds = new Set(lastIndexById.keys());
   return {
     ...config,
     chartRiskAutoSend: config.chartRiskAutoSend === true,
     extHoursMarketBufferPct,
-    templates: templates.map((t) => ({ ...t, deck: placed.has(t.id) })),
+    templates: templates.map((t, index) => {
+      const id = lastIndexById.get(t.id) === index ? t.id : unusedTemplateId(t.id, usedIds);
+      usedIds.add(id);
+      return { ...t, id, deck: placed.has(id) };
+    }),
     hotkeyDeck,
   };
 }

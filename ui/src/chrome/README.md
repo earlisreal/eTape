@@ -5,10 +5,12 @@ and footer. Content scrolls independently; narrow windows move navigation into
 a horizontal row. Orders & hotkeys, Venues & creds, and Data & storage keep
 their Save button in the same fixed footer, beside Done. General changes save
 immediately. Broker cards test connections; Save persists venue and limit edits.
-Closing or leaving
-Orders & hotkeys discards unsaved template edits. Imports ask for confirmation
-in a nested dialog; dismissing it leaves Settings open. New Window renames
-workspaces inline and uses the shared two-click delete confirmation.
+Closing or leaving Orders & hotkeys discards unsaved template edits. Adding a
+template creates an independent card. Saved templates that share an ID become
+independently editable on load, and existing Deck buttons keep their targets.
+Imports ask for confirmation in a nested dialog; dismissing it leaves Settings
+open. New Window renames workspaces inline and uses the shared two-click delete
+confirmation.
 
 Data & storage edits bootstrap settings with an explicit Save and restart.
 Reset to defaults uses the engine's built-in defaults, requires confirmation,

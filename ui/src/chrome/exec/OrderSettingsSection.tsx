@@ -25,7 +25,7 @@ import type { ExecStore } from "../../data/ExecStore";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
 import {
-  CHART_BINDINGS, DEFAULT_TEMPLATES, MANAGEMENT_ACTIONS, defaultLeverageCap, normalizeOrderConfig, type ActionTemplate, type ChartBinding, type DeckColor, type ManagementAction,
+  CHART_BINDINGS, DEFAULT_TEMPLATES, MANAGEMENT_ACTIONS, defaultLeverageCap, nextTemplateId, normalizeOrderConfig, type ActionTemplate, type ChartBinding, type DeckColor, type ManagementAction,
   type PerpetualRiskLeverage,
   type HotkeyDeckConfig, type OrderConfig, type PlaceOrderTemplate, type RiskEntryTemplate,
 } from "./actionTemplate";
@@ -805,13 +805,8 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
       }
     }
   };
-  // Removing a row must also drop its rawEdits entries. uid() below is
-  // deterministic in templates.length alone, so an add-then-remove that
-  // returns the array to a prior length reuses the exact same id on the
-  // next add. Without this cleanup, a still-in-progress (unblurred) edit on
-  // the removed row would leak onto whichever new row is later assigned the
-  // reused id — the input would show stale typed text while the saved model
-  // holds the real, correct value.
+  // A later add can reuse a removed ID. Clear edits that have yet to blur
+  // so the new template displays its own values.
   const removeTemplate = (id: string) => {
     setTemplates((ts) => ts.filter((t) => t.id !== id));
     setDeck((d) => ({ ...d, rows: removeDeckPlacement(d.rows, id) }));
@@ -831,13 +826,20 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
       [next[i], next[j]] = [next[j], next[i]];
       return next;
     });
-  const uid = (p: string) => `${p}-${templates.length + 1}-${Math.max(0, ...templates.map((_, i) => i)) + 1}`;
-  const addPlace = () => setTemplates((ts) => [...ts, { kind: "place", id: uid("tmpl"), label: "New", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO", priceSource: "Ask", priceOffset: 0, priceOffsetUnit: "$", sizing: { mode: "Shares", shares: 100 } } as PlaceOrderTemplate]);
-  const addManage = () => setTemplates((ts) => [...ts, { kind: "manage", id: uid("mng"), label: "New action", action: "CancelLast" }]);
-  const addRisk = () => setTemplates((ts) => [...ts, {kind:"risk",id:uid("risk"),label:"Chart Risk Entry",mode:"Dollar",value:100,buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"}}]);
+  const addPlace = () => setTemplates((ts) => [...ts, {
+    kind: "place", id: nextTemplateId("tmpl", ts), label: "New", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO",
+    priceSource: "Ask", priceOffset: 0, priceOffsetUnit: "$", sizing: { mode: "Shares", shares: 100 },
+  }]);
+  const addManage = () => setTemplates((ts) => [...ts, {
+    kind: "manage", id: nextTemplateId("mng", ts), label: "New action", action: "CancelLast",
+  }]);
+  const addRisk = () => setTemplates((ts) => [...ts, {
+    kind: "risk", id: nextTemplateId("risk", ts), label: "Chart Risk Entry", mode: "Dollar", value: 100,
+    buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" },
+  }]);
   // Reset replaces every template wholesale, so any live rawEdits entry —
   // even for an id that still exists after reset (default ids are fixed
-  // strings, not uid()-generated) — must not survive it; otherwise the
+  // strings) — must not survive it; otherwise the
   // display would keep showing pre-reset in-progress typed text instead of
   // snapping to the restored default value.
   const doReset = () => {

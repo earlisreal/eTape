@@ -172,6 +172,25 @@ describe("normalizeOrderConfig", () => {
     expect(out.hotkeyDeck).toEqual({ rows: [["b", "a"]], showHotkeyLabels: true });
     expect(out.templates.map((t) => t.deck)).toEqual([true, true]);
   });
+  it("separates saved templates sharing an ID and keeps the Deck's existing target", () => {
+    const raw: OrderConfig = {
+      activeVenue: "",
+      templates: [
+        { kind: "manage", id: "mng-2-1", label: "Cancel Last", action: "CancelLast", hotkey: "Ctrl+X" },
+        { kind: "manage", id: "mng-2-1", label: "Cancel All", action: "CancelAllFocused", hotkey: "Ctrl+Shift+X" },
+        { kind: "manage", id: "mng-2-1-2", label: "Kill", action: "KillSwitch" },
+      ],
+      hotkeyDeck: { rows: [["mng-2-1", "mng-2-1-2"]], showHotkeyLabels: true },
+    };
+    const out = normalizeOrderConfig(raw);
+    expect(out.templates).toEqual([
+      { ...raw.templates[0], id: "mng-2-1-3", deck: false },
+      { ...raw.templates[1], deck: true },
+      { ...raw.templates[2], deck: true },
+    ]);
+    expect(out.hotkeyDeck).toEqual(raw.hotkeyDeck);
+    expect(normalizeOrderConfig(out)).toEqual(out);
+  });
   it("does not fall back to legacy flags when an explicit layout is present but malformed", () => {
     const out = normalizeOrderConfig({
       activeVenue: "",

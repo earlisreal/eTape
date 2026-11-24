@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "./useOrderConfig";
@@ -551,6 +551,34 @@ describe("OrderSettingsSection", () => {
     expect(saved.templates[saved.templates.length - 1].session).toBe("AUTO");
   });
 
+  it("edits only the newly added order template after an earlier template was removed", () => {
+    const onSave = vi.fn();
+    const [first, second] = SAMPLE_ORDER_CONFIG.templates;
+    const config = normalizeOrderConfig({
+      ...SAMPLE_ORDER_CONFIG,
+      templates: [
+        { ...first, id: "tmpl-1-1" },
+        { ...second, id: "tmpl-2-1", label: "Test Buy", hotkey: "Shift+T" },
+      ],
+    });
+    render(<ThemeProvider><OrderSettingsSection config={config} onSave={onSave} /></ThemeProvider>);
+
+    fireEvent.click(screen.getByRole("button", { name: `Remove ${first.label}` }));
+    fireEvent.click(screen.getByTestId("add-template"));
+    fireEvent.click(screen.getByTestId("add-place"));
+    const [existingCard, newCard] = screen.getAllByTestId(/^tmpl-card-/);
+    fireEvent.change(within(newCard).getByDisplayValue("New"), { target: { value: "Cover" } });
+    fireEvent.keyDown(within(newCard).getByPlaceholderText("press keys"), { key: "z", ctrlKey: true });
+
+    expect((within(existingCard).getByTestId("tmpl-label-tmpl-2-1") as HTMLInputElement).value).toBe("Test Buy");
+    expect((within(existingCard).getByPlaceholderText("press keys") as HTMLInputElement).value).toBe("Shift+T");
+    fireEvent.click(screen.getByTestId("save"));
+    const [existing, added] = onSave.mock.calls[0][0].templates;
+    expect(existing).toEqual(config.templates[1]);
+    expect(added).toMatchObject({ kind: "place", label: "Cover", hotkey: "Ctrl+Z" });
+    expect(added.id).not.toBe(existing.id);
+  });
+
   it("edits a template's session and round-trips it on save", () => {
     const { onSave } = wrap();
     // buy-5k starts at the default session ("AUTO" — normalizeOrderConfig
@@ -581,9 +609,8 @@ describe("OrderSettingsSection", () => {
     expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").hotkey).toBe("");
   });
 
-  // Regression: uid() is deterministic in templates.length alone, so once the
-  // array returns to a prior length (add-then-remove), the next add reuses
-  // the exact same id. removeTemplate must drop that id's rawEdits entries,
+  // Regression: an add-then-remove can free an ID for the next add.
+  // removeTemplate must drop that ID's rawEdits entries,
   // or a still-in-progress (unblurred) edit on the removed row leaks onto
   // whichever new row is assigned the reused id — a WYSIWYG desync where the
   // input shows stale typed text but the saved model holds the real value.
