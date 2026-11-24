@@ -667,6 +667,8 @@ export interface WatchlistRow {
   last: number | null;
   changePct: number | null;
   volume: number /* int64 */;
+  sessionChangePct?: number | null;
+  sessionVolume?: number | null;
 }
 /**
  * WatchlistRowsPayload is the full-snapshot push on topic watchlist.rows.
@@ -678,6 +680,7 @@ export interface WatchlistRowsPayload {
   refreshedAt: string | null;
   symbols: string[];
   rows: WatchlistRow[];
+  session?: 'pre' | 'rth' | 'post' | 'overnight' | 'closed';
 }
 export interface WatchlistAddArgs {
   symbol: string;

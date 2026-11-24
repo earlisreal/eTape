@@ -598,10 +598,12 @@ type ScanHitPayload struct {
 // convention). Not reusing ScannerRow: it carries floatShares (scanner-only),
 // and coupling the types drags either's evolution onto the other.
 type WatchlistRow struct {
-	Symbol    string   `json:"symbol"`
-	Last      *float64 `json:"last" tstype:"number | null,required"`
-	ChangePct *float64 `json:"changePct" tstype:"number | null,required"`
-	Volume    int64    `json:"volume"`
+	Symbol           string   `json:"symbol"`
+	Last             *float64 `json:"last" tstype:"number | null,required"`
+	ChangePct        *float64 `json:"changePct" tstype:"number | null,required"`
+	Volume           int64    `json:"volume"`
+	SessionChangePct *float64 `json:"sessionChangePct,omitempty" tstype:"number | null"`
+	SessionVolume    *int64   `json:"sessionVolume,omitempty" tstype:"number | null"`
 }
 
 // WatchlistRowsPayload is the full-snapshot push on topic watchlist.rows.
@@ -612,6 +614,7 @@ type WatchlistRowsPayload struct {
 	RefreshedAt *string        `json:"refreshedAt" tstype:"string | null,required"`
 	Symbols     []string       `json:"symbols"`
 	Rows        []WatchlistRow `json:"rows"`
+	Session     string         `json:"session,omitempty" tstype:"'pre' | 'rth' | 'post' | 'overnight' | 'closed'"`
 }
 
 type WatchlistAddArgs struct {

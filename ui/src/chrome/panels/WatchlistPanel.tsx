@@ -13,6 +13,7 @@ import { bareSymbol } from "../exec/orderStatus";
 import { TVContextMenu, type MenuEntry } from "./tv/TVContextMenu";
 import { menuChrome } from "../menuChrome";
 import { useToasts } from "../Toast";
+import { useDismissibleLayer } from "../controls/useDismissibleLayer";
 
 // A row view over the watchlist snapshot: symbols is authoritative membership +
 // order, but rows may lag by up to one poll — a symbol absent from rows still
@@ -22,27 +23,43 @@ interface WatchlistRowView {
   last: number | null;
   changePct: number | null;
   volume: number | null;
+  sessionChangePct: number | null;
+  sessionVolume: number | null;
 }
 
 const STALE_MS = 10_000;
 const STALE_CHECK_MS = 2_000;
 
-const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
-  { col: "sym", label: "Symbol", align: "left" },
-  { col: "last", label: "Last", align: "right" },
-  { col: "changePct", label: "%Chg", align: "right" },
-  { col: "vol", label: "Volume", align: "right" },
-];
+const COLUMNS = [
+  { col: "sym", label: "Symbol", name: "Symbol" },
+  { col: "last", label: "Last", name: "Last" },
+  { col: "changePct", label: "%Chg", name: "%Chg" },
+  { col: "sessionChangePct", label: "Session %", name: "Session Change %" },
+  { col: "vol", label: "Volume", name: "Volume" },
+  { col: "sessionVolume", label: "Session Vol", name: "Session Volume" },
+] as const;
+const METRICS = COLUMNS.filter((column) => column.col !== "sym");
+type Metric = typeof METRICS[number]["col"];
+const SESSION_LABELS = { pre: "Pre-market", rth: "Regular", post: "After-hours", overnight: "Overnight", closed: "Closed" };
+
+function hiddenMetrics(value: unknown): Metric[] {
+  return Array.isArray(value) ? METRICS.map(({ col }) => col).filter((col) => value.includes(col)) : [];
+}
 const SORT_ACCESSORS: Record<string, (r: WatchlistRowView) => number | string | null> = {
   sym: (r) => r.symbol,
   last: (r) => r.last,
   changePct: (r) => r.changePct,
   vol: (r) => r.volume,
+  sessionChangePct: (r) => r.sessionChangePct,
+  sessionVolume: (r) => r.sessionVolume,
 };
 
-function toRowView(symbol: string, row: WatchlistRow | undefined): WatchlistRowView {
-  if (!row) return { symbol, last: null, changePct: null, volume: null };
-  return { symbol, last: row.last, changePct: row.changePct, volume: row.volume };
+function toRowView(symbol: string, row: WatchlistRow | undefined, showSession: boolean): WatchlistRowView {
+  return {
+    symbol, last: row?.last ?? null, changePct: row?.changePct ?? null, volume: row?.volume ?? null,
+    sessionChangePct: (showSession ? row?.sessionChangePct : null) ?? null,
+    sessionVolume: (showSession ? row?.sessionVolume : null) ?? null,
+  };
 }
 
 function dropPosition(event: DragEvent<HTMLTableRowElement>): WatchlistMoveArgs["position"] {
@@ -50,7 +67,7 @@ function dropPosition(event: DragEvent<HTMLTableRowElement>): WatchlistMoveArgs[
   return event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
 }
 
-export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSync, group: groupProp }: PanelProps): JSX.Element {
+export function WatchlistPanel({ config, stores, linkGroups, commands, onConfigChange, scannerSync, group: groupProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   // config.group is frozen at panel creation (dockview never re-invokes the panel
   // factory with a fresh config after a later swatch re-pick) — PanelFrame threads
@@ -62,6 +79,11 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
   const draggedSymbol = useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ symbol: string; position: WatchlistMoveArgs["position"] } | null>(null);
   const [sort, setSort] = useState<SortState>(null);
+  const [hidden, setHidden] = useState(() => hiddenMetrics(config.settings.watchlistHiddenColumns));
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const columnsRef = useRef<HTMLDivElement>(null);
+  const columnsTrigger = useRef<HTMLButtonElement>(null);
+  useDismissibleLayer(columnsRef, () => setColumnsOpen(false), { enabled: columnsOpen, anchor: columnsTrigger.current });
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ clientX: number; clientY: number; symbol: string } | null>(null);
@@ -77,11 +99,22 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
   }, []);
 
   const stale = snap.refreshedAt != null && now - Date.parse(snap.refreshedAt) > STALE_MS;
+  const session = snap.received ? snap.session : null;
+  const showSession = session !== null && session !== "closed";
+  const sessionLabel = session && (!hidden.includes("sessionChangePct") || !hidden.includes("sessionVolume"))
+    ? SESSION_LABELS[session] : null;
+  const visible = COLUMNS.filter(({ col }) => col === "sym" || !hidden.includes(col));
 
   const rows = useMemo(() => {
-    const views = snap.symbols.map((sym) => toRowView(sym, snap.rows.get(sym)));
+    const views = snap.symbols.map((sym) => toRowView(sym, snap.rows.get(sym), showSession));
     return sortRows(views, sort, SORT_ACCESSORS);
-  }, [snap.symbols, snap.rows, sort]);
+  }, [snap.symbols, snap.rows, showSession, sort]);
+
+  const updateHidden = (next: Metric[]) => {
+    setHidden(next);
+    onConfigChange({ watchlistHiddenColumns: next });
+    if (next.some((col) => col === sort?.col)) setSort(null);
+  };
 
   const move = (symbol: string, target: string | undefined, position: WatchlistMoveArgs["position"]) => {
     if (!target || symbol === target) return;
@@ -133,14 +166,36 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
   );
 
   const headerActions = useContext(PanelHeaderActionsSlotContext);
-  const sourceControl = scannerSync && <ScannerSyncControl sync={scannerSync} sourceName="Watchlist" />;
-  const following = headerActions === undefined ? sourceControl
-    : headerActions && sourceControl ? createPortal(sourceControl, headerActions) : null;
+  const actions = <>
+    {scannerSync && <ScannerSyncControl sync={scannerSync} sourceName="Watchlist" />}
+    <button type="button" ref={columnsTrigger} aria-expanded={columnsOpen} onClick={() => setColumnsOpen((open) => !open)}
+      style={{ border: `1px solid ${palette.border}`, borderRadius: 3, background: palette.surface, color: palette.textMuted, cursor: "pointer", padding: "2px 5px", fontFamily: FONTS.mono, fontSize: 10, lineHeight: 1, flex: "0 0 auto" }}>
+      Columns
+    </button>
+  </>;
+  const controls = headerActions === undefined ? actions : headerActions && createPortal(actions, headerActions);
+  const columnsMenu = columnsOpen && (
+    <div ref={columnsRef} role="group" aria-label="Watchlist columns" className="popover"
+      style={{ top: headerActions === undefined ? 28 : 6, right: 6, width: 172, maxWidth: "calc(100% - 12px)" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {METRICS.map(({ col, name }) => (
+          <label key={col} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <input type="checkbox" checked={!hidden.includes(col)}
+              onChange={() => updateHidden(hidden.includes(col) ? hidden.filter((id) => id !== col) : [...hidden, col])} />
+            {name}
+          </label>
+        ))}
+        <button type="button" onClick={() => updateHidden([])}>Reset columns</button>
+      </div>
+    </div>
+  );
+  const panelStyle = { position: "relative" as const, height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 };
 
   if (snap.symbols.length === 0) {
     return (
-      <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
-        {following}
+      <div style={panelStyle}>
+        {controls}
+        {columnsMenu}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: 16 }}>
           <span style={{ color: palette.textMuted }}>Add a symbol to start your watchlist</span>
           {!group && <span>Choose a Link Group color to load symbols.</span>}
@@ -151,19 +206,22 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
   }
 
   return (
-    <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
-      {following}
+    <div style={panelStyle}>
+      {controls}
+      {columnsMenu}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}` }}>
         {addInput}
+        {sessionLabel && <span style={{ color: palette.textMuted }}>{sessionLabel}</span>}
       </div>
       {!group && <p style={{ padding: "0 8px" }}>Choose a Link Group color to load symbols.</p>}
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ color: palette.textMuted, textAlign: "right" }}>
-            {COLUMNS.map((c) => (
-              <th key={c.col} style={{ ...th, textAlign: c.align, cursor: "pointer" }} onClick={() => clickSort(c.col)}
+            {visible.map((c) => (
+              <th key={c.col} style={{ ...th, textAlign: c.col === "sym" ? "left" : "right", cursor: "pointer", whiteSpace: "nowrap" }} onClick={() => clickSort(c.col)}
                 aria-sort={sort?.col === c.col ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
-                title={sort?.col === c.col && sort.dir === "asc" ? "Click to show saved order" : undefined}
+                aria-label={c.label !== c.name ? c.name : undefined}
+                title={sort?.col === c.col && sort.dir === "asc" ? `${c.name} · Click to show saved order` : c.name}
                 className={`col-head sortable${sort?.col === c.col ? " sort-active" : ""}`}>
                 {c.label} {sortIndicator(sort, c.col)}
               </th>
@@ -222,13 +280,17 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, scannerSy
                   boxShadow: insertion ? `inset 0 ${insertion === "before" ? 2 : -2}px 0 ${palette.accent}`
                     : selected ? `inset 0 0 0 1px ${palette.accent}` : "none",
                   transition: "background 120ms ease" }}>
-                <td style={symCell}>{bareSymbol(r.symbol)}</td>
-                <td style={{ ...numCell, opacity: stale ? 0.55 : 1 }}>{r.last === null ? "—" : formatPrice(r.last, quoteDecimals(r.last, 2))}</td>
-                <td style={{ ...numCell, opacity: stale ? 0.55 : 1,
-                  color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>
-                  {formatChangePct(r.changePct)}
-                </td>
-                <td style={{ ...numCell, opacity: stale ? 0.55 : 1 }}>{formatCompactShares(r.volume)}</td>
+                {visible.map(({ col }) => {
+                  if (col === "sym") return <td key={col} style={symCell}>{bareSymbol(r.symbol)}</td>;
+                  const style = { ...numCell, opacity: stale ? 0.55 : 1 };
+                  if (col === "last") return <td key={col} style={style}>{r.last === null ? "—" : formatPrice(r.last, quoteDecimals(r.last, 2))}</td>;
+                  if (col === "changePct" || col === "sessionChangePct") {
+                    const pct = r[col];
+                    const color = pct === null ? palette.textMuted : pct > 0 ? palette.up : pct < 0 ? palette.down : palette.text;
+                    return <td key={col} style={{ ...style, color }}>{formatChangePct(pct)}</td>;
+                  }
+                  return <td key={col} style={style}>{formatCompactShares(col === "vol" ? r.volume : r.sessionVolume)}</td>;
+                })}
               </tr>
             );
           })}

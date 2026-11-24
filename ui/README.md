@@ -75,6 +75,14 @@ half to save the move above or below it. With a row focused, use **Alt+Up** or
 **Alt+Down** to move it one place. Clicking a column header cycles through
 descending, ascending, and saved order. Return to saved order to move rows.
 
+**Session %** and **Session Vol** show Scanner’s current US-stock session
+change and share volume. Regular trading compares price with the prior regular
+close. Pre-market, after-hours, and overnight use moomoo’s matching session
+figures. The label above the table identifies the session, and dashes mark
+closed or unavailable values. Use **Columns** in a Watchlist header to show or
+hide metrics for that panel. **Reset columns** restores the defaults. Hiding
+the sorted column returns the Watchlist to saved row order.
+
 In a stock workspace, click **Use this Watchlist** or **Use this Scanner** to
 fill that window's pinned charts. Each window has its own **Following** switch
 in the top bar and saves its own selection. The Watchlist uses the shared

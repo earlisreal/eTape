@@ -11,6 +11,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
+	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
@@ -69,6 +70,7 @@ type fakeReq struct {
 	calls     int
 	failAll   bool
 	onRequest func()
+	prepare   func(*snappb.SnapshotBasicData) bool
 }
 
 func (r *fakeReq) Request(ctx context.Context, protoID uint32, req proto.Message) (opend.Frame, error) {
@@ -90,7 +92,7 @@ func (r *fakeReq) Request(ctx context.Context, protoID uint32, req proto.Message
 	for _, sec := range in.GetC2S().GetSecurityList() {
 		code := sec.GetCode()
 		cur, last, vol := 10.0, 8.0, int64(1000)
-		list = append(list, &snappb.Snapshot{
+		snapshot := &snappb.Snapshot{
 			Basic: &snappb.SnapshotBasicData{
 				// SnapshotBasicData has 15 required proto2 fields (see
 				// scan_test.go's snapshotBasic) — every one must be set or
@@ -111,7 +113,10 @@ func (r *fakeReq) Request(ctx context.Context, protoID uint32, req proto.Message
 				Turnover:       proto.Float64(0),
 				TurnoverRate:   proto.Float64(0),
 			},
-		})
+		}
+		if r.prepare == nil || r.prepare(snapshot.Basic) {
+			list = append(list, snapshot)
+		}
 	}
 	resp.RetType = proto.Int32(0)
 	resp.S2C = &snappb.S2C{SnapshotList: list}
@@ -178,6 +183,103 @@ func TestPollComputesChangePct(t *testing.T) {
 	if got.RefreshedAt == nil {
 		t.Fatal("RefreshedAt nil after successful poll")
 	}
+}
+
+func TestSessionMetrics(t *testing.T) {
+	day := time.Date(2026, time.November, 24, 0, 0, 0, 0, session.Loc())
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+		pct  *float64
+		vol  *int64
+	}{
+		{"pre", day.Add(5 * time.Hour), proto.Float64(0), proto.Int64(0)},
+		{"regular", day.Add(10 * time.Hour), proto.Float64(25), proto.Int64(1000)},
+		{"post", day.Add(17 * time.Hour), proto.Float64(-2.1), nil},
+		{"overnight", day.Add(time.Hour), nil, proto.Int64(800)},
+		{"closed", day.AddDate(0, 0, 4), nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l, _ := NewList(newFakeStore())
+			l.Seed([]string{"AAPL"})
+			pb := &pub{}
+			r := &fakeReq{prepare: func(b *snappb.SnapshotBasicData) bool {
+				b.UpdateTimestamp = proto.Float64(float64(tc.at.Unix()))
+				b.PreMarket = &qotcommon.PreAfterMarketData{ChangeRate: proto.Float64(0), Volume: proto.Int64(0)}
+				b.AfterMarket = &qotcommon.PreAfterMarketData{ChangeRate: proto.Float64(-2.1), Volume: proto.Int64(-1)}
+				b.Overnight = &qotcommon.PreAfterMarketData{Volume: proto.Int64(800)}
+				return true
+			}}
+			p := New(l, r, pb, clock.NewFake(tc.at), time.Second)
+			p.pollAndPublish(context.Background())
+			got := pb.last()
+			row := got.Rows[0]
+			if got.Session != session.PhaseAt(tc.at).String() || r.calls != 1 {
+				t.Fatalf("session=%s requests=%d", got.Session, r.calls)
+			}
+			if !equalOptional(row.SessionChangePct, tc.pct) || !equalOptional(row.SessionVolume, tc.vol) {
+				t.Fatalf("metrics: pct=%v volume=%v, want pct=%v volume=%v", row.SessionChangePct, row.SessionVolume, tc.pct, tc.vol)
+			}
+		})
+	}
+}
+
+func equalOptional[T comparable](got, want *T) bool {
+	return got == nil && want == nil || got != nil && want != nil && *got == *want
+}
+
+func TestSessionRolloverClearsCachedAndInFlightRows(t *testing.T) {
+	start := time.Date(2026, time.November, 24, 9, 29, 0, 0, session.Loc())
+	fc := clock.NewFake(start)
+	l, _ := NewList(newFakeStore())
+	l.Seed([]string{"AAPL", "MSFT"})
+	pb := &pub{}
+	omitted := false
+	r := &fakeReq{prepare: func(b *snappb.SnapshotBasicData) bool {
+		b.UpdateTime = proto.String(start.Format("2006-01-02 15:04:05"))
+		b.PreMarket = &qotcommon.PreAfterMarketData{ChangeRate: proto.Float64(12), Volume: proto.Int64(70)}
+		return !omitted || b.GetSecurity().GetCode() != "MSFT"
+	}}
+	p := New(l, r, pb, fc, time.Second)
+	p.pollAndPublish(context.Background())
+	if got := pb.last().Rows[0].SessionVolume; got == nil || *got != 70 {
+		t.Fatalf("pre-market volume=%v", got)
+	}
+	omitted = true
+	r.onRequest = func() { fc.Advance(time.Minute) }
+	p.pollAndPublish(context.Background())
+	r.onRequest = nil
+	assertCleared := func() {
+		t.Helper()
+		got := pb.last()
+		if got.Session != "rth" || len(got.Rows) != 2 {
+			t.Fatalf("published session=%s rows=%d", got.Session, len(got.Rows))
+		}
+		for _, row := range got.Rows {
+			if row.SessionChangePct != nil || row.SessionVolume != nil || row.Last == nil {
+				t.Fatalf("rollover leaked or cleared the wrong fields: %+v", row)
+			}
+		}
+	}
+	assertCleared()
+	// The next request starts in regular trading but still returns a
+	// snapshot stamped during pre-market.
+	p.pollAndPublish(context.Background())
+	assertCleared()
+
+	r.prepare = func(b *snappb.SnapshotBasicData) bool {
+		b.UpdateTimestamp = proto.Float64(float64(fc.Now().Unix()))
+		return true
+	}
+	p.pollAndPublish(context.Background())
+	r.failAll = true
+	p.pollAndPublish(context.Background())
+	if got := pb.last().Rows[0].SessionVolume; got == nil || *got != 1000 {
+		t.Fatalf("same-session failure lost cached volume: %v", got)
+	}
+	fc.Advance(24 * time.Hour)
+	p.publishMembership()
+	assertCleared()
 }
 
 func TestPokePublishesMembershipImmediately(t *testing.T) {

@@ -65,7 +65,42 @@ describe("WatchlistPanel", () => {
     expect(screen.getByText("MISSING")).toBeTruthy();
     const cells = screen.getByText("MISSING").closest("tr")!.querySelectorAll("td");
     expect(screen.getByText("MISSING").textContent).toBe("MISSING");
-    expect([...cells].slice(1).map((c) => c.textContent)).toEqual([ "—", "—", "—"]);
+    expect([...cells].slice(1).map((c) => c.textContent)).toEqual(["—", "—", "—", "—", "—"]);
+  });
+
+  it("shows current session values, sorts raw values, and restores saved order when hiding the sort", () => {
+    const { watchlist, onConfigChange } = renderPanel({ settings: { watchlistHiddenColumns: ["unknown", "sym"] } });
+    act(() => watchlist.apply({ kind: "snapshot", topic: "watchlist.rows", payload: {
+      refreshedAt: null, session: "pre", symbols: ["US.ZERO", "US.LOW", "US.HIGH", "US.MISSING"],
+      rows: [
+        { symbol: "US.ZERO", last: 10, changePct: 1, volume: 100, sessionVolume: 0, sessionChangePct: 0 },
+        { symbol: "US.LOW", last: 10, changePct: 1, volume: 100, sessionVolume: 1051, sessionChangePct: 2.11 },
+        { symbol: "US.HIGH", last: 10, changePct: 1, volume: 100, sessionVolume: 1052, sessionChangePct: 2.12 },
+      ],
+    } }));
+    expect(screen.getByText("Pre-market")).toBeTruthy();
+    expect(screen.getByRole("row", { name: /^ZERO/ }).textContent).toContain("0.0%");
+    const symbols = () => [...document.querySelectorAll("tbody td:first-child")].map((cell) => cell.textContent);
+    const change = screen.getByRole("columnheader", { name: "Session Change %" });
+    fireEvent.click(change);
+    expect(symbols()).toEqual(["HIGH", "LOW", "ZERO", "MISSING"]);
+    fireEvent.click(change);
+    expect(symbols()).toEqual(["ZERO", "LOW", "HIGH", "MISSING"]);
+    fireEvent.click(screen.getByRole("button", { name: "Columns" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Session Change %" }));
+    expect(symbols()).toEqual(["ZERO", "LOW", "HIGH", "MISSING"]);
+    expect(screen.getByRole<HTMLTableRowElement>("row", { name: /^ZERO/ }).draggable).toBe(true);
+    expect(onConfigChange).toHaveBeenLastCalledWith({ watchlistHiddenColumns: ["sessionChangePct"] });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Session Volume" }));
+    expect(screen.queryByText("Pre-market")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Reset columns" }));
+    expect(onConfigChange).toHaveBeenLastCalledWith({ watchlistHiddenColumns: [] });
+    expect(screen.getByRole("columnheader", { name: "Session Change %" }).hasAttribute("aria-sort")).toBe(false);
+    act(() => watchlist.disconnect());
+    expect(screen.queryByText("Pre-market")).toBeNull();
+    expect(screen.queryByText("0.0%")).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("group", { name: "Watchlist columns" })).toBeNull();
   });
 
   it("sign-colors %Chg via palette.up/down", () => {

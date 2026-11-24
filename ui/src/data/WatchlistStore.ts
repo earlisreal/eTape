@@ -6,9 +6,10 @@ export interface WatchlistState {
   received: boolean;
   rows: Map<string, WatchlistRow>;
   refreshedAt: string | null;
+  session: NonNullable<WatchlistRowsPayload["session"]> | null;
 }
 
-const EMPTY: WatchlistState = { symbols: [], received: false, rows: new Map(), refreshedAt: null };
+const EMPTY: WatchlistState = { symbols: [], received: false, rows: new Map(), refreshedAt: null, session: null };
 
 // WatchlistStore holds the single global watchlist snapshot. Deliberately none
 // of ScannerStore's flash/mute/seen machinery — a user-curated stable list has
@@ -34,7 +35,7 @@ export class WatchlistStore extends ReactStore<WatchlistState> {
     const rows = new Map<string, WatchlistRow>();
     for (const r of p.rows ?? []) rows.set(r.symbol, r);
     this.membership = new Set(symbols);
-    this.set({ symbols, received: Array.isArray(p.symbols), rows, refreshedAt: p.refreshedAt ?? null });
+    this.set({ symbols, received: Array.isArray(p.symbols), rows, refreshedAt: p.refreshedAt ?? null, session: p.session ?? null });
   }
 
   has(symbol: string): boolean {
