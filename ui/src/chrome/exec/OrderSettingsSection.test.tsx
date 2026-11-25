@@ -66,6 +66,18 @@ describe("OrderSettingsSection", () => {
       kind: "risk", entryStopDistancePct: 5, protectionStopDistancePct: 0, buyCushion: { value: 0.25, unit: "$" },
     })]));
   });
+  it("saves the regular-hours market trigger choice on a stock risk preset", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("add-template"));
+    fireEvent.click(screen.getByTestId("add-risk"));
+    const setting = screen.getByRole<HTMLInputElement>("checkbox", { name: /Stock triggers send market orders/ });
+    expect(setting.checked).toBe(false);
+    fireEvent.click(setting);
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].templates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "risk", marketOnTriggerRth: true }),
+    ]));
+  });
   it("saves a trailing protection mode with its explicit distance",()=>{
     const {onSave}=wrap();fireEvent.click(screen.getByTestId("add-template"));fireEvent.click(screen.getByTestId("add-risk"));
     fireEvent.change(screen.getByLabelText("Protection mode"),{target:{value:"PRICE"}});

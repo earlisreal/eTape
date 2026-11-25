@@ -117,10 +117,10 @@ const ORDER_PRICE_COLUMNS: OrderColumn[] = [
   { col: "stopPrice", label: "STOP", title: "Stop trigger price", defaultWidth: 76, minWidth: 68, align: "right", sortable: true },
   { col: "type", label: "TYPE", title: "Order type", defaultWidth: 68, minWidth: 64, align: "left", sortable: true },
 ];
-const ORDER_PRICE_ACCESSORS: Record<string, (o: Pick<Order, "type" | "limitPrice" | "stopPrice">) => number | string | null> = {
-  price: (o) => o.type === "LIMIT" || o.type === "STOP_LIMIT" || o.type === "LIMIT_IF_TOUCHED" || o.type==="TRAILING_STOP" && o.limitPrice>0 ? o.limitPrice : null,
+const ORDER_PRICE_ACCESSORS: Record<string, (o: Pick<Order, "type" | "limitPrice" | "stopPrice" | "held">) => number | string | null> = {
+  price: (o) => !o.held?.marketChild && (o.type === "LIMIT" || o.type === "STOP_LIMIT" || o.type === "LIMIT_IF_TOUCHED" || o.type==="TRAILING_STOP" && o.limitPrice>0) ? o.limitPrice : null,
   stopPrice: (o) => o.type === "STOP" || o.type === "STOP_LIMIT" || o.type === "LIMIT_IF_TOUCHED" || o.type==="TRAILING_STOP" && o.stopPrice>0 ? o.stopPrice : null,
-  type: (o) => abbrevType(o.type),
+  type: (o) => abbrevType(o.held?.marketChild ? "MARKET" : o.type),
 };
 const ORDERS_COLUMNS: OrderColumn[] = [
   { col: "createdMs", label: "TIME", title: "Submitted (US Eastern)", defaultWidth: 96, minWidth: 88, align: "left", sortable: true },
@@ -187,7 +187,7 @@ function readClosedSort(s: Record<string, unknown>): SortState {
 
 const orderCell = { padding: "2px 8px", overflow: "hidden", textOverflow: "ellipsis" };
 
-function OrderPriceCells({ order }: { order: Pick<Order, "symbol" | "type" | "limitPrice" | "stopPrice"> }): JSX.Element {
+function OrderPriceCells({ order }: { order: Pick<Order, "symbol" | "type" | "limitPrice" | "stopPrice" | "held"> }): JSX.Element {
   return <>{ORDER_PRICE_COLUMNS.map((column) => {
     const value = ORDER_PRICE_ACCESSORS[column.col](order);
     const text = value === null ? "—" : typeof value === "number"

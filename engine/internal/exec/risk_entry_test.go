@@ -694,6 +694,104 @@ func TestRiskEntryReconciledLateFillRequiresResume(t *testing.T) {
 	}
 }
 
+func TestRiskEntryMarketOnTriggerUsesExecutionSession(t *testing.T) {
+	rth := time.Date(2026, 11, 24, 14, 30, 1, 0, time.UTC)
+	pre := rth.Add(-2 * time.Second)
+	post := rth.Add(7 * time.Hour)
+	const fractionalQty = 1.098901098
+	for _, tc := range []struct {
+		name          string
+		start, exitAt time.Time
+		side          Side
+		qty           float64
+		entryMarket   bool
+		exitMarket    bool
+	}{
+		{"regular fractional long", rth, rth, SideBuy, fractionalQty, true, true},
+		{"regular short", rth, rth, SideShort, 1, true, true},
+		{"premarket long", pre, pre, SideBuy, 1, false, false},
+		{"premarket long exits in regular hours", pre, rth, SideBuy, 1, false, true},
+		{"postmarket long", post, post, SideBuy, 1, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newHeldTestBroker()
+			b.fractional = tc.qty != 1
+			c, clk, _, ctx := newHeldCoreWithBroker(t, tc.start, nil, nil, nil, b)
+			c.PublishBrokerEvent(BrokerAccount{Account: AccountSnapshot{
+				Venue: "v", BuyingPower: 1000, AvailableCash: 1000, TsMs: clk.Now().UnixMilli(),
+			}})
+			select {
+			case <-c.Updates():
+			case <-time.After(time.Second):
+				t.Fatal("missing account update")
+			}
+
+			const symbol = "US.NVDA"
+			entryTrigger, entryPrint, stopTrigger, exitPrint := 159.52, 159.57, 158.77, 158.45
+			if tc.side == SideShort {
+				entryTrigger, entryPrint, stopTrigger, exitPrint = 158.77, 158.70, 159.52, 160.10
+			}
+			cushionPct := 10.0
+			ack := c.Do(SubmitRiskEntry{
+				Venue: "v", Symbol: symbol, Side: tc.side, BuyStop: entryTrigger, SellStop: stopTrigger,
+				Mode: "Dollar", Value: 1, MaxQty: tc.qty, MarketOnTriggerRTH: true,
+				EntryStopDistancePct: &cushionPct, ProtectionStopDistancePct: &cushionPct,
+			})
+			if !ack.Accepted {
+				t.Fatalf("admission: %+v", ack)
+			}
+			entry := waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+			publish := func(seq int64, price float64) {
+				t.Helper()
+				clk.Advance(time.Millisecond)
+				p := eligible(seq, clk.Now(), price)
+				p.Symbol = symbol
+				feedCorroboratedPrint(t, c, ctx, p)
+			}
+			assertChild := func(o Order, market bool) {
+				t.Helper()
+				wantType, wantSession, wantLimit := TypeLimit, o.Session, o.LimitPrice
+				if market {
+					wantType, wantSession, wantLimit = TypeMarket, SessionRTH, 0
+				}
+				select {
+				case req := <-b.submits:
+					if req.ClientOrderID != o.ID || req.Side != o.Side || req.Type != wantType ||
+						req.Session != wantSession || req.TIF != TIFDay || req.LimitPrice != wantLimit ||
+						req.StopPrice != 0 || math.Abs(req.Qty-tc.qty) > 1e-9 {
+						t.Fatalf("child = %+v, want type %v, session %v, limit %v, qty %v", req, wantType, wantSession, wantLimit, tc.qty)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("no child reached broker")
+				}
+				b.ev <- OrderAccepted{V: "v", OID: o.ID, Ts: clk.Now().UnixMilli()}
+				working := waitHeldOrder(t, c, o.ID, HeldWorking)
+				if working.Held.MarketChild != market {
+					t.Fatalf("wrong persisted child type: %+v", working.Held)
+				}
+				if market {
+					edit := c.Do(ReplaceOrder{Venue: "v", OrderID: o.ID, LimitPrice: o.LimitPrice,
+						ExpectedHeldPhase: HeldWorking, ExpectedRiskEntryPhase: "ACTIVATED"})
+					if edit.Accepted {
+						t.Fatal("market child accepted price modification")
+					}
+				}
+			}
+
+			publish(1, entryPrint)
+			assertChild(entry, tc.entryMarket)
+			b.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: symbol, Side: entry.Side, Qty: tc.qty,
+				Price: entryPrint, TsMs: clk.Now().UnixMilli()}, CumQty: tc.qty, AvgPrice: entryPrint}
+			stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return math.Abs(o.Qty-tc.qty) < 1e-9 })
+			if advance := tc.exitAt.Sub(clk.Now()); advance > 0 {
+				clk.Advance(advance)
+			}
+			publish(2, exitPrint)
+			assertChild(stop, tc.exitMarket)
+		})
+	}
+}
+
 func TestFractionalRiskEntryKeepsPreciseProtectionAfterSale(t *testing.T) {
 	b := newHeldTestBroker()
 	b.fractional = true

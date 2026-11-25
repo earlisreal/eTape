@@ -49,10 +49,12 @@ function markerPriceText(marker: ChartOrderMarker, price: number): string {
 }
 function markerLabel(marker: ChartOrderMarker, price: number): string {
   const label = markerPriceText(marker, price);
+  if (marker.kind === "market") return `${label} · MKT`;
   return marker.kind === "pending-protection" ? `${label} · ${markerSide(marker)} PENDING` : label;
 }
 function orderTitle(marker: ChartOrderMarker): string {
   if (marker.kind === "pending-protection") return `${markerSide(marker)} pending protective stop`;
+  if (marker.kind === "market") return `${marker.order.side} MARKET · ${marker.phase} · trigger`;
   if(marker.order.held?.trail && marker.kind!=="limit")return `${marker.order.side} ${trailModeLabel(marker.order)} TRAIL · ${marker.phase}`;
   if (marker.kind === "stop") return `${marker.order.side} ${marker.order.leavesQty} ${marker.order.wholePositionProtection ? "lots · Whole-position stop" : "contract stop"} · ${wholePositionCloseStatus(marker.order) ?? marker.phase}`;
   const type = marker.order.type === "LIMIT_IF_TOUCHED" ? "LIT" : marker.kind === "limit" ? "LIMIT" : "STOP-LIMIT";
@@ -79,7 +81,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const waiting = action?.kind === "replace" && action.price !== marker.price ? action : undefined;
       const price = waiting ? waiting.price! : marker.price;
       const groupPrice = marker.order.symbol.startsWith("PERP.") ? price : price.toFixed(4);
-      const key = `${markerSide(marker)}:${marker.kind}:${groupPrice}${marker.order.held?.trail?`:trail:${markerId(marker)}`:""}${waiting ? `:pending:${markerId(marker)}` : ""}`;
+      const key = `${markerSide(marker)}:${marker.kind}:${groupPrice}${marker.triggeredStop ? ":triggered-stop" : ""}${marker.order.held?.trail?`:trail:${markerId(marker)}`:""}${waiting ? `:pending:${markerId(marker)}` : ""}`;
       const group = map.get(key) ?? { key, kind: marker.kind, price, markers: [], ...(waiting ? { pending: waiting } : {}) };
       group.markers.push(waiting ? { ...marker, price, draggable: false } : marker); map.set(key, group);
     }
@@ -132,6 +134,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
 
   const riskProposal=(marker:ChartOrderMarker,price:number):{detail:string;qty:number;plannedQty?:number;aboveBudget?:boolean;limit?:number}=>{
     const { order } = marker;
+    if (marker.kind === "market") return {detail:"", qty:order.leavesQty};
     if (order.perpetualRisk && order.pendingProtectionPrice && !order.held?.childClientId) {
       const terms = order.perpetualRisk;
       const protection = marker.kind === "pending-protection";
@@ -184,7 +187,14 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
   };
   const sideText = (marker: ChartOrderMarker) => markerSide(marker) === "BUY" || markerSide(marker) === "COVER" ? "B" : "S";
   const tooltip = (marker: ChartOrderMarker, price = marker.price, proposed = false) => {
-    if(marker.order.held?.trail && marker.kind!=="limit")return trailDetails(marker.order);
+    if (marker.kind === "market") {
+      return `${marker.order.side} MARKET · ${formatExecutionQuantity(marker.order.leavesQty)} shares remaining\nTrigger price ${markerPriceText(marker, price)} · ${marker.phase}`;
+    }
+    const riskOwner = marker.order.riskEntry ?? orders.find(o => o.id === marker.order.riskEntryId)?.riskEntry;
+    const regularMarket = marker.kind === "stop-limit" && riskOwner?.marketOnTriggerRth;
+    if (marker.order.held?.trail && marker.kind !== "limit") {
+      return trailDetails(marker.order) + (regularMarket ? "\nMarket in regular hours · Limit in extended hours" : "");
+    }
     const risk = riskProposal(marker, price);
     if (marker.kind === "pending-protection") {
       const terms = marker.order.perpetualRisk;
@@ -204,11 +214,12 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         ? `${(proposed ? risk.qty : risk.plannedQty ?? 0).toLocaleString("en-US")} planned shares`
         : `${marker.order.leavesQty.toLocaleString("en-US")} ${marker.order.perpetualRisk?.wholePosition ? "lots" : marker.order.symbol.startsWith("PERP.") ? "contracts" : "shares"}`;
     const limit = risk.limit ?? (marker.kind === "limit" ? price : marker.order.limitPrice);
-    const type = marker.kind === "limit" ? "LIMIT" : marker.kind === "limit-if-touched" ? "LIT" : "STOP-LIMIT";
+    const type = regularMarket ? "STOP · Market in regular hours" : marker.kind === "limit" ? "LIMIT" : marker.kind === "limit-if-touched" ? "LIT" : "STOP-LIMIT";
+    const limitLabel = regularMarket ? "extended-hours limit" : "limit";
     const add=marker.order.riskEntry?.sharedEntryId && !marker.order.riskEntry.stopApplied?`\nShared stop ${priceText(marker.order.riskEntry.addStopPrice??0)} or higher on first fill`:"";
     const held = marker.order.held;
     const phase = `${marker.phase || marker.order.status}${held?.pausedReason ? ` · ${held.pausedReason}` : ""}`;
-    return `${quantity}\n${marker.order.side} ${type} · limit ${markerPriceText(marker, limit)}\n${held && marker.kind !== "limit" ? "Held by eTape · " : ""}${marker.order.riskEntry ? "Risk Entry · " : marker.order.riskEntryId ? "Linked Protection · " : ""}${phase}${add}`;
+    return `${quantity}\n${marker.order.side} ${type} · ${limitLabel} ${markerPriceText(marker, limit)}\n${held && marker.kind !== "limit" ? "Held by eTape · " : ""}${marker.order.riskEntry ? "Risk Entry · " : marker.order.riskEntryId ? "Linked Protection · " : ""}${phase}${add}`;
   };
 
   const layout = () => {
@@ -224,7 +235,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       if(label){label.textContent=`${priceText(live.stopPrice)} ${trailModeLabel(live)} ${live.held.phase}`;label.title=trailDetails(live);label.setAttribute("aria-label",`${live.side} trail at ${priceText(live.stopPrice)}; edit parameters`);}
     }
     groupsLatest.current=groupsLatest.current.map(group=>{
-      if(group.markers.length!==1 || !group.markers[0].order.held?.trail || group.kind==="limit")return group;
+      if(group.markers.length!==1 || !group.markers[0].order.held?.trail || group.kind==="limit" || group.kind==="market")return group;
       const live=latest.current.execStore?.liveOrder(group.markers[0].order.id);
       return live?{...group,price:live.stopPrice,markers:[{...group.markers[0],order:live,price:live.stopPrice}]}:group;
     });
@@ -529,7 +540,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const stackKey = group.price.toFixed(4);
       const stackIndex = stack.get(stackKey) ?? 0; stack.set(stackKey, stackIndex + 1);
       const first = group.markers[0];
-      const color = sideText(first) === "B" ? props.chrome.up : props.chrome.down;
+      const color = first.triggeredStop ? props.chrome.triggeredStop : sideText(first) === "B" ? props.chrome.up : props.chrome.down;
       const action = group.pending ?? orderActionPending(first) ?? pending.get(markerId(first));
       const paused = first.phase === "PAUSED";
       const opacity = paused || action?.kind === "cancel" ? 0.48 : 1;
@@ -559,7 +570,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
             title={`${group.markers.map(marker => tooltip(marker, marker.price, !!group.pending)).join("\n\n")}${status && status !== closeStatus ? `\n${status}` : ""}`}
             aria-label={group.markers.length > 1 ? `${group.markers.length} ${markerSide(first)} orders at ${markerPriceText(first, group.price)}; choose an order` : `${orderTitle(first)} at ${markerPriceText(first, group.price)}${first.draggable ? "; drag or use arrow keys to adjust" : ""}`}
             style={{ border:0, background:"transparent", color:"inherit", height:"100%", padding:"0 5px", cursor:first.draggable ? "ns-resize" : "pointer", font:"inherit" }}>
-            {markerLabel(first, group.price)}{first.order.held?.trail && first.kind!=="limit"?` ${trailModeLabel(first.order)} ${first.phase}`:""}{group.markers.length > 1 ? ` (${group.markers.length})` : ""}
+            {markerLabel(first, group.price)}{first.order.held?.trail && first.kind!=="limit" && first.kind!=="market"?` ${trailModeLabel(first.order)} ${first.phase}`:""}{group.markers.length > 1 ? ` (${group.markers.length})` : ""}
           </button>
           {group.markers.length===1 && trailActions(first.order)}
           {group.markers.length === 1 && (!plannedStop || first.draggable) && <button type="button" disabled={action?.kind === "cancel"}

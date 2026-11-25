@@ -159,7 +159,7 @@ func mapOrder(o exec.Order) wsmsg.Order {
 	}
 	var risk *wsmsg.RiskEntry
 	if r := o.RiskEntry; r != nil {
-		risk = &wsmsg.RiskEntry{Fractional: r.Fractional, StopID: r.StopID, Budget: r.Budget, Mode: r.Mode,
+		risk = &wsmsg.RiskEntry{MarketOnTriggerRTH: r.MarketOnTriggerRTH, Fractional: r.Fractional, StopID: r.StopID, Budget: r.Budget, Mode: r.Mode,
 			SharedEntryID: r.SharedEntryID, AddStopPrice: r.AddStopPrice, StopApplied: r.StopApplied,
 			EntryStopDistancePct: r.EntryStopDistancePct, ProtectionStopDistancePct: r.ProtectionStopDistancePct,
 			BuyCushion:  wsmsg.LimitCushion{Value: r.BuyCushion.Value, Unit: r.BuyCushion.Unit},
@@ -202,8 +202,8 @@ func mapOrderAction(a exec.OrderAction) *wsmsg.OrderAction {
 
 func mapHeldOrder(h exec.HeldOrder) *wsmsg.HeldOrder {
 	return &wsmsg.HeldOrder{Phase: string(h.Phase), DeadlineMs: h.DeadlineMs, ChildClientID: h.ChildClientID,
-		PerpetualTriggered: h.PerpetualTriggered,
-		ChildBrokerID:      h.ChildBrokerID, PausedReason: h.PausedReason, CancelRequested: h.CancelRequested, ResolvedQty: h.ResolvedQty, Trail: mapTrail(h.Trail)}
+		PerpetualTriggered: h.PerpetualTriggered, MarketChild: h.MarketChild,
+		ChildBrokerID: h.ChildBrokerID, PausedReason: h.PausedReason, CancelRequested: h.CancelRequested, ResolvedQty: h.ResolvedQty, Trail: mapTrail(h.Trail)}
 }
 
 func mapClosedOrder(row exec.ClosedOrder) wsmsg.ClosedOrder {

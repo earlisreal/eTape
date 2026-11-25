@@ -117,13 +117,14 @@ export interface TvChrome {
   accent: string;
   up: string;
   down: string;
+  triggeredStop: string;
 }
 
 export function getTvChrome(mode: ThemeMode): TvChrome {
   const p = getPalette(mode);
   const chart = getTvPalette(mode);
   return { bg: p.bg, surface: p.surface, border: p.borderStrong, text: p.text, muted: p.textMuted,
-    hover: p.border, accent: p.accent, up: chart.up, down: chart.down };
+    hover: p.border, accent: p.accent, up: chart.up, down: chart.down, triggeredStop: chart.linkYellow };
 }
 
 // Preset color swatches shared by every style editor in the TV chrome (drawing

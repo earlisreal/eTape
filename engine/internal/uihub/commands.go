@@ -326,6 +326,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			expectedSession = &s
 		}
 		return ackFromCmd(cd.ex.Do(exec.SubmitRiskEntry{
+			MarketOnTriggerRTH:   a.MarketOnTriggerRTH,
 			EntryStopDistancePct: a.EntryStopDistancePct, ProtectionStopDistancePct: a.ProtectionStopDistancePct,
 			ExpectedSession: expectedSession,
 			Side:            side, SharedEntryID: a.SharedEntryID,

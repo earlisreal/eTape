@@ -211,6 +211,7 @@ const (
 // HeldOrder is durable engine-side trigger state attached to the visible
 // parent order. ChildClientID is persisted before the first venue POST.
 type HeldOrder struct {
+	MarketChild         bool        `json:"marketChild,omitempty"`
 	Trail               *TrailState `json:"trail,omitempty"`
 	Phase               HeldPhase   `json:"phase"`
 	DeadlineMs          int64       `json:"deadlineMs"`

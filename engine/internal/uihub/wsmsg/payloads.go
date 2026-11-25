@@ -160,6 +160,7 @@ type LimitCushion struct {
 }
 
 type RiskEntry struct {
+	MarketOnTriggerRTH        bool         `json:"marketOnTriggerRth,omitempty"`
 	EntryStopDistancePct      *float64     `json:"entryStopDistancePct,omitempty"`
 	ProtectionStopDistancePct *float64     `json:"protectionStopDistancePct,omitempty"`
 	Fractional                bool         `json:"fractional,omitempty"`
@@ -178,6 +179,7 @@ type RiskEntry struct {
 }
 
 type SubmitRiskEntryArgs struct {
+	MarketOnTriggerRTH        bool         `json:"marketOnTriggerRth,omitempty"`
 	EntryStopDistancePct      *float64     `json:"entryStopDistancePct,omitempty"`
 	ProtectionStopDistancePct *float64     `json:"protectionStopDistancePct,omitempty"`
 	ExpectedSession           OrderSession `json:"expectedSession,omitempty"`
@@ -275,6 +277,7 @@ type SubmitPerpetualRiskEntryArgs struct {
 }
 
 type HeldOrder struct {
+	MarketChild        bool        `json:"marketChild,omitempty"`
 	PerpetualTriggered bool        `json:"perpetualTriggered,omitempty"`
 	Trail              *TrailState `json:"trail,omitempty"`
 	Phase              string      `json:"phase"`

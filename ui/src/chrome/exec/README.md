@@ -1,5 +1,15 @@
 # Execution UI
 
+In **Settings → Orders & hotkeys**, a stock Chart Risk Entry preset can enable
+**Stock triggers send market orders in regular hours**. The setting applies to
+entry and protection, and defaults to off. The cushion still factors into
+position sizing and supplies the limit price for extended-hours triggers.
+Market fill prices can exceed the estimated risk through slippage.
+
+When a stock stop triggers, its chart line turns yellow. A working limit appears
+at the limit price. An active market order shows **MKT** at the trigger price
+until the order completes.
+
 Trailing Stop in the ticket and saved order templates shares Price, Percent or
 Candle settings, position-percentage sizing, PRE/RTH/POST windows and quote or
 cushion execution. No positive distance is invented. Chart Risk Entry presets

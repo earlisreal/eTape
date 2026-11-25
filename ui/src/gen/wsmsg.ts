@@ -252,6 +252,7 @@ export interface LimitCushion {
   unit: string;
 }
 export interface RiskEntry {
+  marketOnTriggerRth?: boolean;
   entryStopDistancePct?: number /* float64 */;
   protectionStopDistancePct?: number /* float64 */;
   fractional?: boolean;
@@ -269,6 +270,7 @@ export interface RiskEntry {
   failure?: string;
 }
 export interface SubmitRiskEntryArgs {
+  marketOnTriggerRth?: boolean;
   entryStopDistancePct?: number /* float64 */;
   protectionStopDistancePct?: number /* float64 */;
   expectedSession?: OrderSession;
@@ -354,6 +356,7 @@ export interface SubmitPerpetualRiskEntryArgs {
   sharedStopId?: string;
 }
 export interface HeldOrder {
+  marketChild?: boolean;
   perpetualTriggered?: boolean;
   trail?: TrailState;
   phase: string;

@@ -401,6 +401,11 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
                 patchLeverage(autoSettings(leverageValue, e.target.checked))} /> Use BingX exchange leverage ceiling</span>
             </label>}
           </>}
+          {!t.perpetual && <label style={fieldGroup}>
+            <span><input type="checkbox" checked={t.marketOnTriggerRth === true}
+              onChange={e => patch(t.id, {marketOnTriggerRth: e.target.checked || undefined})} /> Stock triggers send market orders in regular hours</span>
+            <span>Applies to entry and protection. Slippage can exceed the risk estimate. Extended-hours triggers use limits.</span>
+          </label>}
           {!t.perpetual && <label style={fieldGroup}>Protection mode <select aria-label="Protection mode" className="field" value={t.protection?.mode??"FIXED"} onChange={e=>patch(t.id,{protection:e.target.value==="FIXED"?undefined:{...(t.protection??newTrailConfig()),mode:e.target.value,pricing:"CUSHION",cushion:t.sellCushion}})}>
             <option value="FIXED">Fixed</option><option value="PRICE">Trail Price</option><option value="PERCENT">Trail Percent</option><option value="CANDLE">Candle Trail</option></select></label>}
           {t.protection && <TrailEditor value={t.protection} lockMode lockSessions cushionOnly hideCushion onChange={c=>patch(t.id,{protection:c})}/>}

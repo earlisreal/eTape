@@ -4,7 +4,8 @@ import { isWorking } from "../../wire/orderStatus";
 export interface ChartOrderMarker {
   order: Order;
   price: number;
-  kind: "limit" | "stop" | "stop-limit" | "limit-if-touched" | "pending-protection";
+  kind: "limit" | "market" | "stop" | "stop-limit" | "limit-if-touched" | "pending-protection";
+  triggeredStop?: boolean;
   draggable: boolean;
   phase: string;
 }
@@ -66,10 +67,14 @@ export function chartOrderMarkers(orders: Iterable<Order>, venue: string, symbol
     if (order.type !== "STOP_LIMIT" && order.type !== "LIMIT_IF_TOUCHED" && order.type!=="TRAILING_STOP") continue;
     const childExists = !!held?.childClientId || held?.phase === "WORKING" || held?.phase === "ACTIVATING";
     if(held?.trail?.retired && !childExists)continue;
+    if (childExists && held?.marketChild) {
+      out.push({ order, price: order.stopPrice, kind: "market", triggeredStop: true, draggable: false, phase: held.phase });
+      continue;
+    }
     const paused = held?.phase === "PAUSED";
     const price = childExists ? order.limitPrice : order.stopPrice;
     out.push({
-      order, price, kind: childExists ? "limit" : order.type === "LIMIT_IF_TOUCHED" ? "limit-if-touched" : "stop-limit",
+      order, price, triggeredStop: childExists && !perpetual && order.type !== "LIMIT_IF_TOUCHED", kind: childExists ? "limit" : order.type === "LIMIT_IF_TOUCHED" ? "limit-if-touched" : "stop-limit",
       draggable: perpetual ? !!order.perpetualRisk && pretrigger && !actionPending :
         (!held?.trail || childExists) && !paused && !held?.cancelRequested && !actionPending && (held?.phase === "WORKING" || held?.phase === "WAITING" || held?.phase === "ARMED"),
       phase: held?.phase ?? "NATIVE",

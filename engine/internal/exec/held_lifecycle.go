@@ -285,7 +285,14 @@ func (c *Core) heldGate(req OrderRequest, orderID string) (bool, string) {
 	if req.Qty == 0 {
 		return EvaluateDeferredAdmission(&copyState, gate, req)
 	}
-	return Evaluate(&copyState, gate, req, c.marks)
+	marks := c.marks
+	if req.Type == TypeMarket && req.Perpetual == nil {
+		// The execution print can reach the trigger before the mark bridge.
+		if last, ok := c.lastEligible[req.Symbol]; ok && c.freshEligiblePrint(last) {
+			marks = markState{req.Symbol: last.Price}
+		}
+	}
+	return Evaluate(&copyState, gate, req, marks)
 }
 
 func (c *Core) activateHeld(ctx context.Context, o Order) {
@@ -351,10 +358,17 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 		c.changeHeld(o, HeldPaused, "venue flatten is awaiting authoritative reconciliation; resume manually", false)
 		return
 	}
+	execution := o.RiskEntry
+	if o.RiskEntryID != "" {
+		execution = c.riskOwner(o).RiskEntry
+	}
 	child := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: TypeLimit, TIF: o.TIF, Session: o.Session,
 		Qty: o.LeavesQty, LimitPrice: o.LimitPrice, ClientOrderID: o.ID}
 	if o.Type == TypeTrailingStop && o.Held.Trail != nil {
 		child.Session = o.Held.Trail.Config.Sessions.orderSession()
+	}
+	if execution != nil && execution.MarketOnTriggerRTH && o.Perpetual == nil && session.PhaseAt(c.clk.Now()) == session.RTH {
+		child.Type, child.Session, child.LimitPrice = TypeMarket, SessionRTH, 0
 	}
 	if o.Perpetual != nil {
 		p := *o.Perpetual
@@ -433,6 +447,7 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 		h.ResolvedQty = child.Qty
 	}
 	h.ChildClientID = o.ID
+	h.MarketChild = child.Type == TypeMarket
 	var event Event = HeldOrderChanged{V: o.Venue, OID: o.ID, Held: h, Ts: c.now()}
 	if o.Perpetual.IsRiskEntry() && child.TIF == TIFGTC {
 		o.Held, o.Perpetual, o.UpdatedMs = &h, child.Perpetual, c.now()
@@ -448,6 +463,13 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 
 func (c *Core) postHeldChild(ctx context.Context, b Broker, req OrderRequest) {
 	if b == nil {
+		return
+	}
+	if req.Type == TypeMarket && req.Perpetual == nil && session.PhaseAt(c.clk.Now()) != session.RTH {
+		select {
+		case c.bevents <- OrderRejected{V: req.Venue, OID: req.ClientOrderID, Reason: "regular session ended before market order dispatch", Ts: c.now()}:
+		case <-ctx.Done():
+		}
 		return
 	}
 	ack, err := b.SubmitOrder(ctx, req)

@@ -532,6 +532,21 @@ it("uses cushions and funding caps, preserves the completed quantity cap, and se
     fireEvent.keyDown(window,{key:"Enter"});
     await waitFor(()=>expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry",expect.objectContaining({maxQty:99})));
 });
+it("previews and submits regular-hours market triggers from the preset", async () => {
+    const preset: RiskEntryTemplate = { ...template, marketOnTriggerRth: true };
+    const {host, sendCommand} = mount(false, preset);
+    initiateChartRiskEntry(preset);
+    fireEvent.pointerDown(host, {pointerId:1, button:0, clientX:100, clientY:200});
+    fireEvent.pointerUp(window, {pointerId:1});
+    fireEvent.pointerDown(host, {pointerId:2, button:0, clientX:200, clientY:220});
+    fireEvent.pointerUp(window, {pointerId:2});
+    flushFrames();
+    expect(host.querySelector("[data-risk-readout]")?.textContent).toContain("Entry and protection · Market in regular hours");
+    fireEvent.keyDown(window, {key:"Enter"});
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.objectContaining({
+        marketOnTriggerRth: true, buyStop: 10, sellStop: 9.8,
+    })));
+});
 it("previews rounded stop-distance cushions and sends the recipe with reviewed dollar limits", async () => {
     const preset: RiskEntryTemplate = {...template, entryStopDistancePct:5, protectionStopDistancePct:0};
     const {host, sendCommand} = mount(false, preset);

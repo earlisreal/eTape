@@ -15,6 +15,7 @@ type LimitCushion struct {
 
 // RiskEntry retains per-entry sizing; adds link to the original protection owner.
 type RiskEntry struct {
+	MarketOnTriggerRTH        bool         `json:"marketOnTriggerRth,omitempty"`
 	EntryStopDistancePct      *float64     `json:"entryStopDistancePct,omitempty"`
 	ProtectionStopDistancePct *float64     `json:"protectionStopDistancePct,omitempty"`
 	Fractional                bool         `json:"fractional,omitempty"`
@@ -35,6 +36,7 @@ type RiskEntry struct {
 }
 
 type SubmitRiskEntry struct {
+	MarketOnTriggerRTH                              bool
 	EntryStopDistancePct, ProtectionStopDistancePct *float64
 	ExpectedSession                                 *OrderSession
 	Side                                            Side
@@ -280,7 +282,7 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 		cm.Protection = &config
 		stop.Held.Trail = &TrailState{Config: config, Stop: cm.SellStop, Limit: sellLimit, Floor: cm.SellStop}
 	}
-	entry.RiskEntry = &RiskEntry{Fractional: fractional, StopID: stop.ID, Budget: budget, Mode: cm.Mode, BuyCushion: cm.BuyCushion, SellCushion: cm.SellCushion}
+	entry.RiskEntry = &RiskEntry{MarketOnTriggerRTH: cm.MarketOnTriggerRTH, Fractional: fractional, StopID: stop.ID, Budget: budget, Mode: cm.Mode, BuyCushion: cm.BuyCushion, SellCushion: cm.SellCushion}
 	entry.RiskEntry.EntryStopDistancePct = cm.EntryStopDistancePct
 	entry.RiskEntry.ProtectionStopDistancePct = cm.ProtectionStopDistancePct
 	entry.RiskEntry.Protection = cm.Protection
@@ -569,6 +571,9 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 		return blocked("linked order action unresolved or paused")
 	}
 	if !pretrigger {
+		if o.Held.MarketChild {
+			return blocked("triggered market order has no editable price")
+		}
 		if o.Held.Phase != HeldWorking || !validLimitIfTouchedPrice(cm.LimitPrice) {
 			return blocked("invalid working limit modification")
 		}

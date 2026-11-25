@@ -286,6 +286,11 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             const isLivePerpetual = livePerpetual();
             const { up, down } = latest.current.chrome;
             const isShort = short();
+            const context = protection();
+            const entryMarket = !draft.template.perpetual && draft.template.marketOnTriggerRth === true;
+            const protectionMarket = context.owner
+                ? context.owner.riskEntry?.marketOnTriggerRth === true
+                : entryMarket;
             const qty = s ? draft.complete ? Math.min(draft.maxQty, s.qty) : s.qty : 0;
             const paneHeight = facade?.paneHeights()[0] ?? host.clientHeight;
             const rect = host.getBoundingClientRect();
@@ -325,7 +330,10 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 readout.textContent = blocked || !s ? `— ${unit} · Est. risk —` :
                     `${formatExecutionQuantity(qty)} ${unit} · Est. risk ${s.kind === "perpetual" ? `${amount.toFixed(2)} ${currency} · ${s.leverage}×${s.autoLeverage ? " Auto" : ""}` : amount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
                 if (s?.kind === "stock" && qty > 0 && (s.entryStopDistancePct !== undefined || s.protectionStopDistancePct !== undefined) && !blocked) {
-                    readout.textContent += `\nEntry limit ${pxText(s.buyLimit)} · Protection limit ${pxText(s.sellLimit)}\nLoss at drawn prices ${(qty * s.gap).toLocaleString("en-US", {style:"currency",currency:"USD"})}`;
+                    const prices = entryMarket || protectionMarket
+                        ? `Sizing prices · Entry ${pxText(s.buyLimit)} · Protection ${pxText(s.sellLimit)}`
+                        : `Entry limit ${pxText(s.buyLimit)} · Protection limit ${pxText(s.sellLimit)}`;
+                    readout.textContent += `\n${prices}\nLoss at drawn prices ${(qty * s.gap).toLocaleString("en-US", {style:"currency",currency:"USD"})}`;
                 }
                 if (s?.kind === "perpetual" && qty > 0) {
                     readout.textContent += `\nEst. initial margin ${(s.margin * qty / s.qty).toFixed(2)} ${currency}`;
@@ -336,7 +344,10 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 }
                 if (draft.template.auto && (perpetualSide() || (!draft.template.perpetual && (isShort || draft.sell! < draft.buy!))))
                     readout.textContent = `${isShort ? "Short" : "Long"} · ${readout.textContent}`;
-                const context = protection();
+                if (entryMarket || protectionMarket) {
+                    const legs = entryMarket && protectionMarket ? "Entry and protection" : entryMarket ? "Entry" : "Protection";
+                    readout.textContent += `\n${legs} · Market in regular hours · Slippage can exceed est. risk`;
+                }
                 if (context.stop) {
                     const existing = Math.abs(context.qty);
                     readout.textContent += `\n${formatExecutionQuantity(existing)} existing + ${formatExecutionQuantity(qty)} added = ${formatExecutionQuantity((existing + qty))} total\nShared stop ${pxText(context.stop.stopPrice)} → ${pxText(draft.sell!)} on first fill · ${context.stop.held?.trail ? "trailing mode retained" : "Fixed"}`;
@@ -370,7 +381,11 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     if (button && price !== undefined) {
                         button.textContent = pxText(price);
                         const limit = side === "buy" ? s?.buyLimit : s?.sellLimit;
-                        button.title = `${draft.complete ? `${formatExecutionQuantity(qty)} planned shares` : "Choose both prices to size shares"}\n${leg(side)} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
+                        const limitText = limit === undefined ? "pending" : pxText(limit);
+                        const execution = (side === "buy" ? entryMarket : protectionMarket)
+                            ? `market in regular hours · extended-hours limit ${limitText}`
+                            : `STOP-LIMIT · limit ${limitText}`;
+                        button.title = `${draft.complete ? `${formatExecutionQuantity(qty)} planned shares` : "Choose both prices to size shares"}\n${leg(side)} ${execution}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
                         if (draft.template.perpetual)
                             button.title = side === "buy" ? `${leg(side)} entry · Last trade triggers a limit using ${short() ? "bid minus" : "ask plus"} cushion · 24 hours` :
                                 `${leg(side)} protective stop · Fair price · ${bingx() ? "Whole position · Held by eTape" : `Confirmed fills${isLivePerpetual ? " · Held by eTape" : ""}`}`;
@@ -490,6 +505,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             const context = protection(), effective = riskEntryAddTemplate(current.template, context.owner, context.stop);
             const args: SubmitRiskEntryArgs | undefined = s.kind === "stock" ? { venue, symbol, ...(current.route?.fractionalRisk ? { expectedSession: current.route.effectiveSession } : {}), ...(short() ? {side: "SHORT" as const} : {}), buyStop: current.buy!, sellStop: current.sell!, mode: current.template.mode, value: current.template.value,
                 ...(current.sharedEntryId ? { sharedEntryId: current.sharedEntryId } : {}),
+                ...(current.template.marketOnTriggerRth ? {marketOnTriggerRth: true} : {}),
                 maxQty: Math.min(current.maxQty, s.qty), buyCushion: s.buyCushion, sellCushion: s.sellCushion,
                 ...(s.entryStopDistancePct !== undefined ? {entryStopDistancePct: s.entryStopDistancePct} : {}),
                 ...(s.protectionStopDistancePct !== undefined ? {protectionStopDistancePct: s.protectionStopDistancePct} : {}),

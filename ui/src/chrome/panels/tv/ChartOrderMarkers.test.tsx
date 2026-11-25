@@ -46,6 +46,29 @@ beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("ChartOrderMarkers", () => {
+  it("uses yellow only for activated stock stops and identifies a market child", () => {
+    const deadlineMs = 9999999999999;
+    const stop = { ...base, type: "STOP_LIMIT", side: "SELL", stopPrice: 99, limitPrice: 98 } as const;
+    const { sendCommand } = mount([
+      { ...stop, id: "armed", held: { phase: "ARMED", deadlineMs } },
+      { ...stop, id: "limit-child", held: { phase: "WORKING", childClientId: "limit-child", deadlineMs } },
+      { ...stop, id: "market-child", held: { phase: "ACTIVATING", childClientId: "market-child", marketChild: true, deadlineMs } },
+      { ...base, id: "ordinary-limit", side: "SELL", limitPrice: 98 },
+    ]);
+    const group = (id: string) => screen.getByTestId(`order-label-${id}`).closest<HTMLElement>("[data-order-group]")!;
+    const chrome = getTvChrome("light");
+    expect(group("armed").style.getPropertyValue("--order-color")).toBe(chrome.down);
+    expect(group("ordinary-limit").style.getPropertyValue("--order-color")).toBe(chrome.down);
+    expect(group("limit-child").style.getPropertyValue("--order-color")).toBe(chrome.triggeredStop);
+    expect(group("limit-child").dataset.price).toBe("98");
+    expect(group("market-child").style.getPropertyValue("--order-color")).toBe(chrome.triggeredStop);
+    expect(group("market-child").dataset.price).toBe("99");
+    const label = screen.getByTestId("order-label-market-child");
+    expect(label.title).toContain("SELL MARKET");
+    expect(label.title).toContain("Trigger price 99.00");
+    fireEvent.keyDown(label, { key: "ArrowUp" });
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
   it("shows one protective marker after a partial fill on a resting BingX limit", () => {
     const venue = "bingx-vst";
     const symbol = "PERP.BINGX.BTC-USDT";

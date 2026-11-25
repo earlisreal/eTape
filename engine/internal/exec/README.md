@@ -206,6 +206,14 @@ edit updates both limits, the resolved cushions, and the approved quantity
 in one journal event. Dispatch locks the dollar cushion for subsequent
 protective moves. Adds use the cushion of the existing shared stop.
 
+Stock presets can opt in to market orders for both triggers during regular
+hours. The engine persists the policy with the pair and selects the order type
+at activation. A market child uses the regular-hours route and the original
+client order ID for reconciliation. Outside regular hours, permitted triggers
+submit the cushion-priced limit. The cushions still size the position, and a
+market fill can exceed the estimated risk through slippage. Shared protection
+and late-fill exits use the original protection owner's policy.
+
 `MaxQty` prevents increasing the approved preview. Admission requires fresh
 account data, a confirmed flat position or fully protected same-side position,
 no unrelated working orders, opening gates,
