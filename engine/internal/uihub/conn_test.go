@@ -116,14 +116,18 @@ func (f *deferredCmd) handle(_ context.Context, name string, _ json.RawMessage, 
 
 type fakeQuery struct{}
 
-func (fakeQuery) handle(_ string, _ json.RawMessage) any { return []wsmsg.Fill{} }
+func (fakeQuery) handleForConnection(_ string, _ json.RawMessage, _ uint64) any {
+	return []wsmsg.Fill{}
+}
 
 type deferredQuery struct {
 	started chan struct{}
 	release chan struct{}
 }
 
-func (deferredQuery) handle(_ string, _ json.RawMessage) any { return []wsmsg.Fill{} }
+func (deferredQuery) handleForConnection(_ string, _ json.RawMessage, _ uint64) any {
+	return []wsmsg.Fill{}
+}
 func (q deferredQuery) handleAsync(ctx context.Context, name string, _ json.RawMessage, reply func(any)) bool {
 	if name != "slow" {
 		return false

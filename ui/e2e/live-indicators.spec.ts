@@ -1,6 +1,56 @@
-import { expect, test, type WebSocketRoute } from "@playwright/test";
+import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { WORKSPACE_LAYOUT_VERSION } from "../src/chrome/workspace";
 import type { Bar, ClientMessage, QueryChartWindowArgs, ServerMessage, SysEvent } from "../src/wire/contract";
+
+test("Monitoring windows with identical saved IDs keep their own VWAP", async ({ page, context }) => {
+  const panelId = "m-chart-red";
+  const instanceId = `${panelId}:VWAP-0`;
+  const openChart = async (target: Page, workspace: string, symbol: string) => {
+    const points: number[] = [];
+    await target.routeWebSocket("**/ws", (socket) => {
+      const server = socket.connectToServer();
+      socket.onMessage((raw) => {
+        const message = JSON.parse(raw.toString()) as ClientMessage;
+        if (message.kind === "command" && message.name === "GetConfig" && (message.args as { key: string }).key === `workspace.${workspace}`) {
+          socket.send(JSON.stringify({ kind: "ack", corrId: message.corrId, status: "accepted", value: {
+            name: workspace, layoutVersion: WORKSPACE_LAYOUT_VERSION, layout: null,
+            panels: [{ id: panelId, panelId: "chart", group: null, settings: {
+              symbol, timeframe: "1m", indicators: [{ instanceId, type: "VWAP", params: {} }],
+            } }],
+          } }));
+        } else server.send(raw);
+      });
+      server.onMessage((raw) => {
+        const message = JSON.parse(raw.toString()) as ServerMessage;
+        if (message.kind === "delta" && message.topic === "md.indicator" && message.key === instanceId) {
+          points.push((message.payload as { value: number }).value);
+        }
+        if ((message.kind === "snapshot" || message.kind === "delta") && message.topic === "sys.session") {
+          // Keep demo onboarding from replacing the saved chart; the engine still supplies demo data.
+          socket.send(JSON.stringify({ ...message, payload: { ...message.payload as object, mode: "live" } }));
+        } else socket.send(raw);
+      });
+    });
+    await target.goto(`/?workspace=${workspace}`);
+    const onboarding = target.getByRole("button", { name: "I'll do it later", exact: true });
+    if (await onboarding.isVisible()) await onboarding.click();
+    await target.mouse.move(0, 0);
+    return { points, legend: target.getByTestId(`legend-ind-${instanceId}-0`) };
+  };
+
+  // Seed 1 has DRGO near $5 and GLDN near $370, so a misrouted value is unambiguous.
+  const first = await openChart(page, "e2e-monitoring-low", "US.DRGO");
+  await expect.poll(async () => Number(await first.legend.textContent())).toBeGreaterThan(0);
+  const firstBefore = first.points.length;
+  const secondPage = await context.newPage();
+  const second = await openChart(secondPage, "e2e-monitoring-high", "US.GLDN");
+  await expect.poll(async () => Number(await second.legend.textContent())).toBeGreaterThan(100);
+  await expect.poll(() => second.points.length).toBeGreaterThan(0);
+  await expect.poll(() => first.points.length).toBeGreaterThan(firstBefore);
+  expect(first.points.every((value) => value > 0 && value < 40)).toBe(true);
+  expect(second.points.every((value) => value > 100)).toBe(true);
+  await expect.poll(async () => Number(await first.legend.textContent())).toBeLessThan(40);
+});
 
 test("VWAP and EMA 9 catch up and resume streaming after a socket reconnect", async ({ page }) => {
   const workspace = "e2e-live-indicators";

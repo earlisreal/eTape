@@ -39,7 +39,7 @@ type perpetualOpeningPreviewer interface {
 type queries struct {
 	fills  fillsQuerier
 	charts interface {
-		QueryChartWindow(wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult
+		QueryChartWindow(uint64, wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult
 	}
 	clk               clock.Clock
 	locates           LocateRegistry
@@ -73,7 +73,7 @@ type venueEligibilityCall struct {
 }
 
 func newQueries(f fillsQuerier, clk clock.Clock, charts ...interface {
-	QueryChartWindow(wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult
+	QueryChartWindow(uint64, wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult
 }) *queries {
 	q := &queries{fills: f, clk: clk, profileSlots: make(chan struct{}, 2)}
 	if len(charts) > 0 {
@@ -89,7 +89,14 @@ func fillRowToWire(r exec.FillRow) wsmsg.Fill {
 	}
 }
 
-func (q *queries) handle(name string, args json.RawMessage) any {
+func (q *queries) handleForConnection(name string, args json.RawMessage, connID uint64) any {
+	if name == "QueryChartWindow" {
+		var a wsmsg.QueryChartWindowArgs
+		if json.Unmarshal(args, &a) != nil || q.charts == nil || a.Symbol == "" || a.Timeframe == "" || (a.TailBars > 0) == (a.FromMs < a.ToMs) {
+			return wsmsg.QueryChartWindowResult{Symbol: a.Symbol, Timeframe: a.Timeframe, Bars: []wsmsg.Bar{}, Indicators: []wsmsg.IndicatorSeriesWindow{}}
+		}
+		return q.charts.QueryChartWindow(connID, a)
+	}
 	return q.handleContext(context.Background(), name, args)
 }
 
@@ -143,12 +150,6 @@ func (q *queries) handleContext(ctx context.Context, name string, args json.RawM
 		return preview
 	case "QueryAppInfo":
 		return wsmsg.AppInfo{Version: buildinfo.Version}
-	case "QueryChartWindow":
-		var a wsmsg.QueryChartWindowArgs
-		if json.Unmarshal(args, &a) != nil || q.charts == nil || a.Symbol == "" || a.Timeframe == "" || (a.TailBars > 0) == (a.FromMs < a.ToMs) {
-			return wsmsg.QueryChartWindowResult{Symbol: a.Symbol, Timeframe: a.Timeframe, Bars: []wsmsg.Bar{}, Indicators: []wsmsg.IndicatorSeriesWindow{}}
-		}
-		return q.charts.QueryChartWindow(a)
 	case "QueryFills":
 		var a wsmsg.QueryFillsArgs
 		if err := json.Unmarshal(args, &a); err != nil {

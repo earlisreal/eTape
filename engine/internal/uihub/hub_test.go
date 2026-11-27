@@ -167,7 +167,7 @@ func TestHubSubscribeSendsSnapshotThenCoalescedDelta(t *testing.T) {
 	}
 }
 
-func TestHubIndicatorReadyBroadcastsExactInstanceID(t *testing.T) {
+func TestHubIndicatorReadyTargetsOwnerWithExactInstanceID(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	h := newTestHub(clk)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -175,11 +175,20 @@ func TestHubIndicatorReadyBroadcastsExactInstanceID(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	c := &fakeClient{nid: 1}
+	other := &fakeClient{nid: 2}
 	h.Register(c)
+	h.Register(other)
 	h.Subscribe(c, wsmsg.TopicSysEvents)
+	h.Subscribe(other, wsmsg.TopicSysEvents)
+	h.EnsureIndicator(c.id(), "panel-a:VWAP-0", md.IndicatorSpec{})
+	h.EnsureIndicator(other.id(), "panel-a:VWAP-0", md.IndicatorSpec{})
 	syncHub(h)
-	h.PublishMD(md.IndicatorReadyUpdate{Symbol: "US.AAPL", InstanceID: "panel-a:VWAP-0"})
+	otherBefore := len(other.got())
+	h.PublishMD(md.IndicatorReadyUpdate{Symbol: "US.AAPL", InstanceID: "1/panel-a:VWAP-0"})
 	syncHub(h)
+	if got := len(other.got()); got != otherBefore {
+		t.Fatalf("other window received %d extra events", got-otherBefore)
+	}
 
 	for _, frame := range c.got() {
 		var msg struct {
@@ -246,13 +255,17 @@ func TestHubQueryChartWindowSkipBarsReturnsOnlyIndicators(t *testing.T) {
 	defer cancel()
 	go func() { _ = h.Run(ctx) }()
 
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+	h.EnsureIndicator(c.id(), "panel-a:VWAP-0", md.IndicatorSpec{})
+	syncHub(h)
 	for _, bucket := range []int64{1_000, 2_000, 3_000} {
 		h.PublishMD(md.BarUpdate{Bar: md.Bar{
 			Symbol: "US.AAPL", TF: session.TF1m, BucketMs: bucket, C: float64(bucket),
 		}})
 	}
 	h.PublishMD(md.IndicatorUpdate{
-		InstanceID: "panel-a:VWAP-0", SeriesKey: "panel-a:VWAP-0", Snapshot: true,
+		InstanceID: "1/panel-a:VWAP-0", SeriesKey: "1/panel-a:VWAP-0", Snapshot: true,
 		Points: []md.Point{{TimeMs: 1_000, Value: 10}, {TimeMs: 2_000, Value: 11}, {TimeMs: 3_000, Value: 12}},
 	})
 	syncHub(h)
@@ -261,7 +274,7 @@ func TestHubQueryChartWindowSkipBarsReturnsOnlyIndicators(t *testing.T) {
 		Symbol: "US.AAPL", Timeframe: "1m", FromMs: 1_000, ToMs: 3_000,
 		TailBars: 0, IndicatorSeriesKeys: []string{"panel-a:VWAP-0"}, SkipBars: true,
 	}
-	hydrated := h.QueryChartWindow(args)
+	hydrated := h.QueryChartWindow(c.id(), args)
 	if len(hydrated.Bars) != 0 {
 		t.Fatalf("skipBars result returned %d bars, want none", len(hydrated.Bars))
 	}
@@ -273,7 +286,7 @@ func TestHubQueryChartWindowSkipBarsReturnsOnlyIndicators(t *testing.T) {
 	}
 
 	args.SkipBars = false
-	withBars := h.QueryChartWindow(args)
+	withBars := h.QueryChartWindow(c.id(), args)
 	if len(withBars.Bars) != 2 {
 		t.Fatalf("normal chart-window result returned %d bars, want 2", len(withBars.Bars))
 	}

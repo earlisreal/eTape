@@ -70,7 +70,7 @@ func TestHubIndicator_UnregisterReleasesAll(t *testing.T) {
 
 	rel := si.snapshotReleased()
 	sort.Slice(rel, func(i, j int) bool { return rel[i].id < rel[j].id })
-	want := []indicatorCall{{connID: 11, id: "ind-a"}, {connID: 11, id: "ind-b"}}
+	want := []indicatorCall{{connID: 11, id: "11/ind-a"}, {connID: 11, id: "11/ind-b"}}
 	if !reflect.DeepEqual(rel, want) {
 		t.Fatalf("released = %v, want %v", rel, want)
 	}

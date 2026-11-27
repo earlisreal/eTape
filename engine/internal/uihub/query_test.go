@@ -13,6 +13,10 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
+func (q *queries) handle(name string, args json.RawMessage) any {
+	return q.handleForConnection(name, args, 0)
+}
+
 type spyFills struct {
 	rows []exec.FillRow
 	err  error

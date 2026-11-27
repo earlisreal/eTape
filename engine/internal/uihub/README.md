@@ -7,6 +7,13 @@ DNS-rebound external hostnames. Native clients may omit Origin. The Vite `/ws`
 proxy preserves Host and Origin, so development uses the same policy at any
 local port without an origin allowlist. Remote UI access is unsupported.
 
+Chart indicator subscriptions belong to the requesting WebSocket connection.
+Saved indicator IDs may repeat across layouts. Live points and readiness events
+go to the owning connection, and chart window queries read that connection's
+indicator history. Unsubscribe and disconnect release the calculator and its
+cached series. Reconnecting charts subscribe and hydrate again with their saved
+IDs.
+
 `alerts.state` is a low-rate full snapshot of saved price alerts and the newest
 100 independent history records, with a revision, total history count, and
 storage error. `alerts.trigger` carries live-only burst notifications and has no

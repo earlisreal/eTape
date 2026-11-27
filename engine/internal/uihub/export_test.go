@@ -38,7 +38,7 @@ func NewQueriesForTest(f fillsQuerier, clk clock.Clock, registries ...LocateRegi
 
 // NewVenueEligibilityQueriesForTest exposes the shared venue eligibility query
 // seam to external tests without coupling it to the locate registry.
-func NewVenueEligibilityQueriesForTest(f fillsQuerier, clk clock.Clock, registry EligibilityRegistry) queryHandler {
+func NewVenueEligibilityQueriesForTest(f fillsQuerier, clk clock.Clock, registry EligibilityRegistry) *queries {
 	q := newQueries(f, clk)
 	q.eligibility = registry
 	return q

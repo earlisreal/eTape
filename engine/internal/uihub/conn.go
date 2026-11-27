@@ -23,7 +23,7 @@ type commandHandler interface {
 }
 
 type queryHandler interface {
-	handle(name string, args json.RawMessage) any
+	handleForConnection(name string, args json.RawMessage, connID uint64) any
 }
 
 // asyncQueryHandler is an optional escape hatch for queries backed by slow
@@ -339,7 +339,7 @@ func (c *conn) dispatch(ctx context.Context, b []byte) {
 		}) {
 			return
 		}
-		payload := c.qry.handle(head.Name, head.Args)
+		payload := c.qry.handleForConnection(head.Name, head.Args, c.id())
 		c.enqueueJSON(wsmsg.ResultMsg{Kind: "result", CorrID: head.CorrID, Payload: payload})
 	case "ping":
 		c.enqueueJSON(c.hub.pong(head.T))

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -93,8 +95,9 @@ type releaseIndicatorReq struct {
 }
 
 type chartWindowReq struct {
-	args  wsmsg.QueryChartWindowArgs
-	reply chan wsmsg.QueryChartWindowResult
+	connID uint64
+	args   wsmsg.QueryChartWindowArgs
+	reply  chan wsmsg.QueryChartWindowResult
 }
 
 // dropReport is how a conn's own goroutine (writeLoop, on a write timeout)
@@ -186,16 +189,16 @@ type Hub struct {
 
 	// Run-loop-owned:
 	clients         map[client]map[wsmsg.Topic]bool
-	demands         map[uint64]map[string]demandInfo // connID -> demandID -> demandInfo
-	demandLive      map[uint64]bool                  // connID currently registered
-	indicators      map[uint64]map[string]bool       // connID -> instanceIDs owned by that connection
-	warmed          map[string]bool                  // symbol -> archive warm succeeded
-	warmInflight    map[string]bool                  // symbol -> archive warm currently running
-	prepareInflight map[string]bool                  // symbol -> focused preparation currently running
-	historyWired    bool                             // history roles have been explicitly installed or disabled
-	pendKeep        map[string]staged                // classMDKeep, flushed on md ticker
-	tapePend        map[string][]wsmsg.Tick          // symbol -> accumulated ticks
-	acctPend        map[string]staged                // venue -> latest account frame
+	demands         map[uint64]map[string]demandInfo          // connID -> demandID -> demandInfo
+	demandLive      map[uint64]bool                           // connID currently registered
+	indicators      map[uint64]map[string]indicatorSeriesKeys // connID -> saved instance ID -> cached series keys
+	warmed          map[string]bool                           // symbol -> archive warm succeeded
+	warmInflight    map[string]bool                           // symbol -> archive warm currently running
+	prepareInflight map[string]bool                           // symbol -> focused preparation currently running
+	historyWired    bool                                      // history roles have been explicitly installed or disabled
+	pendKeep        map[string]staged                         // classMDKeep, flushed on md ticker
+	tapePend        map[string][]wsmsg.Tick                   // symbol -> accumulated ticks
+	acctPend        map[string]staged                         // venue -> latest account frame
 	posLatest       staged
 	posDirty        bool
 
@@ -233,7 +236,7 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 		clients:            map[client]map[wsmsg.Topic]bool{},
 		demands:            map[uint64]map[string]demandInfo{},
 		demandLive:         map[uint64]bool{},
-		indicators:         map[uint64]map[string]bool{},
+		indicators:         map[uint64]map[string]indicatorSeriesKeys{},
 		warmed:             map[string]bool{},
 		warmInflight:       map[string]bool{},
 		prepareInflight:    map[string]bool{},
@@ -276,10 +279,10 @@ func (h *Hub) Unsubscribe(c client, t wsmsg.Topic) {
 	}
 }
 
-func (h *Hub) QueryChartWindow(a wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult {
+func (h *Hub) QueryChartWindow(connID uint64, a wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult {
 	reply := make(chan wsmsg.QueryChartWindowResult, 1)
 	select {
-	case h.chartWindowCh <- chartWindowReq{args: a, reply: reply}:
+	case h.chartWindowCh <- chartWindowReq{connID: connID, args: a, reply: reply}:
 	case <-h.closed:
 		return wsmsg.QueryChartWindowResult{Symbol: a.Symbol, Timeframe: a.Timeframe, Bars: []wsmsg.Bar{}, Indicators: []wsmsg.IndicatorSeriesWindow{}}
 	}
@@ -684,10 +687,8 @@ func (h *Hub) handleUnregister(c client) {
 		delete(h.demands, id)
 	}
 	if m := h.indicators[id]; m != nil {
-		if h.ind != nil {
-			for iid := range m {
-				h.ind.ReleaseIndicator(id, iid)
-			}
+		for iid := range m {
+			h.handleReleaseIndicator(releaseIndicatorReq{connID: id, id: iid})
 		}
 		delete(h.indicators, id)
 	}
@@ -792,7 +793,7 @@ func (h *Hub) handleChartWindow(r chartWindowReq) {
 		}
 	}
 	for _, key := range a.IndicatorSeriesKeys {
-		points := h.m.indicators[key]
+		points := h.m.indicators[scopedIndicatorKey(r.connID, key)]
 		lo := sort.Search(len(points), func(i int) bool { return points[i].TimeMs >= from })
 		hi := sort.Search(len(points), func(i int) bool { return points[i].TimeMs >= to })
 		window := make([]wsmsg.IndicatorPoint, 0, hi-lo)
@@ -861,35 +862,46 @@ func (h *Hub) handleReleaseDemand(r releaseDemandReq) {
 	}
 }
 
-// handleEnsureIndicator mirrors handleEnsureDemand: it reuses the existing
-// demandLive liveness tracker (rather than a parallel one) so a late ensure
-// for an already-unregistered connection is dropped the same way a late
-// demand ensure is, then records r.id under h.indicators[r.connID] and
-// forwards to the injected md.Core so ownership is tracked on both sides --
-// the Hub only needs to know WHICH ids to release on disconnect; md.Core's
-// owner set (indicator.go) handles the actual idempotency/correctness.
+type indicatorSeriesKeys map[string]struct{}
+
+// A saved instance ID may be reused by several windows. Scope it before
+// giving it to the engine and restore the saved ID on outbound frames.
+func scopedIndicatorKey(connID uint64, key string) string {
+	return strconv.FormatUint(connID, 10) + "/" + key
+}
+
+func splitIndicatorKey(key string) (uint64, string) {
+	prefix, local, _ := strings.Cut(key, "/")
+	connID, _ := strconv.ParseUint(prefix, 10, 64)
+	return connID, local
+}
+
 func (h *Hub) handleEnsureIndicator(r ensureIndicatorReq) {
 	if !h.demandLive[r.connID] {
 		return // conn already gone; drop so it can never leak the instance
 	}
 	m := h.indicators[r.connID]
 	if m == nil {
-		m = map[string]bool{}
+		m = map[string]indicatorSeriesKeys{}
 		h.indicators[r.connID] = m
 	}
-	m[r.id] = true
+	if m[r.id] == nil {
+		m[r.id] = make(indicatorSeriesKeys)
+	}
 	if h.ind != nil {
-		h.ind.EnsureIndicator(r.connID, r.id, r.spec)
+		h.ind.EnsureIndicator(r.connID, scopedIndicatorKey(r.connID, r.id), r.spec)
 	}
 }
 
 // handleReleaseIndicator mirrors handleReleaseDemand.
 func (h *Hub) handleReleaseIndicator(r releaseIndicatorReq) {
-	if m := h.indicators[r.connID]; m != nil {
-		delete(m, r.id)
+	m := h.indicators[r.connID]
+	for key := range m[r.id] {
+		delete(h.m.indicators, key)
 	}
+	delete(m, r.id)
 	if h.ind != nil {
-		h.ind.ReleaseIndicator(r.connID, r.id)
+		h.ind.ReleaseIndicator(r.connID, scopedIndicatorKey(r.connID, r.id))
 	}
 }
 
@@ -918,6 +930,26 @@ func (h *Hub) handleUnsub(r subReq) {
 }
 
 func (h *Hub) handleMD(u md.Update) {
+	switch update := u.(type) {
+	case md.IndicatorUpdate:
+		connID, id := splitIndicatorKey(update.InstanceID)
+		if keys := h.indicators[connID][id]; keys != nil {
+			keys[update.SeriesKey] = struct{}{}
+			for _, s := range h.m.applyIndicator(update) {
+				if !s.Snap {
+					_, s.Key = splitIndicatorKey(s.Key)
+					h.broadcastTo(s, false, connID)
+				}
+			}
+		}
+		return
+	case md.IndicatorReadyUpdate:
+		connID, id := splitIndicatorKey(update.InstanceID)
+		if h.indicators[connID][id] != nil {
+			h.broadcastTo(h.buildSysEvent("indicator-ready", id), false, connID)
+		}
+		return
+	}
 	for _, s := range h.m.applyMD(u) {
 		h.stageMD(s)
 	}
@@ -938,11 +970,6 @@ func (h *Hub) handleMD(u md.Update) {
 			kind = "chart-ready"
 		}
 		event := h.buildSysEvent(kind, ready.Symbol)
-		h.m.applyPub(event)
-		h.broadcast(event, false)
-	}
-	if ready, ok := u.(md.IndicatorReadyUpdate); ok {
-		event := h.buildSysEvent("indicator-ready", ready.InstanceID)
 		h.m.applyPub(event)
 		h.broadcast(event, false)
 	}
@@ -1112,6 +1139,10 @@ func (h *Hub) flushAcct() {
 }
 
 func (h *Hub) broadcast(s staged, snap bool) {
+	h.broadcastTo(s, snap, 0)
+}
+
+func (h *Hub) broadcastTo(s staged, snap bool, connID uint64) {
 	var b []byte
 	var err error
 	if snap {
@@ -1133,7 +1164,7 @@ func (h *Hub) broadcast(s staged, snap bool) {
 	// batch, so the emit loop below can't itself add to it.
 	var dead []client
 	for c, subs := range h.clients {
-		if subs[s.Topic] {
+		if (connID == 0 || c.id() == connID) && subs[s.Topic] {
 			if !c.enqueue(b, ck) {
 				dead = append(dead, c)
 			}
