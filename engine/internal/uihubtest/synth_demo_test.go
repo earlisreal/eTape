@@ -233,8 +233,8 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndScannerConsistent(t *testing.T)
 	var got1m, gotD wsmsg.QueryChartWindowResult
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		got1m = hub.QueryChartWindow(wsmsg.QueryChartWindowArgs{Symbol: wantSymbol, Timeframe: "1m", TailBars: 100000})
-		gotD = hub.QueryChartWindow(wsmsg.QueryChartWindowArgs{Symbol: wantSymbol, Timeframe: "D", TailBars: 100000})
+		got1m = hub.QueryChartWindow(0, wsmsg.QueryChartWindowArgs{Symbol: wantSymbol, Timeframe: "1m", TailBars: 100000})
+		gotD = hub.QueryChartWindow(0, wsmsg.QueryChartWindowArgs{Symbol: wantSymbol, Timeframe: "D", TailBars: 100000})
 		if len(got1m.Bars) == len(wantIntraday) && len(gotD.Bars) >= len(wantDaily) {
 			break
 		}
