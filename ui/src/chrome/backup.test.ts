@@ -104,6 +104,16 @@ describe("backup: structural layout export", () => {
     expect(imported.panels[0].settings.chartSettings).toEqual(chartSettings);
     expect(built).not.toHaveProperty("chartPreferences");
   });
+  it("preserves hidden trade markers alongside the other chart settings", () => {
+    const workspace = makeWorkspace("source");
+    const chartSettings = { showTradeMarkers: false, grid: false };
+    workspace.panels[0].settings.chartSettings = chartSettings;
+    const built = buildExport({ layout: true, hotkeys: false }, { workspace, orderConfig: makeOrderConfig([]) });
+    const parsed = parseImport(JSON.stringify(built));
+    if (!parsed.ok || !parsed.data.layout) throw new Error("layout missing");
+    const imported = prepareImportedWorkspace(parsed.data.layout, "destination");
+    expect(imported.panels[0].settings.chartSettings).toEqual(chartSettings);
+  });
   it("removes symbols and cross-window Scanner Source state without mutating the live workspace", () => {
     const workspace: Workspace = {
       ...makeWorkspace("monitoring"),

@@ -11,6 +11,12 @@ at 50% without changing saved colors, and lets price use that space in every
 supported chart style with 8% bottom padding below price. Volume visibility
 remains in its indicator controls.
 
+Use **Chart settings → Show trade markers** to show or hide fill diamonds for
+buys, sells, short sales, and buy-to-covers. Open the dialog from the chart
+gear or right-click **Settings…** and click **OK** to apply. Markers are visible
+by default. Each chart saves its choice in the workspace and in layout exports.
+Turning markers back on also reveals fills received while they were hidden.
+
 Settings groups appearance, sound, workspace backup, trading controls, and broker
 connections behind persistent navigation. Dialogs share light/dark styling and
 close with Escape, their close button, or a click outside; nested confirmations

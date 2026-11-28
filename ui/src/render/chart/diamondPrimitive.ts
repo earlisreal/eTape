@@ -19,18 +19,33 @@ export class DiamondFillPrimitive implements ISeriesPrimitive<Time> {
   private markers: FillMarker[] = [];
   private series: ISeriesApi<"Candlestick"> | null = null;
   private chartApi: SeriesAttachedParameter<Time>["chart"] | null = null;
+  private requestUpdate: (() => void) | null = null;
+  private visible = true;
   private readonly size = 16;
 
   constructor(private palette: Palette) {}
-  attached(p: SeriesAttachedParameter<Time>): void { this.series = p.series as ISeriesApi<"Candlestick">; this.chartApi = p.chart; }
-  detached(): void { this.series = null; this.chartApi = null; }
+  attached(p: SeriesAttachedParameter<Time>): void {
+    this.series = p.series as ISeriesApi<"Candlestick">;
+    this.chartApi = p.chart;
+    this.requestUpdate = p.requestUpdate;
+  }
+  detached(): void {
+    this.series = null;
+    this.chartApi = null;
+    this.requestUpdate = null;
+  }
+  setVisible(visible: boolean): void {
+    if (this.visible === visible) return;
+    this.visible = visible;
+    this.requestUpdate?.();
+  }
   setMarkers(m: FillMarker[]): void { this.markers = m; }
   setPalette(p: Palette): void { this.palette = p; }
 
   paneViews(): readonly IPrimitivePaneView[] {
     const draw = (target: DrawTarget) => {
       const series = this.series, chartApi = this.chartApi;
-      if (!series || !chartApi) return;
+      if (!this.visible || !series || !chartApi) return;
       target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
         const half = diamondHalfSize(this.size);
         for (const m of this.markers) {

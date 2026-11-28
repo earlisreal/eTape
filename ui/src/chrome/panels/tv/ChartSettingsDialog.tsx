@@ -3,8 +3,8 @@ import { useState } from "react";
 import { TVDialog } from "./TVDialog";
 import type { TvChrome } from "../../../render/chart/tvTheme";
 
-export interface ChartSettings { sessionShading: boolean; grid: boolean; watermark: boolean; barCloseTimer: boolean; visibleExtrema: boolean; volumeOverlap?: boolean }
-export const DEFAULT_CHART_SETTINGS: ChartSettings = { sessionShading: true, grid: true, watermark: false, barCloseTimer: true, visibleExtrema: true };
+export interface ChartSettings { sessionShading: boolean; grid: boolean; watermark: boolean; barCloseTimer: boolean; visibleExtrema: boolean; showTradeMarkers: boolean; volumeOverlap?: boolean }
+export const DEFAULT_CHART_SETTINGS: ChartSettings = { sessionShading: true, grid: true, watermark: false, barCloseTimer: true, visibleExtrema: true, showTradeMarkers: true };
 
 export function normalizeChartSettings(raw: unknown): ChartSettings {
   const source = typeof raw === "object" && raw !== null ? raw as Partial<ChartSettings> : {};
@@ -14,6 +14,7 @@ export function normalizeChartSettings(raw: unknown): ChartSettings {
     watermark: source.watermark === true,
     barCloseTimer: source.barCloseTimer !== false,
     visibleExtrema: source.visibleExtrema !== false,
+    showTradeMarkers: source.showTradeMarkers !== false,
     ...(typeof source.volumeOverlap === "boolean" ? { volumeOverlap: source.volumeOverlap } : {}),
   };
 }
@@ -33,6 +34,7 @@ const TOGGLES: { key: Exclude<keyof ChartSettings, "volumeOverlap">; label: stri
   { key: "watermark", label: "symbol watermark" },
   { key: "barCloseTimer", label: "bar-close timer" },
   { key: "visibleExtrema", label: "show visible high/low" },
+  { key: "showTradeMarkers", label: "Show trade markers" },
 ];
 
 export function ChartSettingsDialog({ chrome, settings, globalVolumeOverlap = false, onClose, onApply }: ChartSettingsDialogProps): JSX.Element {

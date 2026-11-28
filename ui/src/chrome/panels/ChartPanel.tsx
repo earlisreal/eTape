@@ -69,7 +69,7 @@ type PendingIndicatorHydration = {
 
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
 function makeFacade(chart: IChartApi, palette: Palette, host: HTMLElement): {
-  facade: ChartApiFacade; setPalette: (p: Palette) => void; drawings: DrawingsPrimitive; visibleExtrema: VisibleExtremaPrimitive; volumeProfile: VolumeProfilePrimitive;
+  facade: ChartApiFacade; setPalette: (p: Palette) => void; diamonds: DiamondFillPrimitive; drawings: DrawingsPrimitive; visibleExtrema: VisibleExtremaPrimitive; volumeProfile: VolumeProfilePrimitive;
 } {
   let main: ISeriesApi<"Candlestick" | "Bar" | "Line" | "Area"> | null = null;
   let volumeScale: ISeriesApi<"Histogram"> | null = null;
@@ -182,7 +182,7 @@ function makeFacade(chart: IChartApi, palette: Palette, host: HTMLElement): {
     remove: () => { orderCrosshair.dispose(); chart.remove(); },
   };
   const orderCrosshair = installOrderCrosshair(chart, host, facade, () => palette.crosshair);
-  return { facade, setPalette: (p) => { palette = p; session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); visibleExtrema.setPalette(p); volumeProfile.setPalette(p); orderCrosshair.refresh(); }, drawings, visibleExtrema, volumeProfile };
+  return { facade, setPalette: (p) => { palette = p; session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); visibleExtrema.setPalette(p); volumeProfile.setPalette(p); orderCrosshair.refresh(); }, diamonds, drawings, visibleExtrema, volumeProfile };
 }
 
 export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp, symbol: symbolProp, monitoring, active }: PanelProps): JSX.Element {
@@ -300,6 +300,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const orderChooserOpenRef = useRef(false);
   const drawingsPrimRef = useRef<DrawingsPrimitive | null>(null);
   const visibleExtremaPrimRef = useRef<VisibleExtremaPrimitive | null>(null);
+  const diamondsRef = useRef<DiamondFillPrimitive | null>(null);
   const refreshExtremaRef = useRef<() => void>(() => {});
   const refreshProfileRef = useRef<() => void>(() => {});
   const activeRef = useRef(active);
@@ -363,7 +364,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (selectionFrame !== null) return;
       selectionFrame = requestAnimationFrame(() => { selectionFrame = null; refreshSelRef.current?.(); });
     };
-    const { facade, setPalette, drawings, visibleExtrema, volumeProfile } = makeFacade(chart, palette, host);
+    const { facade, setPalette, diamonds, drawings, visibleExtrema, volumeProfile } = makeFacade(chart, palette, host);
+    diamondsRef.current = diamonds;
+    diamonds.setVisible(chartSettingsRef.current.showTradeMarkers);
     let viewportGeneration = 0;
     let indicatorReloadPending = false;
     let chartSnapshotLoaded = false;
@@ -1024,6 +1027,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (firstPaintLogFrame !== null) cancelAnimationFrame(firstPaintLogFrame);
       refreshExtremaRef.current = () => {};
       visibleExtremaPrimRef.current = null;
+      diamondsRef.current = null;
       interaction.dispose(); controller.dispose(); controllerRef.current = null; interactionRef.current = null;
     };
     // Intentionally keyed only by panel identity and symbol availability:
@@ -1225,6 +1229,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const c = controllerRef.current;
     c?.setShowSessions(s.sessionShading); c?.setGrid(s.grid); c?.setWatermark(s.watermark);
     visibleExtremaPrimRef.current?.setVisible(s.visibleExtrema);
+    diamondsRef.current?.setVisible(s.showTradeMarkers);
     refreshExtremaRef.current?.();
     forceRepaintRef.current = true;
     persist({ chartSettings: chartSettingsRollbackProjection(rawChartSettingsRef.current, s), chartIndicatorModelVersion: CHART_INDICATOR_MODEL_VERSION });
