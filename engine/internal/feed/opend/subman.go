@@ -767,11 +767,11 @@ func (m *subManager) qotSub(ctx context.Context, symbols []string, subs []feed.S
 		subTypes = append(subTypes, pbSubType(s))
 	}
 	// RegPushRehabTypeList: only effective for registered K-line-type pushes
-	// (K_1M here); every other subscription type ignores it. Left unset, moomoo
+	// (K_1M and K_DAY); every other subscription type ignores it. Left unset, moomoo
 	// defaults registered K-line push to forward-adjusted, which diverges from
 	// the raw tick/quote scale on a reverse-split symbol (see historyBars' rehab
-	// comment) — set it explicitly to unadjusted so live K_1M pushes match the
-	// rest of the intraday pipeline. Deviates from the official Python SDK,
+	// comment). Request raw pushes for K_1M and the current K_DAY; older daily
+	// bars come from adjusted history. Deviates from the official Python SDK,
 	// which never sets this field (quote_query.py pack_sub_or_unsub_req,
 	// verified 2026-07-05) and so silently rides the forward-adjusted default;
 	// K_1M pushes were confirmed still flowing with this field set (2026-07-03

@@ -2,7 +2,9 @@ package md
 
 import (
 	"testing"
+	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
@@ -313,6 +315,78 @@ func TestDerivedDailyAndOfficialReplacement(t *testing.T) {
 		if b.BucketMs == day && b.O != 99.8 {
 			t.Fatalf("official daily overwritten by derivation: %+v", b)
 		}
+	}
+}
+
+func TestLiveDailyRefreshesSeededChart(t *testing.T) {
+	at := time.Date(2026, 11, 27, 9, 59, 0, 0, session.Loc())
+	day := session.DayMs(at.UnixMilli())
+	previousDay := session.PreviousTradingDay(at).UnixMilli()
+	const symbol = "US.SNDK"
+	var finalized []Bar
+	c := New(Config{Clock: clock.NewFake(at), FinalizedBar: func(b Bar) {
+		if b.TF == session.TFDay {
+			finalized = append(finalized, b)
+		}
+	}})
+	history := feed.Bar{Symbol: symbol, BucketMs: previousDay, O: 71.315, H: 73.77, L: 67.02, C: 73.61, Volume: 124_401_166}
+	cached := feed.Bar{Symbol: symbol, BucketMs: day, O: 79.72, H: 80.73, L: 77.10, C: 80.32, Volume: 28_920_000}
+	seed := []feed.Bar{history, cached}
+	c.apply(seedDailyMsg{symbol: symbol, bars: seed})
+	c.apply(ensureIndicatorMsg{connID: 1, id: "daily-sma", spec: IndicatorSpec{
+		Symbol: symbol, TF: session.TFDay, Type: IndSMA, Params: map[string]float64{"period": 2},
+	}})
+	lastDaily := func() Bar { return *c.bars.latestBar(symbol, session.TFDay) }
+	if got := lastDaily(); got.C != cached.C || !got.InProgress {
+		t.Fatalf("initial candle = %+v, want forming cached candle", got)
+	}
+	stale := history
+	stale.C = 70
+	live := cached
+	live.C, live.Volume = 79.91, 28_971_000
+	updates := []feed.Bar{stale, live}
+	c.apply(eventMsg{ev: feed.BarsDailyEvent{Bars: updates}, at: at})
+	c.apply(eventMsg{ev: feed.Bars1mEvent{Bars: []feed.Bar{{
+		Symbol: symbol, BucketMs: at.UnixMilli(), O: 79.91, H: 79.95, L: 79.82, C: 79.85, Volume: 25_000,
+	}}}, at: at})
+	c.apply(seedDailyMsg{symbol: symbol, bars: seed})
+	if got := lastDaily(); got.C != live.C || got.V != live.Volume || !got.InProgress {
+		t.Fatalf("daily candle after live update and late seed = %+v", got)
+	}
+	if got := c.bars.sym(symbol).series[session.TFDay].get(previousDay); got.C != history.C || got.InProgress {
+		t.Fatalf("adjusted historical candle changed: %+v", got)
+	}
+	for _, tf := range []session.Timeframe{session.TFWeek, session.TFMonth} {
+		if got := c.bars.latestBar(symbol, tf); got.C != live.C || got.V != history.Volume+live.Volume {
+			t.Fatalf("%s candle after daily update = %+v", tf, got)
+		}
+	}
+	us := make([]Update, 0, len(c.updates))
+	for len(c.updates) > 0 {
+		us = append(us, <-c.updates)
+	}
+	dailyUpdates := collectBars(us, session.TFDay)
+	if len(dailyUpdates) != 1 || dailyUpdates[0].C != live.C {
+		t.Fatalf("daily chart updates = %+v", dailyUpdates)
+	}
+	var indicatorPublished bool
+	for _, u := range us {
+		if ind, ok := u.(IndicatorUpdate); ok && !ind.Snapshot && ind.InstanceID == "daily-sma" && len(ind.Points) == 1 {
+			indicatorPublished = ind.Points[0] == (Point{TimeMs: day, Value: (history.C + live.C) / 2})
+		}
+	}
+	if !indicatorPublished {
+		t.Fatal("daily indicator did not publish a preview for the live candle")
+	}
+	if len(finalized) != 0 {
+		t.Fatalf("forming daily candles archived: %+v", finalized)
+	}
+
+	// This Black Friday session ends at 13:00 ET.
+	live.C, live.Volume = 79.98, 55_000_000
+	c.apply(eventMsg{ev: feed.BarsDailyEvent{Bars: []feed.Bar{live}}, at: at.Add(3*time.Hour + time.Minute)})
+	if got := lastDaily(); got.C != live.C || got.InProgress || len(finalized) != 1 || finalized[0] != got {
+		t.Fatalf("closing daily candle = %+v, archived = %+v", got, finalized)
 	}
 }
 

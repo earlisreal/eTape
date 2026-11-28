@@ -183,7 +183,7 @@ func TestGoldenQotFramesReencode(t *testing.T) {
 
 // TestGoldenQotPushesDecode requires every captured push frame (protoID in
 // IsPushProtoID) to decode cleanly via DecodePush. Zero events is acceptable
-// (e.g. a K-line push for a non-1m KLType is intentionally filtered) — the
+// (e.g. an unsupported K-line timeframe is intentionally filtered) — the
 // requirement is "no error", not "at least one event".
 func TestGoldenQotPushesDecode(t *testing.T) {
 	frames := goldenFrames(t, qotGoldenFiles...)

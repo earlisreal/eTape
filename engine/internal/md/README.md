@@ -48,6 +48,12 @@ ordinary ticks do not create a derived update for every print.
 
 Builds books, quotes, bars, ticks, and engine-computed indicators from normalized events. Chart Volume is a UI-local indicator derived from the displayed bar stream; it is not subscribed or calculated here. TICKER creates exchange-time 10-second bars after one centralized Trade-Report Condition policy stamps Range-Eligible, Last-Eligible, and Volume-Eligible permissions; one-minute K-lines support larger intraday resolutions; daily history supports daily/weekly/monthly. Same ordered events must reproduce state. `DropStats` distinguishes inbox/live-event drops from outgoing UI-update drops; keep-latest marks/books are intentionally not counted. Test: `go test ./internal/md`.
 
+OpenD K_DAY pushes update the current US trading date's daily candle and
+its weekly and monthly aggregates. The current daily candle stays forming
+through regular trading hours. Cache and archive seeds preserve the current
+day's live value once a push has arrived. One-minute bars can supply a
+provisional daily candle before any provider daily data is available.
+
 Indicator snapshots include a preview for the current real candle when the
 study is warmed up. The calculator folds only closed candles, so repeated
 updates to a forming candle recompute its value from the same closed history.

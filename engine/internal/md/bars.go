@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/instrument"
@@ -96,7 +97,8 @@ type symbolBars struct {
 
 	shadowFinals  map[int64]Bar  // tick-derived 1m finals: delta source + validation
 	compared      map[int64]bool // per-bucket validation guard
-	dailyOfficial map[int64]bool // K_DAY-seeded buckets: derivation must not touch
+	dailyOfficial map[int64]bool // provider daily buckets supersede minute-derived bars
+	liveDaily     int64          // latest exchange date supplied by a K_DAY push
 	gapPending    bool
 	curDay        int64
 }
@@ -547,10 +549,10 @@ func (e *barEngine) cascade(c *Core, sb *symbolBars, m int64) {
 	}
 }
 
-// deriveDaily maintains the live derived daily bar (always in-progress —
-// official K_DAY bars are fetched, never aggregated, and replace it).
+// deriveDaily supplies a forming candle until a provider daily bar is available.
 func (e *barEngine) deriveDaily(c *Core, sb *symbolBars, m int64) {
 	day := marketBucket(sb.symbol, m, session.TFDay)
+	e.finalizeLiveDailyBefore(c, sb, day)
 	if sb.dailyOfficial[day] {
 		return
 	}
@@ -560,9 +562,59 @@ func (e *barEngine) deriveDaily(c *Core, sb *symbolBars, m int64) {
 	}
 	nb := foldBars(sb.symbol, session.TFDay, day, members)
 	nb.InProgress = true
-	if sb.series[session.TFDay].upsert(nb) {
-		c.barOut(nb)
-		e.deriveWM(c, sb, day)
+	e.upsertDaily(c, sb, nb)
+}
+
+// applyDaily uses the current exchange day's raw K_DAY push. An initial push
+// can replay older candles, which the chart gets from adjusted history.
+func (e *barEngine) applyDaily(c *Core, bars []feed.Bar, at time.Time) {
+	schedule := session.Schedule(at)
+	if !schedule.TradingDay {
+		return
+	}
+	day := schedule.Date.UnixMilli()
+	for _, raw := range bars {
+		if raw.BucketMs != day {
+			continue
+		}
+		sb := e.sym(raw.Symbol)
+		e.finalizeLiveDailyBefore(c, sb, day)
+		sb.liveDaily = day
+		sb.dailyOfficial[day] = true
+		e.upsertDaily(c, sb, providerDailyBar(raw.Symbol, raw, at.Before(schedule.Close)))
+	}
+}
+
+// The first bar of a later date closes the last live daily candle if no
+// push arrived after its session ended.
+func (e *barEngine) finalizeLiveDailyBefore(c *Core, sb *symbolBars, day int64) {
+	liveDay := sb.liveDaily
+	if liveDay == 0 || liveDay >= day {
+		return
+	}
+	sb.liveDaily = 0
+	if prev := sb.series[session.TFDay].get(liveDay); prev != nil && prev.InProgress {
+		prev.InProgress = false
+		// Commit the chart/indicator value without archiving a candle whose
+		// close was never observed. The history provider supplies that close.
+		if !c.seeding {
+			c.publishBar(*prev)
+		}
+		e.deriveWM(c, sb, prev.BucketMs)
+	}
+}
+
+func providerDailyBar(symbol string, raw feed.Bar, inProgress bool) Bar {
+	return Bar{
+		Symbol: symbol, TF: session.TFDay, BucketMs: raw.BucketMs,
+		O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume, InProgress: inProgress,
+	}
+}
+
+func (e *barEngine) upsertDaily(c *Core, sb *symbolBars, bar Bar) {
+	if sb.series[session.TFDay].upsert(bar) {
+		c.barOut(bar)
+		e.deriveWM(c, sb, bar.BucketMs)
 	}
 }
 
@@ -575,17 +627,18 @@ func (e *barEngine) seedDaily(c *Core, symbol string, bars []feed.Bar) {
 		return
 	}
 	sb := e.sym(symbol)
+	now := c.cfg.Clock.Now()
+	schedule := session.Schedule(now)
+	today := schedule.Date.UnixMilli()
+	forming := !instrument.IsPerpetual(symbol) && schedule.TradingDay && now.Before(schedule.Close)
 	c.seeding = true
 	for _, raw := range bars {
-		nb := Bar{
-			Symbol: symbol, TF: session.TFDay, BucketMs: raw.BucketMs,
-			O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume,
+		// An asynchronous archive/cache read can finish after a newer push.
+		if raw.BucketMs == today && sb.liveDaily == today {
+			continue
 		}
 		sb.dailyOfficial[raw.BucketMs] = true
-		if sb.series[session.TFDay].upsert(nb) {
-			c.barOut(nb)
-			e.deriveWM(c, sb, raw.BucketMs)
-		}
+		e.upsertDaily(c, sb, providerDailyBar(symbol, raw, forming && raw.BucketMs == today))
 	}
 	c.seeding = false
 	e.emitSeedSnapshots(c, sb, seedDailyTFs)
@@ -598,18 +651,17 @@ func (e *barEngine) deriveWM(c *Core, sb *symbolBars, day int64) {
 	newest := daily.maxBucket()
 	for _, tf := range []session.Timeframe{session.TFWeek, session.TFMonth} {
 		hb := marketBucket(sb.symbol, day, tf)
-		var members []Bar
+		start := daily.idx(hb)
+		end := start
 		anyInProgress := false
-		for _, d := range daily.bars {
-			if marketBucket(sb.symbol, d.BucketMs, tf) == hb {
-				members = append(members, d)
-				anyInProgress = anyInProgress || d.InProgress
-			}
+		for end < len(daily.bars) && marketBucket(sb.symbol, daily.bars[end].BucketMs, tf) == hb {
+			anyInProgress = anyInProgress || daily.bars[end].InProgress
+			end++
 		}
-		if len(members) == 0 {
+		if start == end {
 			continue
 		}
-		nb := foldBars(sb.symbol, tf, hb, members)
+		nb := foldBars(sb.symbol, tf, hb, daily.bars[start:end])
 		nb.InProgress = anyInProgress || marketBucket(sb.symbol, newest, tf) == hb
 		if sb.series[tf].upsert(nb) {
 			c.barOut(nb)

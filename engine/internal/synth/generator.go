@@ -85,13 +85,8 @@ type symRuntime struct {
 	lastBarMs    int64       // last time a Bars1mEvent was emitted for this symbol
 
 	// pendingDailies holds daily bars newly archived by rolloverSymbol since
-	// the last DrainDailyBars call. Deliberately separate from the
-	// feed.Event stream Drain serves (TicksEvent/QuoteEvent/BookEvent/
-	// Bars1mEvent): a live feed's official daily bar arrives out-of-band, via
-	// md.Core.SeedDaily + the store's ArchiveDaily, not through that event
-	// union - DrainDailyBars mirrors that same out-of-band path for the
-	// generator's own rollover-produced days rather than growing the event
-	// union (and every exhaustive switch over it) for one demo-only case.
+	// the last DrainDailyBars call. The demo supplies completed daily history
+	// at rollover through md.Core.SeedDaily and the store's ArchiveDaily.
 	pendingDailies []feed.Bar
 }
 
@@ -401,8 +396,7 @@ func (g *Generator) Drain(nowMs int64) []feed.Event {
 // pending buffer. Unlike Drain, this is not on a throttle - daily bars are
 // rare (once per symbol per rollover) and a caller (main.go's demo boot
 // wiring) is expected to poll this on a coarse timer and persist whatever
-// comes back via md.Core.SeedDaily + the store's ArchiveDaily, the same way
-// a live feed's periodic official K_DAY re-fetch would.
+// comes back via md.Core.SeedDaily + the store's ArchiveDaily.
 func (g *Generator) DrainDailyBars() []feed.Bar {
 	g.mu.Lock()
 	defer g.mu.Unlock()

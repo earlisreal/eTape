@@ -30,6 +30,6 @@ func TestDemandProfiles(t *testing.T) {
 
 // Compile-time exhaustiveness: every event type is part of the union.
 var _ = []Event{
-	TicksEvent{}, QuoteEvent{}, BookEvent{}, Bars1mEvent{},
+	TicksEvent{}, QuoteEvent{}, BookEvent{}, Bars1mEvent{}, BarsDailyEvent{},
 	ConnUpEvent{}, ConnDownEvent{}, ResyncedEvent{},
 }

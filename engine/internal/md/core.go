@@ -344,6 +344,10 @@ func (c *Core) barOut(b Bar) {
 	if !b.InProgress && c.cfg.FinalizedBar != nil {
 		c.cfg.FinalizedBar(b)
 	}
+	c.publishBar(b)
+}
+
+func (c *Core) publishBar(b Bar) {
 	c.emit(BarUpdate{Bar: b})
 	c.inds.onBar(c, b)
 }
@@ -441,6 +445,8 @@ func (c *Core) applyEventAt(ev feed.Event, at time.Time) {
 		} else {
 			c.bars.apply1m(c, e.Bars) // Task 11
 		}
+	case feed.BarsDailyEvent:
+		c.bars.applyDaily(c, e.Bars, at)
 	case feed.ConnUpEvent:
 		c.executionGap(at)
 		c.advanceTransport(false, at)

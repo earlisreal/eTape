@@ -73,6 +73,10 @@ func EventSource(ev Event) SourceRef {
 		if len(e.Bars) > 0 {
 			return e.Bars[0].Source
 		}
+	case BarsDailyEvent:
+		if len(e.Bars) > 0 {
+			return e.Bars[0].Source
+		}
 	case BookEvent:
 		return e.Book.Source
 	case QuoteEvent:

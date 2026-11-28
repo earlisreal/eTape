@@ -377,8 +377,13 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 			return nil, fmt.Errorf("opend: kl push retType=%d msg=%q", resp.GetRetType(), resp.GetRetMsg())
 		}
 		s2c := resp.GetS2C()
-		// eTape only subscribes K_1M; ignore anything else defensively.
-		if s2c.GetKlType() != int32(qotcommon.KLType_KLType_1Min) {
+		var resolution feed.Resolution
+		switch qotcommon.KLType(s2c.GetKlType()) {
+		case qotcommon.KLType_KLType_1Min:
+			resolution = feed.Res1m
+		case qotcommon.KLType_KLType_Day:
+			resolution = feed.ResDay
+		default:
 			return nil, nil
 		}
 		if s2c.GetSecurity() == nil {
@@ -387,7 +392,10 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 		symbol := formatSymbol(s2c.GetSecurity())
 		bars := make([]feed.Bar, 0, len(s2c.GetKlList()))
 		for i, k := range s2c.GetKlList() {
-			b, err := decodeKLine(symbol, k, feed.Res1m)
+			if resolution == feed.ResDay && k.GetIsBlank() {
+				continue
+			}
+			b, err := decodeKLine(symbol, k, resolution)
 			if err != nil {
 				return nil, err
 			}
@@ -396,6 +404,9 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 		}
 		if len(bars) == 0 {
 			return nil, nil
+		}
+		if resolution == feed.ResDay {
+			return []feed.Event{feed.BarsDailyEvent{Bars: bars}}, nil
 		}
 		return []feed.Event{feed.Bars1mEvent{Bars: bars}}, nil
 	}

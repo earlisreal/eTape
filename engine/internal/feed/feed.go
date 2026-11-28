@@ -250,7 +250,7 @@ func WatchDemand(id, symbol string) Demand {
 		Subs: []SubType{SubTicker}, WantsHistory: true}
 }
 
-// ChartDemand adds K_DAY solely to unlock one fast cached-daily read.
+// ChartDemand includes K_DAY for live daily updates and the cached-daily read.
 func ChartDemand(id, symbol string) Demand {
 	subs := []SubType{SubTicker, SubKL1m, SubKLDay}
 	if instrument.IsPerpetual(symbol) {

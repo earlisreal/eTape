@@ -35,6 +35,9 @@ type Bars1mEvent struct {
 	Execution Coverage
 }
 
+// BarsDailyEvent carries provider updates to the stock daily candle.
+type BarsDailyEvent struct{ Bars []Bar }
+
 // Coverage is acknowledged subscription continuity, independent of recording.
 type Coverage struct {
 	Verified bool
@@ -57,6 +60,7 @@ func (TicksEvent) isEvent()     {}
 func (QuoteEvent) isEvent()     {}
 func (BookEvent) isEvent()      {}
 func (Bars1mEvent) isEvent()    {}
+func (BarsDailyEvent) isEvent() {}
 func (ConnUpEvent) isEvent()    {}
 func (ConnDownEvent) isEvent()  {}
 func (ResyncedEvent) isEvent()  {}

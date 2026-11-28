@@ -367,30 +367,45 @@ func TestDecodePushErrors(t *testing.T) {
 	})
 }
 
-func TestDecodePushKLFiltersNon1m(t *testing.T) {
-	mk := func(klType qotcommon.KLType) []byte {
+func TestDecodePushKLDispatchesMinuteAndDaily(t *testing.T) {
+	mk := func(klType qotcommon.KLType, timestamp float64) []byte {
 		resp := &qotupdatekl.Response{
 			RetType: proto.Int32(0),
 			S2C: &qotupdatekl.S2C{
-				RehabType: proto.Int32(int32(qotcommon.RehabType_RehabType_Forward)),
+				RehabType: proto.Int32(int32(qotcommon.RehabType_RehabType_None)),
 				KlType:    proto.Int32(int32(klType)), Security: sec(11, "AAPL"),
 				KlList: []*qotcommon.KLine{{
-					Time: proto.String("2026-07-02 12:41:00"), IsBlank: proto.Bool(false),
-					Timestamp: proto.Float64(1782146460), OpenPrice: proto.Float64(1),
-					HighPrice: proto.Float64(1), LowPrice: proto.Float64(1), ClosePrice: proto.Float64(1),
+					Time: proto.String(""), IsBlank: proto.Bool(false),
+					Timestamp: proto.Float64(timestamp), OpenPrice: proto.Float64(79.72),
+					HighPrice: proto.Float64(80.73), LowPrice: proto.Float64(77.10), ClosePrice: proto.Float64(79.91),
+					Volume: proto.Int64(28_920_000),
 				}},
 			},
 		}
 		b, _ := proto.Marshal(resp)
 		return b
 	}
-	evs, err := DecodePush(Frame{ProtoID: ProtoQotUpdateKL, Body: mk(qotcommon.KLType_KLType_1Min)})
+	const day = 1795755600 // 2026-11-27 at 00:00 ET
+	evs, err := DecodePush(Frame{ProtoID: ProtoQotUpdateKL, Body: mk(qotcommon.KLType_KLType_1Min, day+60)})
 	if err != nil || len(evs) != 1 {
 		t.Fatalf("1m push: evs=%v err=%v", evs, err)
 	}
-	evs, err = DecodePush(Frame{ProtoID: ProtoQotUpdateKL, Body: mk(qotcommon.KLType_KLType_Day)})
+	if minutes, ok := evs[0].(feed.Bars1mEvent); !ok || len(minutes.Bars) != 1 || minutes.Bars[0].BucketMs != day*1000 {
+		t.Fatalf("minute candle was not end-label normalized: %+v", evs[0])
+	}
+	source := feed.SourceRef{Run: "fixture", Connection: 2, Ingress: 7}
+	evs, err = DecodePush(Frame{ProtoID: ProtoQotUpdateKL, Body: mk(qotcommon.KLType_KLType_Day, day), Source: source})
+	if err != nil || len(evs) != 1 {
+		t.Fatalf("daily push: evs=%v err=%v", evs, err)
+	}
+	daily, ok := evs[0].(feed.BarsDailyEvent)
+	want := feed.Bar{Source: source, Symbol: "US.AAPL", BucketMs: day * 1000, O: 79.72, H: 80.73, L: 77.10, C: 79.91, Volume: 28_920_000}
+	if !ok || len(daily.Bars) != 1 || daily.Bars[0] != want {
+		t.Fatalf("daily candle = %+v, want %+v", evs[0], want)
+	}
+	evs, err = DecodePush(Frame{ProtoID: ProtoQotUpdateKL, Body: mk(qotcommon.KLType_KLType_Week, day)})
 	if err != nil || len(evs) != 0 {
-		t.Fatalf("non-1m KL push must be ignored: evs=%v err=%v", evs, err)
+		t.Fatalf("unsupported KL push: evs=%v err=%v", evs, err)
 	}
 	// Unknown push IDs and RT pushes are ignored, not errors.
 	if evs, err := DecodePush(Frame{ProtoID: ProtoQotUpdateRT, Body: nil}); err != nil || evs != nil {
